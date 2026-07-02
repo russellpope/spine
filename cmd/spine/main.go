@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
@@ -139,8 +140,50 @@ func warnDirty(dir string, stderr io.Writer) {
 }
 
 func cmdADR(args []string, stdout, stderr io.Writer) int {
-	fmt.Fprintln(stderr, "adr: not implemented yet")
-	return 2
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, `usage: spine adr <new|list> [flags]  (adr new [--dir D] [--supersedes N] "Title")`)
+		return 2
+	}
+	switch args[0] {
+	case "new":
+		fs := flag.NewFlagSet("adr new", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", ".", "repo root")
+		supersedes := fs.Int("supersedes", 0, "ADR number this decision supersedes")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if fs.NArg() != 1 {
+			fmt.Fprintln(stderr, `usage: spine adr new [--dir D] [--supersedes N] "Title" (flags before title)`)
+			return 2
+		}
+		path, err := adr.New(*dir, fs.Arg(0), *supersedes)
+		if err != nil {
+			fmt.Fprintln(stderr, "adr new:", err)
+			return 2
+		}
+		fmt.Fprintln(stdout, path)
+		return 0
+	case "list":
+		fs := flag.NewFlagSet("adr list", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", ".", "repo root")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		entries, err := adr.List(*dir)
+		if err != nil {
+			fmt.Fprintln(stderr, "adr list:", err)
+			return 2
+		}
+		for _, e := range entries {
+			fmt.Fprintf(stdout, "%04d  %-22s  %s\n", e.ID, e.Status, e.Title)
+		}
+		return 0
+	default:
+		fmt.Fprintf(stderr, "unknown adr subcommand %q\n", args[0])
+		return 2
+	}
 }
 
 func cmdDoctor(args []string, stdout, stderr io.Writer) int {

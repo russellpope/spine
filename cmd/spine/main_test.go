@@ -107,3 +107,22 @@ func TestUpdateMissingWorkflowExits2(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
 }
+
+func TestADRNewAndList(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCmd(t, "adr", "new", "--dir", dir, "Go with stdlib only")
+	if code != 0 || !strings.Contains(out, "0001-go-with-stdlib-only.md") {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+	code, out, _ = runCmd(t, "adr", "list", "--dir", dir)
+	if code != 0 || !strings.Contains(out, "0001  Accepted") {
+		t.Fatalf("list code=%d out=%q", code, out)
+	}
+	code, _, errs = runCmd(t, "adr", "new", "--dir", dir, "--supersedes", "9", "X")
+	if code != 2 || !strings.Contains(errs, "not found") {
+		t.Fatalf("code=%d err=%q", code, errs)
+	}
+}
