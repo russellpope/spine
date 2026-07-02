@@ -89,6 +89,28 @@ func TestSuperpowersDriftD5(t *testing.T) {
 	}
 }
 
+func TestUnrecognizedEditsD4(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	wf := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wf, append(raw, []byte("custom_rule: never deploy fridays\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids(fs)["D4"] == 0 {
+		t.Fatalf("want D4 finding for unrecognized edit, got %#v", fs)
+	}
+}
+
 func TestADRProblemsD6(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {

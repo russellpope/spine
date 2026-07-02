@@ -2427,7 +2427,9 @@ Expected: FAIL — package does not exist.
 package doctor
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2477,19 +2479,14 @@ func updateChecks(dir string) []Finding {
 	if err != nil {
 		return []Finding{{"D2", "error", "WORKFLOW.md", "update cannot run: " + err.Error()}}
 	}
-	pending := 0
 	for _, r := range reports {
 		switch r.State {
 		case update.Pending:
-			pending++
+			fs = append(fs, Finding{"D2", "warn", r.Path, "behind template generation — run spine update"})
 		case update.SkippedUnrecognized:
 			fs = append(fs, Finding{"D4", "warn", r.Path,
 				fmt.Sprintf("%d unrecognized local edit(s) in a machine-owned file — reconcile or spine update --force", len(r.Unrecognized))})
 		}
-	}
-	if pending > 0 {
-		fs = append(fs, Finding{"D2", "warn", "WORKFLOW.md",
-			fmt.Sprintf("%d file(s) behind template generation — run spine update", pending)})
 	}
 	return fs
 }
@@ -2527,7 +2524,10 @@ func superpowersCheck(dir string) []Finding {
 func adrCheck(dir string) []Finding {
 	entries, err := adr.List(dir)
 	if err != nil {
-		return nil // no docs/adr — D1 covers structural absence
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // no docs/adr — D1 covers structural absence
+		}
+		return []Finding{{"D6", "error", "docs/adr", "adr ledger unreadable: " + err.Error()}}
 	}
 	var fs []Finding
 	seen := map[int]bool{}
