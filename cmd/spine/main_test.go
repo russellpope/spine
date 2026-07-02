@@ -126,3 +126,20 @@ func TestADRNewAndList(t *testing.T) {
 		t.Fatalf("code=%d err=%q", code, errs)
 	}
 }
+
+func TestDoctorCleanAndJSON(t *testing.T) {
+	dir := t.TempDir()
+	runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo")
+	code, out, _ := runCmd(t, "doctor", "--dir", dir)
+	if code != 0 || !strings.Contains(out, "ok") {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+	code, out, _ = runCmd(t, "doctor", "--dir", dir, "--json")
+	if code != 0 || !strings.Contains(out, `"findings":[]`) {
+		t.Fatalf("json code=%d out=%q", code, out)
+	}
+	code, out, _ = runCmd(t, "doctor", "--dir", t.TempDir())
+	if code != 1 || !strings.Contains(out, "D1") {
+		t.Fatalf("empty-dir code=%d out=%q", code, out)
+	}
+}

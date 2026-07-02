@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/russellpope/spine/internal/adr"
+	"github.com/russellpope/spine/internal/doctor"
 	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
@@ -187,6 +189,35 @@ func cmdADR(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdDoctor(args []string, stdout, stderr io.Writer) int {
-	fmt.Fprintln(stderr, "doctor: not implemented yet")
-	return 2
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	asJSON := fs.Bool("json", false, "machine-readable output")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	findings, err := doctor.Run(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "doctor:", err)
+		return 2
+	}
+	if *asJSON {
+		payload := struct {
+			Findings []doctor.Finding `json:"findings"`
+		}{Findings: findings}
+		if err := json.NewEncoder(stdout).Encode(payload); err != nil {
+			fmt.Fprintln(stderr, "doctor:", err)
+			return 2
+		}
+	} else if len(findings) == 0 {
+		fmt.Fprintln(stdout, "ok — workflow healthy")
+	} else {
+		for _, f := range findings {
+			fmt.Fprintf(stdout, "%s %-5s %s: %s\n", f.ID, f.Severity, f.Path, f.Message)
+		}
+	}
+	if len(findings) > 0 {
+		return 1
+	}
+	return 0
 }
