@@ -139,7 +139,7 @@ func setKey(content, dotted, val string) string {
 func replaceValue(line, key, val string) string {
 	keyIdx := strings.Index(line, key)
 	indent := line[:keyIdx]
-	rest := line[keyIdx+len(key)+2:]  // skip "key: "
+	rest := line[keyIdx+len(key)+2:] // skip "key: "
 
 	// Extract old value (before comment or end of line)
 	oldVal := rest
