@@ -53,13 +53,39 @@ func List(dir string) ([]Entry, error) {
 	return out, nil
 }
 
+// parseFrontMatter reads title/status only from the front-matter block: the
+// lines strictly between the first line that is exactly "---" and the next
+// line that is exactly "---". Within that block the first matching
+// "title: "/"status: " line wins (consistent with flippedContent). Anything
+// outside the block — including a forged "---" fence or a "title: "/
+// "status: " line in the body — is ignored, so it can't corrupt List output.
 func parseFrontMatter(content string) (title, status string) {
-	for _, line := range strings.Split(content, "\n") {
-		if t, ok := strings.CutPrefix(line, "title: "); ok {
-			title = strings.TrimSpace(t)
+	lines := strings.Split(content, "\n")
+	start, end := -1, -1
+	for i, line := range lines {
+		if line != "---" {
+			continue
 		}
-		if s, ok := strings.CutPrefix(line, "status: "); ok {
-			status = strings.TrimSpace(s)
+		if start == -1 {
+			start = i
+			continue
+		}
+		end = i
+		break
+	}
+	if start == -1 || end == -1 {
+		return "", ""
+	}
+	for _, line := range lines[start+1 : end] {
+		if title == "" {
+			if t, ok := strings.CutPrefix(line, "title: "); ok {
+				title = strings.TrimSpace(t)
+			}
+		}
+		if status == "" {
+			if s, ok := strings.CutPrefix(line, "status: "); ok {
+				status = strings.TrimSpace(s)
+			}
 		}
 	}
 	return title, status
@@ -68,6 +94,14 @@ func parseFrontMatter(content string) (title, status string) {
 // New writes the next-numbered ADR; supersedes > 0 also flips that ADR's
 // status line. Returns the new file's path.
 func New(dir, title string, supersedes int) (string, error) {
+	if strings.ContainsAny(title, "\n\r") {
+		return "", fmt.Errorf("title %q contains a newline, which would inject fake front matter", title)
+	}
+	slug := slugify(title)
+	if slug == "" {
+		return "", fmt.Errorf("title %q produces an empty slug — use at least one ASCII letter or digit", title)
+	}
+
 	entries, err := List(dir)
 	if err != nil {
 		return "", err
@@ -83,12 +117,25 @@ func New(dir, title string, supersedes int) (string, error) {
 		for i := range entries {
 			if entries[i].ID == supersedes {
 				target = &entries[i]
+				break
 			}
 		}
 		if target == nil {
 			return "", fmt.Errorf("supersedes target %04d not found", supersedes)
 		}
 	}
+
+	// Compute the supersede flip before writing anything: if the target
+	// can't be flipped (e.g. no status line), New must fail clean rather
+	// than leave a new ADR claiming supersedes on an unflipped target.
+	var flipped []byte
+	if target != nil {
+		flipped, err = flippedContent(target.Path, next)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	raw, err := templates.FS.ReadFile("current/adr.tmpl.md")
 	if err != nil {
 		return "", err
@@ -104,18 +151,27 @@ func New(dir, title string, supersedes int) (string, error) {
 		"{{ADR_DATE}}", time.Now().Format("2006-01-02"),
 		"{{ADR_SUPERSEDES}}", sup,
 	).Replace(string(raw))
-	path := filepath.Join(dir, "docs", "adr", id+"-"+slugify(title)+".md")
+	path := filepath.Join(dir, "docs", "adr", id+"-"+slug+".md")
 	if err := fsutil.WriteFileAtomic(path, []byte(content)); err != nil {
 		return "", err
 	}
 	if target != nil {
-		if err := flipStatus(target.Path, next); err != nil {
+		// Residual window: if this second write fails physically, the new
+		// ADR (already on disk) claims supersedes on a not-yet-flipped
+		// target. Acceptable per review — validation now happens up front.
+		if err := fsutil.WriteFileAtomic(target.Path, flipped); err != nil {
 			return "", err
 		}
 	}
 	return path, nil
 }
 
+// slugify lowercases s and keeps only ASCII letters/digits, collapsing every
+// other rune into a single '-' separator (trimmed at both ends). Non-ASCII
+// runes (e.g. CJK, accented letters) are not transliterated — they collapse
+// to separators just like punctuation, so this is lossy by design. A title
+// made entirely of non-ASCII or punctuation runes yields an empty string;
+// callers must treat that as invalid rather than writing "NNNN-.md".
 func slugify(s string) string {
 	s = strings.ToLower(s)
 	var b []rune
@@ -132,17 +188,21 @@ func slugify(s string) string {
 	return strings.Trim(string(b), "-")
 }
 
-func flipStatus(path string, by int) error {
+// flippedContent reads the ADR at path and returns its content with the
+// status line rewritten to "Superseded by NNNN". It performs no writes, so
+// New can validate a supersede target (and get its would-be new content)
+// before writing anything at all.
+func flippedContent(path string, by int) ([]byte, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	lines := strings.Split(string(raw), "\n")
 	for i, l := range lines {
 		if strings.HasPrefix(l, "status: ") {
 			lines[i] = fmt.Sprintf("status: Superseded by %04d", by)
-			return fsutil.WriteFileAtomic(path, []byte(strings.Join(lines, "\n")))
+			return []byte(strings.Join(lines, "\n")), nil
 		}
 	}
-	return fmt.Errorf("no status line in %s", path)
+	return nil, fmt.Errorf("no status line in %s", path)
 }

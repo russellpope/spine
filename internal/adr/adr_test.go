@@ -94,3 +94,74 @@ func TestSlugStripsPunctuation(t *testing.T) {
 		t.Fatalf("path = %s", path)
 	}
 }
+
+func TestNewEmptySlugRejected(t *testing.T) {
+	dir := adrDir(t)
+	if _, err := adr.New(dir, "!!!", 0); err == nil {
+		t.Fatal("want error for title that produces an empty slug")
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "docs", "adr", "*.md"))
+	if len(files) != 0 {
+		t.Fatalf("want no files written after rejected New, got %v", files)
+	}
+}
+
+func TestNewTitleWithNewlineRejected(t *testing.T) {
+	dir := adrDir(t)
+	if _, err := adr.New(dir, "x\nstatus: Evil", 0); err == nil {
+		t.Fatal("want error for title containing a newline")
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "docs", "adr", "*.md"))
+	if len(files) != 0 {
+		t.Fatalf("want no files written after rejected New, got %v", files)
+	}
+}
+
+func TestListIgnoresBodyLinesOutsideFrontMatter(t *testing.T) {
+	dir := adrDir(t)
+	path, err := adr.New(dir, "Scoped front matter", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a body that happens to contain lines shaped like front
+	// matter keys; List must not let these override the real status.
+	if err := os.WriteFile(path, append(raw, []byte("\nstatus: Draft\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := adr.List(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Status != "Accepted" {
+		t.Fatalf("entries = %#v, want status Accepted (front matter is scoped to the --- block)", entries)
+	}
+}
+
+func TestSupersedeValidatesBeforeWriting(t *testing.T) {
+	dir := adrDir(t)
+	// Hand-write a target ADR with no status line, so the supersede flip
+	// cannot be computed. New must fail before writing anything.
+	target := filepath.Join(dir, "docs", "adr", "0001-x.md")
+	body := "---\nid: 0001\ntitle: X\ndate: 2026-01-01\n---\n\n# 0001: X\n"
+	if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adr.New(dir, "y", 1); err == nil {
+		t.Fatal("want error when supersede target has no status line")
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "docs", "adr", "0002-*.md"))
+	if len(files) != 0 {
+		t.Fatalf("want no new ADR written when supersede validation fails, got %v", files)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "Superseded") {
+		t.Fatalf("target must be untouched when validation fails:\n%s", raw)
+	}
+}
