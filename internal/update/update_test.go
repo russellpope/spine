@@ -18,7 +18,7 @@ Uses the **unified workflow** — see ` + "`WORKFLOW.md`" + ` for the active pro
 - Issue / bug ledger -> ` + "`docs/issues/`" + ` (dependency convention in ` + "`docs/issues/README.md`" + `)
 - Handoffs -> ` + "`docs/handoffs/`" + `
 
-**Mandatory gates:** a PRD up front (run ` + "`/grill-with-docs`" + ` -> ` + "`/to-prd`" + `) and verification before completion.
+**Mandatory gates:** a PRD up front (grill-with-docs -> to-prd) and verification before completion.
 **Model:** see ` + "`WORKFLOW.md`" + ` ` + "`model_default`" + ` (swappable).
 `
 

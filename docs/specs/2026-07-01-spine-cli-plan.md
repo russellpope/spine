@@ -90,7 +90,8 @@ cp "$DT/skills/workflow-init/templates/harness-interface.md" templates/current/
 cp "$DT/skills/workflow-init/templates/issues-README.md"     templates/current/
 cp "$DT/skills/workflow-init/templates/issue.tmpl.md"        templates/current/
 git -C "$DT" show 'f6bca64^:skills/workflow-init/templates/WORKFLOW.md.tmpl'    > templates/gen0/WORKFLOW.md.tmpl
-git -C "$DT" show 'f6bca64^:skills/workflow-init/templates/CLAUDE.md.tmpl'      > templates/gen0/CLAUDE.md.tmpl
+# CLAUDE gen0 = pre-48d5960 (the generation that scaffolded hbmview); WORKFLOW/harness unchanged by 48d5960
+git -C "$DT" show '48d5960^:skills/workflow-init/templates/CLAUDE.md.tmpl'      > templates/gen0/CLAUDE.md.tmpl
 git -C "$DT" show 'f6bca64^:skills/workflow-init/templates/harness-interface.md' > templates/gen0/harness-interface.md
 echo 1 > templates/VERSION
 ```
