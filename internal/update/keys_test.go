@@ -99,6 +99,20 @@ func TestSetKey(t *testing.T) {
 	}
 }
 
+// template_version is a stamp, never a preservable choice — even when the
+// extracted value diverges from anything a template would render.
+func TestChoicesSkipsTemplateVersion(t *testing.T) {
+	extracted := ExtractKeys(gen0Hbmview)
+	extracted["template_version"] = "0"
+	choices, err := Choices(extracted, "gen0", "hbmview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := choices["template_version"]; ok {
+		t.Errorf("template_version wrongly kept as a choice: %#v", choices)
+	}
+}
+
 func containsLine(content, line string) bool {
 	for _, l := range splitLines(content) {
 		if l == line {
