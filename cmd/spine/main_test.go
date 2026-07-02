@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/russellpope/spine/internal/tmpl"
 )
 
 func runCmd(t *testing.T, args ...string) (int, string, string) {
@@ -53,6 +55,54 @@ func TestInitEndToEnd(t *testing.T) {
 func TestInitUndetectableNeedsProfile(t *testing.T) {
 	code, _, errs := runCmd(t, "init", "--dir", t.TempDir())
 	if code != 2 || !strings.Contains(errs, "--profile") {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+}
+
+func TestUpdateDryRunThenWrite(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	// fresh scaffold: nothing pending
+	code, out, _ := runCmd(t, "update", "--dir", dir)
+	if code != 0 || !strings.Contains(out, "up-to-date") {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+	// regress the repo to a TRUE gen0 state (rendering gen0 templates) —
+	// merely deleting the stamp line would leave current-only lines that
+	// read as unrecognized edits against gen0, i.e. Skipped, not Pending.
+	vals := tmpl.Values{Project: "demo", Profile: "rust",
+		Reviewers: "rust-reviewer, security-review", Harness: "cli", Version: 1}
+	for tmplName, rel := range map[string]string{
+		"WORKFLOW.md.tmpl": "WORKFLOW.md",
+		"CLAUDE.md.tmpl":   "CLAUDE.md",
+	} {
+		gen0, err := tmpl.Render("gen0", tmplName, vals)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(gen0), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, out, _ = runCmd(t, "update", "--dir", dir)
+	if code != 1 || !strings.Contains(out, "+ template_version: 1") {
+		t.Fatalf("dry-run code=%d out=%q", code, out)
+	}
+	code, out, _ = runCmd(t, "update", "--dir", dir, "--write")
+	if code != 0 || !strings.Contains(out, "updated: WORKFLOW.md") {
+		t.Fatalf("write code=%d out=%q", code, out)
+	}
+	code, _, _ = runCmd(t, "update", "--dir", dir)
+	if code != 0 {
+		t.Fatalf("after write, code=%d", code)
+	}
+}
+
+func TestUpdateMissingWorkflowExits2(t *testing.T) {
+	code, _, errs := runCmd(t, "update", "--dir", t.TempDir())
+	if code != 2 || !strings.Contains(errs, "spine init") {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
 }

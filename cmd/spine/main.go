@@ -2,14 +2,17 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/tmpl"
+	"github.com/russellpope/spine/internal/update"
 )
 
 const usage = `usage: spine <command> [flags]
@@ -84,8 +87,57 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdUpdate(args []string, stdout, stderr io.Writer) int {
-	fmt.Fprintln(stderr, "update: not implemented yet")
-	return 2
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	write := fs.Bool("write", false, "apply changes (default: dry-run diff)")
+	force := fs.Bool("force", false, "regenerate files with unrecognized local edits (diff shows what gets dropped)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *write {
+		warnDirty(*dir, stderr)
+	}
+	reports, err := update.Run(update.Options{Dir: *dir, Write: *write, Force: *force})
+	if err != nil {
+		fmt.Fprintln(stderr, "update:", err)
+		return 2
+	}
+	outstanding := 0
+	for _, r := range reports {
+		switch r.State {
+		case update.UpToDate:
+			fmt.Fprintf(stdout, "up-to-date: %s\n", r.Path)
+		case update.Pending:
+			if *write {
+				fmt.Fprintf(stdout, "updated: %s\n", r.Path)
+			} else {
+				outstanding++
+				fmt.Fprint(stdout, r.Diff)
+			}
+		case update.SkippedUnrecognized:
+			if !*write {
+				outstanding++
+			}
+			fmt.Fprintf(stderr, "skipped %s — unrecognized local edits (use --force to drop):\n", r.Path)
+			for _, l := range r.Unrecognized {
+				fmt.Fprintf(stderr, "  %s\n", l)
+			}
+		}
+	}
+	if outstanding > 0 {
+		return 1
+	}
+	return 0
+}
+
+// warnDirty nudges the user to review post-write diffs with git; git being
+// absent or dir not being a repo is fine and silent.
+func warnDirty(dir string, stderr io.Writer) {
+	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+	if err == nil && len(bytes.TrimSpace(out)) > 0 {
+		fmt.Fprintln(stderr, "warning: repo has uncommitted changes — review the update with git diff afterwards")
+	}
 }
 
 func cmdADR(args []string, stdout, stderr io.Writer) int {
