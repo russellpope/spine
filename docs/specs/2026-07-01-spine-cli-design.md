@@ -68,8 +68,8 @@ spine/
   for legacy claiming (the only unstamped generation in the wild).
 - **File ownership model:**
   - *Machine-owned:* `WORKFLOW.md`, `docs/harness-interface.md`, `docs/issues/README.md`,
-    `docs/adr/README.md`. Update regenerates them wholesale from the current template, preserving
-    extracted config keys.
+    `docs/issues/_template.md`, `docs/adr/README.md`. Update regenerates them wholesale from the
+    current template, preserving extracted config keys.
   - *Mixed:* `CLAUDE.md` — a spine-managed block delimited by `<!-- spine:begin -->` /
     `<!-- spine:end -->` markers holding the workflow header; everything outside is user territory,
     never touched.
@@ -85,10 +85,10 @@ spine/
 Ports scaffold.sh behavior: profiles `go-service | py-tool | rust | library-cli | presentation | ui`,
 auto-detected (go.mod → go-service or library-cli, pyproject/setup.py → py-tool, Cargo.toml → rust,
 *.pptx/*.key → presentation, package.json + UI framework → ui), `--profile` overrides; per-file
-skip-if-exists; creates `docs/{specs,adr,issues,handoffs}`. New over scaffold.sh: stamps
-`template_version`, emits `docs/adr/README.md` (numbering, `Accepted`/`Superseded` statuses,
-immutability + supersede rules — lifted from ultima's convention), and no longer drops
-`docs/issues/_template.md` (embedded templates serve that role). Exit 0 on success.
+skip-if-exists; creates `docs/{specs,adr,issues,handoffs}`; keeps emitting the issues README +
+`_template.md` pair unchanged. New over scaffold.sh: stamps `template_version` and emits
+`docs/adr/README.md` (numbering, `Accepted`/`Superseded` statuses, immutability + supersede rules —
+lifted from ultima's convention). Exit 0 on success.
 
 ### `spine update [--dir D] [--write] [--force]`
 Dry-run by default: per-file unified diffs to stdout; exit **1 if changes pending, 0 if current**
