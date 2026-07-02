@@ -75,8 +75,9 @@ func TestUpdateDryRunThenWrite(t *testing.T) {
 	vals := tmpl.Values{Project: "demo", Profile: "rust",
 		Reviewers: "rust-reviewer, security-review", Harness: "cli", Version: 1}
 	for tmplName, rel := range map[string]string{
-		"WORKFLOW.md.tmpl": "WORKFLOW.md",
-		"CLAUDE.md.tmpl":   "CLAUDE.md",
+		"WORKFLOW.md.tmpl":     "WORKFLOW.md",
+		"CLAUDE.md.tmpl":       "CLAUDE.md",
+		"harness-interface.md": filepath.Join("docs", "harness-interface.md"),
 	} {
 		gen0, err := tmpl.Render("gen0", tmplName, vals)
 		if err != nil {

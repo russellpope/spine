@@ -116,9 +116,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprint(stdout, r.Diff)
 			}
 		case update.SkippedUnrecognized:
-			if !*write {
-				outstanding++
-			}
+			outstanding++
 			fmt.Fprintf(stderr, "skipped %s — unrecognized local edits (use --force to drop):\n", r.Path)
 			for _, l := range r.Unrecognized {
 				fmt.Fprintf(stderr, "  %s\n", l)
