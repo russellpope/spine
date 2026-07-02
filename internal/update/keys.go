@@ -137,7 +137,22 @@ func setKey(content, dotted, val string) string {
 }
 
 func replaceValue(line, key, val string) string {
-	indent := line[:strings.Index(line, key)]
+	keyIdx := strings.Index(line, key)
+	indent := line[:keyIdx]
+	rest := line[keyIdx+len(key)+2:]  // skip "key: "
+
+	// Extract old value (before comment or end of line)
+	oldVal := rest
+	if i := strings.Index(rest, "#"); i >= 0 {
+		oldVal = strings.TrimRight(rest[:i], " ")
+	}
+
+	// If value hasn't changed, preserve the line exactly as-is
+	if oldVal == val {
+		return line
+	}
+
+	// Value changed: normalize spacing to 4 spaces
 	comment := ""
 	if i := strings.Index(line, "#"); i >= 0 {
 		comment = "    " + strings.TrimRight(line[i:], " ")
