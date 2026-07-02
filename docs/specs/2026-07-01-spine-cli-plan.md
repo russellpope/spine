@@ -1142,7 +1142,19 @@ func setKey(content, dotted, val string) string {
 }
 
 func replaceValue(line, key, val string) string {
-	indent := line[:strings.Index(line, key)]
+	keyIdx := strings.Index(line, key)
+	indent := line[:keyIdx]
+	rest := line[keyIdx+len(key)+2:] // skip "key: "
+
+	oldVal := rest
+	if i := strings.Index(rest, "#"); i >= 0 {
+		oldVal = strings.TrimRight(rest[:i], " ")
+	}
+	// Unchanged value: keep the line byte-exact so pristine renders stay
+	// pristine (expectedOld must not drift from on-disk template alignment).
+	if oldVal == val {
+		return line
+	}
 	comment := ""
 	if i := strings.Index(line, "#"); i >= 0 {
 		comment = "    " + strings.TrimRight(line[i:], " ")
