@@ -75,9 +75,14 @@ spine/
     never touched.
   - *User-owned (spine never modifies):* everything in `docs/specs/`, `docs/handoffs/`, issue entries,
     and ADR bodies (single exception: the supersede status flip, below).
-- **Preserved config keys** (extracted from existing `WORKFLOW.md`, reapplied on regeneration):
+- **Preserved config keys** (extracted from existing `WORKFLOW.md`):
   `profile`, `reviewers`, `functional_harness`, `model_routing.*`, `effort`, `model_default`,
   `security_routing`, `gates`, `stages`.
+- **Choice-vs-default rule:** an extracted value equal to its own generation's default (the value the
+  file's template would have rendered for that profile) is *not* a user choice — regeneration gives it
+  the current template's default. Only values differing from their generation's default are reapplied.
+  `profile` is always preserved. Rationale: hbmview's `model_default: claude-opus-4-8` is gen-0's
+  default, not a decision; preserving it verbatim would defeat the un-stranding.
 
 ## Commands
 
