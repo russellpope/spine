@@ -111,6 +111,11 @@ func adrCheck(dir string) []Finding {
 			fs = append(fs, Finding{"D6", "error", e.Path, fmt.Sprintf("duplicate ADR number %04d", e.ID)})
 		}
 		seen[e.ID] = true
+		if !e.HasFrontMatter {
+			fs = append(fs, Finding{"D6", "info", e.Path,
+				"pre-spine ADR (no front matter) — spine conventions apply to new ADRs"})
+			continue
+		}
 		if e.Status != "Accepted" && !strings.HasPrefix(e.Status, "Superseded by ") {
 			fs = append(fs, Finding{"D6", "warn", e.Path, fmt.Sprintf("invalid status %q", e.Status)})
 		}

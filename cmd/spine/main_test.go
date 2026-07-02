@@ -127,6 +127,27 @@ func TestADRNewAndList(t *testing.T) {
 	}
 }
 
+func TestDoctorInfoOnlyExitsZero(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "doctor", "testdata", "legacy-adr.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "adr", "0001-legacy.md"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCmd(t, "doctor", "--dir", dir)
+	if code != 0 {
+		t.Fatalf("want exit 0 for info-only findings, code=%d out=%q", code, out)
+	}
+	if !strings.Contains(out, "D6") || !strings.Contains(out, "info") {
+		t.Errorf("want D6 info finding printed, out=%q", out)
+	}
+}
+
 func TestDoctorCleanAndJSON(t *testing.T) {
 	dir := t.TempDir()
 	runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo")

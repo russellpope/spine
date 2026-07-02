@@ -141,6 +141,60 @@ func TestListIgnoresBodyLinesOutsideFrontMatter(t *testing.T) {
 	}
 }
 
+func TestSupersedeScopedToFrontMatterBlockBodyIntact(t *testing.T) {
+	dir := adrDir(t)
+	target := filepath.Join(dir, "docs", "adr", "0001-x.md")
+	// Front matter has the real status line; the body ALSO has a column-0
+	// "status: " line (as pre-spine ADRs sometimes do). Only the front-matter
+	// line may flip.
+	body := "---\nid: 0001\ntitle: X\nstatus: Accepted\ndate: 2026-01-01\n---\n\n# 0001: X\n\nstatus: draft\n"
+	if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adr.New(dir, "y", 1); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if !strings.Contains(content, "status: Superseded by 0002") {
+		t.Errorf("front-matter status not flipped:\n%s", content)
+	}
+	if !strings.Contains(content, "\nstatus: draft\n") {
+		t.Errorf("body status line was mutated (should be untouched):\n%s", content)
+	}
+}
+
+func TestSupersedeNoFrontMatterTargetErrorsNoWrite(t *testing.T) {
+	dir := adrDir(t)
+	target := filepath.Join(dir, "docs", "adr", "0001-legacy.md")
+	// Pre-spine style: capitalized "Status:" (not machine front matter), plus
+	// a column-0 lowercase "status: " line buried in a body code sample. A
+	// naive whole-file scan for the first "status: " line would find and
+	// rewrite that body line; the fix must refuse instead since there is no
+	// --- ... --- front-matter block at all.
+	body := "# ADR 0001 — Legacy\n\nStatus: Accepted\nDate: 2026-01-01\n\n## Example config\n\n```\nstatus: draft\n```\n"
+	if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adr.New(dir, "y", 1); err == nil {
+		t.Fatal("want error when supersede target has no front matter")
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "docs", "adr", "0002-*.md"))
+	if len(files) != 0 {
+		t.Fatalf("want no new ADR written when supersede target has no front matter, got %v", files)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != body {
+		t.Fatalf("target must be byte-identical when validation fails:\n%s", raw)
+	}
+}
+
 func TestSupersedeValidatesBeforeWriting(t *testing.T) {
 	dir := adrDir(t)
 	// Hand-write a target ADR with no status line, so the supersede flip

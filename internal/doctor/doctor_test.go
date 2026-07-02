@@ -111,6 +111,38 @@ func TestUnrecognizedEditsD4(t *testing.T) {
 	}
 }
 
+func TestLegacyADRNoFrontMatterD6Info(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join("testdata", "legacy-adr.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "docs", "adr", "0001-legacy.md")
+	if err := os.WriteFile(dst, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range fs {
+		if f.ID != "D6" || f.Path != dst {
+			continue
+		}
+		found = true
+		if f.Severity != "info" {
+			t.Errorf("severity = %q, want info", f.Severity)
+		}
+	}
+	if !found {
+		t.Fatalf("want D6 finding for legacy (no front matter) ADR, got %#v", fs)
+	}
+}
+
 func TestADRProblemsD6(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {

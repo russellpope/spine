@@ -231,3 +231,26 @@ func TestMissingWorkflowIsHardError(t *testing.T) {
 		t.Fatal("want error when WORKFLOW.md missing")
 	}
 }
+
+func TestVersionDowngradeGuard(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bumped := strings.Replace(string(raw), "template_version: 1", "template_version: 2", 1)
+	if bumped == string(raw) {
+		t.Fatal("template_version: 1 not found in scaffolded WORKFLOW.md to bump")
+	}
+	if err := os.WriteFile(path, []byte(bumped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Run(Options{Dir: dir})
+	if err == nil || !strings.Contains(err.Error(), "generation") {
+		t.Fatalf("want error mentioning generation, got %v", err)
+	}
+}

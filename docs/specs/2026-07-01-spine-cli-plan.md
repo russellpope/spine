@@ -2578,8 +2578,11 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s %-5s %s: %s\n", f.ID, f.Severity, f.Path, f.Message)
 		}
 	}
-	if len(findings) > 0 {
-		return 1
+	// info findings do not affect exit code — only warn/error do.
+	for _, f := range findings {
+		if f.Severity == "warn" || f.Severity == "error" {
+			return 1
+		}
 	}
 	return 0
 }

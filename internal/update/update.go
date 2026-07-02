@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/russellpope/spine/internal/fsutil"
@@ -115,7 +116,15 @@ func planWorkflow(dir string) (FileReport, tmpl.Values, string, error) {
 	old := string(raw)
 	keys := ExtractKeys(old)
 	gen := "gen0"
-	if keys["template_version"] != "" {
+	if tv := keys["template_version"]; tv != "" {
+		// A stamped generation newer than what this binary compiles is never
+		// "current" — that would silently downgrade the file. Non-integer
+		// stamps fall through to the existing current-gen treatment.
+		if n, err := strconv.Atoi(tv); err == nil && n > tmpl.Version() {
+			return report, tmpl.Values{}, "", fmt.Errorf(
+				"WORKFLOW.md is template generation %d but this spine binary compiles generation %d — upgrade spine (make install in ~/Projects/github.com/spine)",
+				n, tmpl.Version())
+		}
 		gen = "current"
 	}
 	abs, err := filepath.Abs(dir)

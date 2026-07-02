@@ -108,6 +108,9 @@ file has uncommitted git changes.
   gen-0 (modulo values), claim cleanly (replace wholesale, re-render, add markers); otherwise insert a
   marker block at top and preserve all existing content below it.
 - `WORKFLOW.md` legacy (no `template_version`): treated as gen-0 claim — extract keys, regenerate.
+- Update never downgrades: a stamped `template_version` greater than the compiled generation is a hard
+  error (upgrade spine first) rather than being treated as current-gen. Non-integer stamp values are
+  treated as current-gen, as before.
 
 ### `spine adr new "Title" [--supersedes NNNN]` / `spine adr list`
 `new`: scan `docs/adr/` for next `NNNN`, slugify title, render `NNNN-slug.md` from embedded template
@@ -125,10 +128,10 @@ Read-only. Checks:
 | D3 | CLAUDE.md marker-block integrity (present, balanced, parseable) |
 | D4 | Unrecognized local edits in machine-owned files |
 | D5 | New files accumulating in `docs/superpowers/{specs,plans}` → nudge toward `docs/specs/` |
-| D6 | ADR numbering collisions / invalid status values |
+| D6 | ADR numbering collisions / invalid status values. Pre-spine, hand-rolled ADRs with no front matter (e.g. hbmview's) are `info`, not `warn` — spine conventions apply to new ADRs, not retrofit existing ones. |
 
 Human-readable by default; `--json` emits `{findings: [{id, severity, path, message}]}`.
-Exit 0 clean / 1 findings / 2 execution error.
+Exit 0 clean or info-only / 1 warn-or-error findings / 2 execution error.
 
 ## Error handling
 

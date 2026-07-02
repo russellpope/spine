@@ -22,6 +22,10 @@ type Entry struct {
 	Title  string
 	Status string
 	Path   string
+	// HasFrontMatter is true only when the file has a --- ... --- block as
+	// its first two "---" lines. Pre-spine, hand-rolled ADRs (e.g. hbmview's)
+	// have no such block; Title/Status are empty for them, not invalid.
+	HasFrontMatter bool
 }
 
 var fileRe = regexp.MustCompile(`^(\d{4})-.+\.md$`)
@@ -46,22 +50,19 @@ func List(dir string) ([]Entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		e.Title, e.Status = parseFrontMatter(string(raw))
+		e.Title, e.Status, e.HasFrontMatter = parseFrontMatter(string(raw))
 		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
-// parseFrontMatter reads title/status only from the front-matter block: the
-// lines strictly between the first line that is exactly "---" and the next
-// line that is exactly "---". Within that block the first matching
-// "title: "/"status: " line wins (consistent with flippedContent). Anything
-// outside the block — including a forged "---" fence or a "title: "/
-// "status: " line in the body — is ignored, so it can't corrupt List output.
-func parseFrontMatter(content string) (title, status string) {
-	lines := strings.Split(content, "\n")
-	start, end := -1, -1
+// frontMatterBounds returns the line indices of the first "---" ... "---"
+// block: start is the opening fence, end is the closing fence. Returns
+// -1, -1 if no such block exists (e.g. pre-spine, hand-rolled ADRs that
+// predate spine's front-matter convention).
+func frontMatterBounds(lines []string) (start, end int) {
+	start, end = -1, -1
 	for i, line := range lines {
 		if line != "---" {
 			continue
@@ -73,8 +74,23 @@ func parseFrontMatter(content string) (title, status string) {
 		end = i
 		break
 	}
+	return start, end
+}
+
+// parseFrontMatter reads title/status only from the front-matter block: the
+// lines strictly between the first line that is exactly "---" and the next
+// line that is exactly "---". Within that block the first matching
+// "title: "/"status: " line wins (consistent with flippedContent). Anything
+// outside the block — including a forged "---" fence or a "title: "/
+// "status: " line in the body — is ignored, so it can't corrupt List output.
+// hasFrontMatter is true only when the block exists at all; pre-spine ADRs
+// with no such block get empty title/status and hasFrontMatter=false, which
+// callers must treat as "not applicable" rather than "invalid".
+func parseFrontMatter(content string) (title, status string, hasFrontMatter bool) {
+	lines := strings.Split(content, "\n")
+	start, end := frontMatterBounds(lines)
 	if start == -1 || end == -1 {
-		return "", ""
+		return "", "", false
 	}
 	for _, line := range lines[start+1 : end] {
 		if title == "" {
@@ -88,7 +104,7 @@ func parseFrontMatter(content string) (title, status string) {
 			}
 		}
 	}
-	return title, status
+	return title, status, true
 }
 
 // New writes the next-numbered ADR; supersedes > 0 also flips that ADR's
@@ -189,20 +205,30 @@ func slugify(s string) string {
 }
 
 // flippedContent reads the ADR at path and returns its content with the
-// status line rewritten to "Superseded by NNNN". It performs no writes, so
-// New can validate a supersede target (and get its would-be new content)
-// before writing anything at all.
+// front-matter status line rewritten to "Superseded by NNNN". It performs no
+// writes, so New can validate a supersede target (and get its would-be new
+// content) before writing anything at all.
+//
+// The search for "status: " is scoped to the same first "---" ... "---"
+// block parseFrontMatter uses — never the body. Pre-spine ADRs with no such
+// block (e.g. hbmview's hand-rolled files) cannot be flipped automatically;
+// scanning the whole file for the first "status: " line risked rewriting an
+// unrelated body line (e.g. inside a code sample), so that case is now a
+// hard error instead of a silent mutation.
 func flippedContent(path string, by int) ([]byte, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	lines := strings.Split(string(raw), "\n")
-	for i, l := range lines {
-		if strings.HasPrefix(l, "status: ") {
-			lines[i] = fmt.Sprintf("status: Superseded by %04d", by)
-			return []byte(strings.Join(lines, "\n")), nil
+	start, end := frontMatterBounds(lines)
+	if start != -1 && end != -1 {
+		for i := start + 1; i < end; i++ {
+			if strings.HasPrefix(lines[i], "status: ") {
+				lines[i] = fmt.Sprintf("status: Superseded by %04d", by)
+				return []byte(strings.Join(lines, "\n")), nil
+			}
 		}
 	}
-	return nil, fmt.Errorf("no status line in %s", path)
+	return nil, fmt.Errorf("target %s has no front-matter status line (pre-spine ADR) — supersede it manually", path)
 }
