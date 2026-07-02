@@ -1,0 +1,12 @@
+# Workflow — hbmview
+
+profile: rust
+reviewers: [rust-reviewer, security-review]
+functional_harness: cli    # cli | rest | framebuffer | none
+gates: [grill, verify]             # mandatory; everything else advisory
+model_default: claude-opus-4-8     # swappable; re-evaluate on major model/platform releases
+security_routing: quality-framing-opus-4-8
+stages: [grill, prd, issues, implement, functional-test, review, verify, ship, deploy, docs, handoff]
+
+See `docs/harness-interface.md` for the functional-test harness contract.
+Mandatory gates: a PRD up front (grill-with-docs -> to-prd) and verification before completion.
