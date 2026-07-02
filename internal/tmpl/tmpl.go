@@ -53,10 +53,14 @@ func Defaults(profile string) (reviewers, harness string, err error) {
 func Version() int {
 	raw, err := templates.FS.ReadFile("VERSION")
 	if err != nil {
+		// templates/VERSION is go:embed'd at compile time (see templates/embed.go);
+		// its absence is a build-time invariant violation, unreachable at runtime.
 		panic("templates/VERSION missing from embed: " + err.Error())
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(string(raw)))
 	if err != nil || n < 1 {
+		// Same compile-time invariant: the embedded VERSION file's contents
+		// are controlled by this repo, not runtime input — unreachable at runtime.
 		panic("templates/VERSION must be a positive integer")
 	}
 	return n

@@ -113,7 +113,11 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "up-to-date: %s\n", r.Path)
 		case update.Pending:
 			if *write {
-				fmt.Fprintf(stdout, "updated: %s\n", r.Path)
+				if r.Created {
+					fmt.Fprintf(stdout, "created: %s\n", r.Path)
+				} else {
+					fmt.Fprintf(stdout, "updated: %s\n", r.Path)
+				}
 			} else {
 				outstanding++
 				fmt.Fprint(stdout, r.Diff)

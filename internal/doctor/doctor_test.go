@@ -3,6 +3,7 @@ package doctor_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/russellpope/spine/internal/adr"
@@ -72,6 +73,96 @@ func TestStaleGen0D2AndD3(t *testing.T) {
 	got := ids(fs)
 	if got["D2"] == 0 || got["D3"] == 0 {
 		t.Fatalf("want D2 (stale, pending update) + D3 (no markers), got %#v", fs)
+	}
+}
+
+// Both markers present exactly once but in swapped order must be treated as
+// damage — counts alone (begins==1, ends==1) previously passed silently.
+func TestOutOfOrderMarkersD3Error(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "CLAUDE.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	var beginIdx, endIdx = -1, -1
+	for i, l := range lines {
+		if strings.HasPrefix(l, "<!-- spine:begin") {
+			beginIdx = i
+		}
+		if strings.HasPrefix(l, "<!-- spine:end -->") {
+			endIdx = i
+		}
+	}
+	if beginIdx == -1 || endIdx == -1 {
+		t.Fatalf("scaffolded CLAUDE.md missing markers: %q", string(raw))
+	}
+	lines[beginIdx], lines[endIdx] = lines[endIdx], lines[beginIdx]
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range fs {
+		if f.ID != "D3" {
+			continue
+		}
+		found = true
+		if f.Severity != "error" || f.Message != "spine markers out of order — fix by hand" {
+			t.Errorf("D3 finding = %#v", f)
+		}
+	}
+	if !found {
+		t.Fatalf("want D3 finding, got %#v", fs)
+	}
+}
+
+// Marker damage (unbalanced) must not suggest --force in the D4 message,
+// since --force cannot repair CLAUDE.md's marker block.
+func TestMarkerDamageD4Message(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "CLAUDE.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := strings.Replace(string(raw), "<!-- spine:end -->\n", "", 1)
+	if broken == string(raw) {
+		t.Fatal("end marker line not found to delete")
+	}
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range fs {
+		if f.ID != "D4" || f.Path != "CLAUDE.md" {
+			continue
+		}
+		found = true
+		want := "spine markers damaged — fix by hand (--force cannot repair)"
+		if f.Message != want {
+			t.Errorf("D4 message = %q, want %q", f.Message, want)
+		}
+		if strings.Contains(f.Message, "--force") && !strings.Contains(f.Message, "cannot repair") {
+			t.Errorf("D4 message must not offer --force as a repair: %q", f.Message)
+		}
+	}
+	if !found {
+		t.Fatalf("want D4 finding for CLAUDE.md, got %#v", fs)
 	}
 }
 

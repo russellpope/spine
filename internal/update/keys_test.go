@@ -113,6 +113,31 @@ func TestChoicesSkipsTemplateVersion(t *testing.T) {
 	}
 }
 
+// A '#' is only a comment start at the start of the value or when preceded
+// by whitespace; a value with an interior '#' (no adjacent whitespace) must
+// survive extraction whole.
+func TestValueWithInteriorHashSurvivesExtraction(t *testing.T) {
+	content := "security_routing: quality#framing\n"
+	keys := ExtractKeys(content)
+	if keys["security_routing"] != "quality#framing" {
+		t.Fatalf("got %q, want %q", keys["security_routing"], "quality#framing")
+	}
+	// round-trips through setKey unchanged when the value is unchanged
+	if got := setKey(content, "security_routing", "quality#framing"); got != content {
+		t.Errorf("round-trip mutated line: got %q want %q", got, content)
+	}
+}
+
+// A real trailing comment (space-separated from the value) must still strip,
+// even when the value itself contains an interior '#'.
+func TestValueWithInteriorHashRealCommentStrips(t *testing.T) {
+	content := "security_routing: quality#framing    # swappable; re-evaluate\n"
+	keys := ExtractKeys(content)
+	if keys["security_routing"] != "quality#framing" {
+		t.Fatalf("got %q, want %q", keys["security_routing"], "quality#framing")
+	}
+}
+
 func containsLine(content, line string) bool {
 	for _, l := range splitLines(content) {
 		if l == line {

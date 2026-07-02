@@ -62,6 +62,20 @@ func TestDiffEmptyWhenEqual(t *testing.T) {
 	}
 }
 
+// Diff(path, "", content) is a brand-new file: every line is an addition,
+// never a spurious "- " row for the phantom empty "old" line.
+func TestDiffEmptyOldNoSpuriousMinusRow(t *testing.T) {
+	d := Diff("x", "", "a\nb\n")
+	for _, line := range strings.Split(d, "\n") {
+		if strings.HasPrefix(line, "- ") {
+			t.Errorf("unexpected '- ' row in empty-old diff:\n%s", d)
+		}
+	}
+	if !strings.Contains(d, "+ a") || !strings.Contains(d, "+ b") {
+		t.Errorf("missing expected '+' rows:\n%s", d)
+	}
+}
+
 func TestFreshInitIsUpToDate(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {

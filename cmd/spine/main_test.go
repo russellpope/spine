@@ -24,6 +24,15 @@ func TestNoArgsShowsUsage(t *testing.T) {
 	}
 }
 
+func TestHelpAndDashHShowUsageOnStdout(t *testing.T) {
+	for _, args := range [][]string{{"help"}, {"-h"}} {
+		code, out, _ := runCmd(t, args...)
+		if code != 0 || !strings.Contains(out, "usage: spine") {
+			t.Errorf("run(%v): code=%d out=%q", args, code, out)
+		}
+	}
+}
+
 func TestUnknownCommand(t *testing.T) {
 	code, _, errs := runCmd(t, "bogus")
 	if code != 2 || !strings.Contains(errs, "unknown command") {
@@ -91,9 +100,18 @@ func TestUpdateDryRunThenWrite(t *testing.T) {
 	if code != 1 || !strings.Contains(out, "+ template_version: 1") {
 		t.Fatalf("dry-run code=%d out=%q", code, out)
 	}
+	// also remove a simple machine-owned file entirely, so --write must
+	// report it as created: (missing on disk), not updated:
+	adrReadme := filepath.Join(dir, "docs", "adr", "README.md")
+	if err := os.Remove(adrReadme); err != nil {
+		t.Fatal(err)
+	}
 	code, out, _ = runCmd(t, "update", "--dir", dir, "--write")
 	if code != 0 || !strings.Contains(out, "updated: WORKFLOW.md") {
 		t.Fatalf("write code=%d out=%q", code, out)
+	}
+	if !strings.Contains(out, "created: docs/adr/README.md") {
+		t.Errorf("want created: docs/adr/README.md in --write output, out=%q", out)
 	}
 	code, _, _ = runCmd(t, "update", "--dir", dir)
 	if code != 0 {

@@ -7,7 +7,11 @@ import (
 )
 
 // WriteFileAtomic writes data via temp-file + rename in the same directory,
-// so a crash never leaves a partial file.
+// so a crash never leaves a partial file. The rename has POSIX rename(2)
+// semantics: if path is a symlink, the link itself is replaced (not the
+// file it points to) by a regular file — the symlink does not survive.
+// The written file's mode is always normalized to 0644, regardless of any
+// pre-existing file's mode at path.
 func WriteFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".spine-*")

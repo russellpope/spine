@@ -39,6 +39,18 @@ func TestDetectProfile(t *testing.T) {
 	}
 }
 
+// A dir with BOTH Cargo.toml and go.mod is a real signal collision (e.g. a
+// Rust project vendoring a Go tool); Cargo.toml wins by detection order.
+func TestDetectProfilePriorityRustOverGo(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "Cargo.toml", "[package]")
+	write(t, dir, "go.mod", "module x")
+	got, ok := scaffold.DetectProfile(dir)
+	if !ok || got != "rust" {
+		t.Errorf("got %q ok=%v, want rust", got, ok)
+	}
+}
+
 func TestInitCreatesAndStamps(t *testing.T) {
 	dir := t.TempDir()
 	res, err := scaffold.Init(dir, "rust", "demo")

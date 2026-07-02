@@ -11,6 +11,16 @@ func Diff(path, a, b string) string {
 	if a == b {
 		return ""
 	}
+	if a == "" {
+		// splitLines("") is [""], a phantom empty line that has no
+		// on-disk counterpart — emit only "+" rows for a brand-new file.
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "--- %s (on disk)\n+++ %s (regenerated)\n", path, path)
+		for _, l := range splitLines(b) {
+			sb.WriteString("+ " + l + "\n")
+		}
+		return sb.String()
+	}
 	al, bl := splitLines(a), splitLines(b)
 	m, n := len(al), len(bl)
 	lcs := make([][]int, m+1)

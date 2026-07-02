@@ -27,7 +27,10 @@ type FileReport struct {
 	State        FileState
 	Diff         string
 	Unrecognized []string
-	newContent   string
+	// Created is true when the file did not exist on disk at plan time, so a
+	// Pending state means "will be created" rather than "will be updated".
+	Created    bool
+	newContent string
 }
 
 // Options configures Run. Zero value = dry-run on ".".
@@ -185,6 +188,7 @@ func planClaude(dir, gen string, vals tmpl.Values) (FileReport, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		report.State = Pending
+		report.Created = true
 		report.Diff = Diff(report.Path, "", block)
 		report.newContent = block
 		return report, nil
@@ -243,6 +247,7 @@ func planSimple(dir, gen, tmplName, relPath string, inGen0 bool, vals tmpl.Value
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		report.State = Pending
+		report.Created = true
 		report.Diff = Diff(relPath, "", newContent)
 		report.newContent = newContent
 		return report, nil

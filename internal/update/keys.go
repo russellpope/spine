@@ -25,10 +25,28 @@ func cutKey(line, key string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if i := strings.Index(rest, "#"); i >= 0 {
+	if i := commentIndex(rest); i >= 0 {
 		rest = rest[:i]
 	}
 	return strings.TrimSpace(rest), true
+}
+
+// commentIndex finds the offset of a comment-starting '#' in s: one that
+// begins the value (only whitespace, if any, precedes it) or is itself
+// preceded by whitespace. A '#' embedded inside a value (e.g.
+// "quality#framing") is data, not a comment, and is skipped. Returns -1
+// when s has no comment-starting '#'.
+func commentIndex(s string) int {
+	start := len(s) - len(strings.TrimLeft(s, " \t"))
+	for i := start; i < len(s); i++ {
+		if s[i] != '#' {
+			continue
+		}
+		if i == start || s[i-1] == ' ' || s[i-1] == '\t' {
+			return i
+		}
+	}
+	return -1
 }
 
 // ExtractKeys pulls known config keys out of WORKFLOW.md content. Sub-keys of
@@ -143,7 +161,7 @@ func replaceValue(line, key, val string) string {
 
 	// Extract old value (before comment or end of line)
 	oldVal := rest
-	if i := strings.Index(rest, "#"); i >= 0 {
+	if i := commentIndex(rest); i >= 0 {
 		oldVal = strings.TrimRight(rest[:i], " ")
 	}
 
@@ -154,8 +172,8 @@ func replaceValue(line, key, val string) string {
 
 	// Value changed: normalize spacing to 4 spaces
 	comment := ""
-	if i := strings.Index(line, "#"); i >= 0 {
-		comment = "    " + strings.TrimRight(line[i:], " ")
+	if i := commentIndex(rest); i >= 0 {
+		comment = "    " + strings.TrimRight(rest[i:], " ")
 	}
 	return indent + key + ": " + val + comment
 }

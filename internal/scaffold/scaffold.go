@@ -3,6 +3,7 @@
 package scaffold
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,8 +73,9 @@ func Init(dir, profile, name string) (Result, error) {
 		name = filepath.Base(abs)
 	}
 	for _, d := range []string{"docs/specs", "docs/adr", "docs/issues", "docs/handoffs"} {
-		if err := os.MkdirAll(filepath.Join(dir, d), 0o755); err != nil {
-			return Result{}, err
+		target := filepath.Join(dir, d)
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			return Result{}, fmt.Errorf("mkdir %s: %w", target, err)
 		}
 	}
 	v := tmpl.Values{Project: name, Profile: profile, Reviewers: reviewers, Harness: harness, Version: tmpl.Version()}
@@ -83,13 +85,15 @@ func Init(dir, profile, name string) (Result, error) {
 		if _, err := os.Stat(dst); err == nil {
 			res.Skipped = append(res.Skipped, f.RelPath)
 			continue
+		} else if !os.IsNotExist(err) {
+			return res, fmt.Errorf("stat %s: %w", dst, err)
 		}
 		content, err := tmpl.Render("current", f.TmplName, v)
 		if err != nil {
-			return res, err
+			return res, fmt.Errorf("render %s: %w", f.TmplName, err)
 		}
 		if err := fsutil.WriteFileAtomic(dst, []byte(content)); err != nil {
-			return res, err
+			return res, fmt.Errorf("write %s: %w", dst, err)
 		}
 		res.Created = append(res.Created, f.RelPath)
 	}
