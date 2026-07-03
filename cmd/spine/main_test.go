@@ -182,3 +182,27 @@ func TestDoctorCleanAndJSON(t *testing.T) {
 		t.Fatalf("empty-dir code=%d out=%q", code, out)
 	}
 }
+
+func TestHandoffEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	code, out, errs := runCmd(t, "handoff", "new", "--dir", dir, "spine v2 wrap")
+	if code != 0 || !strings.Contains(out, "-spine-v2-wrap.md") {
+		t.Fatalf("new: code=%d out=%q err=%q", code, out, errs)
+	}
+	code, out, _ = runCmd(t, "handoff", "list", "--dir", dir)
+	if code != 0 || !strings.Contains(out, "spine-v2-wrap") {
+		t.Fatalf("list: code=%d out=%q", code, out)
+	}
+	code, out, _ = runCmd(t, "handoff", "latest", "--dir", dir)
+	if code != 0 || !strings.HasSuffix(strings.TrimSpace(out), "-spine-v2-wrap.md") {
+		t.Fatalf("latest: code=%d out=%q", code, out)
+	}
+	code, out, _ = runCmd(t, "handoff", "latest", "--dir", dir, "--json")
+	if code != 0 || !strings.Contains(out, `"topic":"spine-v2-wrap"`) {
+		t.Fatalf("latest --json: code=%d out=%q", code, out)
+	}
+	code, _, _ = runCmd(t, "handoff", "latest", "--dir", t.TempDir())
+	if code != 1 {
+		t.Fatalf("latest on empty repo: want exit 1, got %d", code)
+	}
+}

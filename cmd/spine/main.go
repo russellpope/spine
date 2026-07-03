@@ -13,6 +13,7 @@ import (
 
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/doctor"
+	"github.com/russellpope/spine/internal/handoff"
 	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
@@ -24,6 +25,7 @@ commands:
   init     scaffold the unified workflow into a repo
   update   regenerate machine-owned workflow files (dry-run by default; --write applies)
   adr      manage architecture decision records (new, list)
+  handoff  manage docs/handoffs (new, list, latest [--fleet DIR])
   doctor   read-only workflow health checks
   version  print the compiled template generation
 `
@@ -42,6 +44,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdUpdate(args[1:], stdout, stderr)
 	case "adr":
 		return cmdADR(args[1:], stdout, stderr)
+	case "handoff":
+		return cmdHandoff(args[1:], stdout, stderr)
 	case "doctor":
 		return cmdDoctor(args[1:], stdout, stderr)
 	case "version":
@@ -190,6 +194,114 @@ func cmdADR(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "unknown adr subcommand %q\n", args[0])
 		return 2
 	}
+}
+
+type handoffJSON struct {
+	Path  string `json:"path"`
+	Date  string `json:"date"`
+	Topic string `json:"topic"`
+	Title string `json:"title"`
+}
+
+func handoffToJSON(e handoff.Entry) handoffJSON {
+	return handoffJSON{Path: e.Path, Date: e.Date.Format("2006-01-02"), Topic: e.Topic, Title: e.Title}
+}
+
+func cmdHandoff(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, `usage: spine handoff <new|list|latest> [flags]  (handoff new [--dir D] "Topic")`)
+		return 2
+	}
+	switch args[0] {
+	case "new":
+		fs := flag.NewFlagSet("handoff new", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", ".", "repo root")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if fs.NArg() != 1 {
+			fmt.Fprintln(stderr, `usage: spine handoff new [--dir D] "Topic" (flags before topic)`)
+			return 2
+		}
+		path, err := handoff.New(*dir, fs.Arg(0))
+		if err != nil {
+			fmt.Fprintln(stderr, "handoff new:", err)
+			return 2
+		}
+		fmt.Fprintln(stdout, path)
+		return 0
+	case "list":
+		fs := flag.NewFlagSet("handoff list", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", ".", "repo root")
+		asJSON := fs.Bool("json", false, "machine-readable output")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		entries, err := handoff.List(*dir)
+		if err != nil {
+			fmt.Fprintln(stderr, "handoff list:", err)
+			return 2
+		}
+		if *asJSON {
+			out := make([]handoffJSON, 0, len(entries))
+			for _, e := range entries {
+				out = append(out, handoffToJSON(e))
+			}
+			if err := json.NewEncoder(stdout).Encode(out); err != nil {
+				fmt.Fprintln(stderr, "handoff list:", err)
+				return 2
+			}
+			return 0
+		}
+		for _, e := range entries {
+			fmt.Fprintf(stdout, "%s  %s\n", e.Date.Format("2006-01-02"), e.Topic)
+		}
+		return 0
+	case "latest":
+		return cmdHandoffLatest(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "unknown handoff subcommand %q\n", args[0])
+		return 2
+	}
+}
+
+func cmdHandoffLatest(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("handoff latest", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	asJSON := fs.Bool("json", false, "machine-readable output")
+	fleet := fs.String("fleet", "", "scan every child repo of DIR instead of one repo")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *fleet != "" {
+		return handoffFleet(*fleet, *asJSON, stdout, stderr) // Task 8
+	}
+	e, ok, err := handoff.Latest(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "handoff latest:", err)
+		return 2
+	}
+	if !ok {
+		fmt.Fprintln(stderr, "no handoffs found")
+		return 1
+	}
+	if *asJSON {
+		if err := json.NewEncoder(stdout).Encode(handoffToJSON(e)); err != nil {
+			fmt.Fprintln(stderr, "handoff latest:", err)
+			return 2
+		}
+		return 0
+	}
+	fmt.Fprintln(stdout, e.Path)
+	return 0
+}
+
+func handoffFleet(parent string, asJSON bool, stdout, stderr io.Writer) int {
+	fmt.Fprintln(stderr, "handoff latest --fleet: not implemented yet")
+	return 2
 }
 
 func cmdDoctor(args []string, stdout, stderr io.Writer) int {
