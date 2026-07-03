@@ -74,9 +74,12 @@ boundary cases: same-day = 0, local-evening-west-of-UTC = 0, yesterday = 1.
 1. `eval` doctor `checkDoc`: non-ENOENT read errors currently report as
    "missing eval.md". Distinguish: missing stays a D7 finding; read errors
    return as errors (doctor's exit-2 path).
-2. `eval.List`: per-file read errors are silently skipped. Surface them —
-   List returns the error (fail loud; a corrupt ledger should not silently
-   thin the scoreboard). JSON contract unchanged on the success path.
+2. `handoff.List` (correction 2026-07-03, post-approval: the v2 ledger's
+   "List swallows per-file read errors" was a Task 7 = handoff-package minor;
+   `eval.List` already fails loud, eval.go:191–193): the `os.ReadFile` at
+   handoff.go:101 silently degrades Title to the filename topic on ANY read
+   error. Propagate read errors instead. `Fleet`'s per-child skip contract
+   (T8, tested) is unaffected — it already skips erroring children.
 3. `update.go:87`: evals-dir Stat swallows non-ENOENT errors (EACCES, ELOOP
    would silently skip evals-README management). Propagate them.
 
@@ -155,5 +158,14 @@ behavior is final) → C6 acceptance.
   claim (emitted content unchanged).
 - C3.2 (List fails loud) could conflict with fleet-scan resilience
   (`handoff latest --fleet` deliberately skips per-child errors, T8). Ruling:
-  eval.List is single-repo (no fleet mode) — fail-loud is correct there and
-  does not touch the fleet skip-branch contract.
+  single-repo `handoff list`/`latest` fail loud; `Fleet` keeps its per-child
+  skip (handoff.go:146), so the fleet contract is untouched.
+- C5 addendum found while planning: `supersedes: %04d` has the identical
+  octal quirk the ledger flagged for `id` — quoting id but not supersedes is
+  half a fix. Included in C5 (same file, same defect class). Also, naive
+  quoting of `title` would trade the colon bug for a quote bug — titles
+  render through a new `{{ADR_TITLE_YAML}}` placeholder escaped via
+  `strconv.Quote` in adr.New; the body H1 keeps the raw title.
+- C1 addendum: `adr.New` has NO collision guard at all (path derives from
+  max-ID+1; concurrent runs silently overwrite). Exclusive create ADDS
+  protection there rather than replacing a guard.
