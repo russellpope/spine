@@ -42,7 +42,7 @@ func TestUnknownCommand(t *testing.T) {
 
 func TestVersionCommand(t *testing.T) {
 	code, out, _ := runCmd(t, "version")
-	if code != 0 || !strings.Contains(out, "1") {
+	if code != 0 || !strings.Contains(out, "spine template generation 2") {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
@@ -97,7 +97,7 @@ func TestUpdateDryRunThenWrite(t *testing.T) {
 		}
 	}
 	code, out, _ = runCmd(t, "update", "--dir", dir)
-	if code != 1 || !strings.Contains(out, "+ template_version: 1") {
+	if code != 1 || !strings.Contains(out, "+ template_version: 2") {
 		t.Fatalf("dry-run code=%d out=%q", code, out)
 	}
 	// also remove a simple machine-owned file entirely, so --write must

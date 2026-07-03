@@ -8,8 +8,8 @@ import (
 )
 
 func TestVersionIsOne(t *testing.T) {
-	if got := tmpl.Version(); got != 1 {
-		t.Fatalf("Version() = %d, want 1", got)
+	if got := tmpl.Version(); got != 2 {
+		t.Fatalf("Version() = %d, want 2", got)
 	}
 }
 
@@ -34,11 +34,11 @@ func TestRenderFillsAllPlaceholders(t *testing.T) {
 }
 
 func TestCurrentWorkflowIsStamped(t *testing.T) {
-	got, err := tmpl.Render("current", "WORKFLOW.md.tmpl", tmpl.Values{Profile: "rust", Version: 1})
+	got, err := tmpl.Render("current", "WORKFLOW.md.tmpl", tmpl.Values{Profile: "rust", Version: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "template_version: 1") {
+	if !strings.Contains(got, "template_version: 2") {
 		t.Error("current WORKFLOW template lacks template_version stamp")
 	}
 	if !strings.Contains(got, "primary: claude-fable-5") {
@@ -47,11 +47,11 @@ func TestCurrentWorkflowIsStamped(t *testing.T) {
 }
 
 func TestCurrentClaudeHasMarkers(t *testing.T) {
-	got, err := tmpl.Render("current", "CLAUDE.md.tmpl", tmpl.Values{Project: "p", Profile: "rust", Version: 1})
+	got, err := tmpl.Render("current", "CLAUDE.md.tmpl", tmpl.Values{Project: "p", Profile: "rust", Version: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(got, "<!-- spine:begin v1 -->") || !strings.Contains(got, "<!-- spine:end -->") {
+	if !strings.HasPrefix(got, "<!-- spine:begin v2 -->") || !strings.Contains(got, "<!-- spine:end -->") {
 		t.Errorf("markers missing:\n%s", got)
 	}
 }
