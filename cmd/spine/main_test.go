@@ -409,3 +409,64 @@ func TestAdoptPreservedADRReadmeCmd(t *testing.T) {
 		t.Fatalf("json missing preserve action: out=%q", out)
 	}
 }
+
+func TestHandoffListTextHasHeaderAndPath(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "handoff", "new", "-dir", dir, "v3 cosmetics"); code != 0 {
+		t.Fatal(errs)
+	}
+	code, out, errs := runCmd(t, "handoff", "list", "-dir", dir)
+	if code != 0 {
+		t.Fatal(errs)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want header + 1 row, got %d lines: %q", len(lines), out)
+	}
+	if !strings.HasPrefix(lines[0], "date") || !strings.Contains(lines[0], "topic") || !strings.Contains(lines[0], "path") {
+		t.Errorf("header missing/wrong: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "v3-cosmetics") || !strings.Contains(lines[1], filepath.Join(dir, "docs", "handoffs")) {
+		t.Errorf("row missing topic or path: %q", lines[1])
+	}
+}
+
+func TestEvalListTextHasHeader(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "eval", "new", "-dir", dir, "header eval"); code != 0 {
+		t.Fatal(errs)
+	}
+	code, out, errs := runCmd(t, "eval", "list", "-dir", dir)
+	if code != 0 {
+		t.Fatal(errs)
+	}
+	first := strings.SplitN(out, "\n", 2)[0]
+	if !strings.HasPrefix(first, "eval") || !strings.Contains(first, "run") ||
+		!strings.Contains(first, "stage") || !strings.Contains(first, "score") {
+		t.Errorf("header missing/wrong: %q", first)
+	}
+}
+
+func TestUpdateTextNamesPreservedFiles(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"WORKFLOW.md", "CLAUDE.md"} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "update", "testdata", "ccq", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Hand-authored ADR index: ADR-0009 territory — update must SAY so.
+	if err := os.WriteFile(filepath.Join(dir, "docs", "adr", "README.md"), []byte("# my hand-rolled index\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, out, _ := runCmd(t, "update", "-dir", dir)
+	if !strings.Contains(out, "preserved (hand-authored): docs/adr/README.md") {
+		t.Errorf("no preservation notice in:\n%s", out)
+	}
+}

@@ -123,7 +123,11 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	for _, r := range reports {
 		switch r.State {
 		case update.UpToDate:
-			fmt.Fprintf(stdout, "up-to-date: %s\n", r.Path)
+			if r.Preserved {
+				fmt.Fprintf(stdout, "preserved (hand-authored): %s\n", r.Path)
+			} else {
+				fmt.Fprintf(stdout, "up-to-date: %s\n", r.Path)
+			}
 		case update.Pending:
 			if *write {
 				if r.Created {
@@ -283,8 +287,9 @@ func cmdHandoff(args []string, stdout, stderr io.Writer) int {
 			}
 			return 0
 		}
+		fmt.Fprintf(stdout, "%-10s  %-28s  %s\n", "date", "topic", "path")
 		for _, e := range entries {
-			fmt.Fprintf(stdout, "%s  %s\n", e.Date.Format("2006-01-02"), e.Topic)
+			fmt.Fprintf(stdout, "%-10s  %-28s  %s\n", e.Date.Format("2006-01-02"), e.Topic, e.Path)
 		}
 		return 0
 	case "latest":
@@ -497,6 +502,7 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 			}
 			return 0
 		}
+		fmt.Fprintf(stdout, "%-30s  %-20s  %-10s  %s\n", "eval", "run", "stage", "score")
 		for _, e := range evals {
 			if len(e.Runs) == 0 {
 				fmt.Fprintf(stdout, "%-30s  %-20s  %-10s  %s\n", e.Name, "-", "-", "-")
