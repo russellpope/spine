@@ -33,11 +33,16 @@ type FileReport struct {
 	newContent string
 }
 
-// Options configures Run. Zero value = dry-run on ".".
+// Options configures Run. Zero value = dry-run on ".". AdoptProfile switches
+// on adopt mode: a missing WORKFLOW.md is synthesized from that profile's
+// defaults (project name = AdoptName, else the dir basename) instead of
+// being a hard error. Set only by spine adopt.
 type Options struct {
-	Dir   string
-	Write bool
-	Force bool
+	Dir          string
+	Write        bool
+	Force        bool
+	AdoptProfile string
+	AdoptName    string
 }
 
 const (
@@ -62,7 +67,7 @@ func Run(opts Options) ([]FileReport, error) {
 	if opts.Dir == "" {
 		opts.Dir = "."
 	}
-	wf, vals, gen, err := planWorkflow(opts.Dir)
+	wf, vals, gen, err := planWorkflow(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -121,10 +126,35 @@ func Run(opts Options) ([]FileReport, error) {
 	return reports, nil
 }
 
-func planWorkflow(dir string) (FileReport, tmpl.Values, string, error) {
+func planWorkflow(opts Options) (FileReport, tmpl.Values, string, error) {
 	report := FileReport{Path: "WORKFLOW.md"}
-	path := filepath.Join(dir, "WORKFLOW.md")
+	path := filepath.Join(opts.Dir, "WORKFLOW.md")
 	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) && opts.AdoptProfile != "" {
+		project := opts.AdoptName
+		if project == "" {
+			abs, aerr := filepath.Abs(opts.Dir)
+			if aerr != nil {
+				return report, tmpl.Values{}, "", aerr
+			}
+			project = filepath.Base(abs)
+		}
+		defRev, defHarness, derr := tmpl.Defaults(opts.AdoptProfile)
+		if derr != nil {
+			return report, tmpl.Values{}, "", derr
+		}
+		vals := tmpl.Values{Project: project, Profile: opts.AdoptProfile,
+			Reviewers: defRev, Harness: defHarness, Version: tmpl.Version()}
+		newContent, rerr := tmpl.Render("current", "WORKFLOW.md.tmpl", vals)
+		if rerr != nil {
+			return report, tmpl.Values{}, "", rerr
+		}
+		report.State = Pending
+		report.Created = true
+		report.Diff = Diff(report.Path, "", newContent)
+		report.newContent = newContent
+		return report, vals, "current", nil
+	}
 	if err != nil {
 		return report, tmpl.Values{}, "", fmt.Errorf("read %s (run spine init first?): %w", path, err)
 	}
@@ -142,7 +172,7 @@ func planWorkflow(dir string) (FileReport, tmpl.Values, string, error) {
 		}
 		gen = "current"
 	}
-	abs, err := filepath.Abs(dir)
+	abs, err := filepath.Abs(opts.Dir)
 	if err != nil {
 		return report, tmpl.Values{}, "", err
 	}

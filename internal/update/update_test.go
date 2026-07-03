@@ -300,6 +300,42 @@ func TestUpdateManagesEvalsReadmeOnlyWhenPresent(t *testing.T) {
 	}
 }
 
+func TestAdoptModeSynthesizesWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	// pre-existing hand-authored CLAUDE.md, praxis-style
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("## Repo invariants\n\n- push with git push github main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := Run(Options{Dir: dir, AdoptProfile: "go-service", AdoptName: "praxis"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]FileReport{}
+	for _, r := range reports {
+		byPath[r.Path] = r
+	}
+	wf := byPath["WORKFLOW.md"]
+	if wf.State != Pending || !wf.Created {
+		t.Fatalf("WORKFLOW.md state=%v created=%v", wf.State, wf.Created)
+	}
+	if !strings.Contains(wf.Diff, "profile: go-service") || !strings.Contains(wf.Diff, "template_version: 2") || !strings.Contains(wf.Diff, "# Workflow — praxis") {
+		t.Errorf("diff=%q", wf.Diff)
+	}
+	cl := byPath["CLAUDE.md"]
+	if cl.State != Pending || cl.Created {
+		t.Fatalf("CLAUDE.md state=%v created=%v (want claim of existing file)", cl.State, cl.Created)
+	}
+	if !strings.Contains(cl.Diff, "spine:begin") || !strings.Contains(cl.Diff, "Repo invariants") {
+		t.Errorf("claim must insert markers and keep hand content; diff=%q", cl.Diff)
+	}
+}
+
+func TestMissingWorkflowStillErrorsWithoutAdoptMode(t *testing.T) {
+	if _, err := Run(Options{Dir: t.TempDir()}); err == nil {
+		t.Fatal("want error")
+	}
+}
+
 func TestVersionDowngradeGuard(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
