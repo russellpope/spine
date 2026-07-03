@@ -3,6 +3,7 @@ package handoff
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,36 @@ func TestNewListLatest(t *testing.T) {
 	latest, ok, err := Latest(dir)
 	if err != nil || !ok || latest.Topic != "spine-v2-spec" {
 		t.Fatalf("latest=%v ok=%v err=%v", latest, ok, err)
+	}
+}
+
+func TestNewRefusesWhenStatFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation may require privileges on Windows")
+	}
+	dir := t.TempDir()
+	hdir := filepath.Join(dir, "docs", "handoffs")
+	if err := os.MkdirAll(hdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	today := time.Now().Format("2006-01-02")
+	path := filepath.Join(hdir, today+"-self-loop.md")
+	// A self-referential symlink makes os.Stat fail with ELOOP — an error
+	// that is neither nil nor IsNotExist. New must surface it instead of
+	// falling through to WriteFileAtomic, whose POSIX rename would silently
+	// replace the existing directory entry ("never overwrites" contract).
+	if err := os.Symlink(path, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(dir, "self loop"); err == nil {
+		t.Fatal("New must fail when Stat on the target errors")
+	}
+	fi, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("target was replaced (mode %v) — New overwrote on Stat failure", fi.Mode())
 	}
 }
 
