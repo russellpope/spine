@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/update"
 )
 
@@ -156,6 +157,81 @@ func TestAdoptUnknownDocsDirsEachGetOwnInfo(t *testing.T) {
 	}
 	if !gotDecisions || !gotLegacy {
 		t.Fatalf("want separate infos for both unknown dirs, got %#v", res.Infos)
+	}
+}
+
+// I2: adopt must follow an existing stamped WORKFLOW.md profile rather than
+// re-detecting from repo signals — a library-cli repo that happens to carry
+// a go.mod must not get silently reclassified as go-service.
+func TestAdoptFollowsStampedProfile(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "library-cli", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Profile != "library-cli" {
+		t.Fatalf("profile=%q, want library-cli (the stamp, not go.mod detection)", res.Profile)
+	}
+}
+
+// I2: an explicit --profile that conflicts with the stamp is a hard error —
+// adopt never silently regenerates a repo under a different profile than
+// the one it's stamped with.
+func TestAdoptConflictingProfileErrors(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "library-cli", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Run(Options{Dir: dir, Profile: "go-service"})
+	if err == nil {
+		t.Fatal("want error for --profile conflicting with stamp")
+	}
+	if !strings.Contains(err.Error(), "library-cli") || !strings.Contains(err.Error(), "stamp") {
+		t.Errorf("error = %q, want mention of stamped profile and 'stamp'", err.Error())
+	}
+}
+
+// I2: --profile matching the stamp is a no-op agreement, not an error.
+func TestAdoptProfileMatchingStampOK(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "library-cli", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Run(Options{Dir: dir, Profile: "library-cli"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Profile != "library-cli" {
+		t.Fatalf("profile=%q", res.Profile)
+	}
+}
+
+// I2: --profile / detection still apply when there is no valid stamp
+// (no WORKFLOW.md at all) — unstamped behavior is unchanged.
+func TestAdoptUnstampedUsesProfileOrDetection(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Cargo.toml"), []byte("[package]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Run(Options{Dir: dir, Profile: "py-tool"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Profile != "py-tool" {
+		t.Fatalf("explicit --profile ignored: got %q", res.Profile)
+	}
+	res, err = Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Profile != "rust" {
+		t.Fatalf("detection ignored: got %q, want rust (Cargo.toml)", res.Profile)
 	}
 }
 

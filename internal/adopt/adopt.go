@@ -65,7 +65,18 @@ func Run(opts Options) (Result, error) {
 		opts.Dir = "."
 	}
 	profile := opts.Profile
-	if profile == "" {
+	// A valid stamped profile in an existing WORKFLOW.md wins over both
+	// --profile and detection: adopt follows the stamp, it doesn't
+	// second-guess it from repo signals (I2). update.Run independently
+	// reads the same stamp for the file contents themselves; this is what
+	// makes res.Profile / DirsToCreate agree with it.
+	if stamped, ok := stampedProfile(opts.Dir); ok {
+		if opts.Profile != "" && opts.Profile != stamped {
+			return Result{}, fmt.Errorf(
+				"repo is stamped profile %s; adopt follows the stamp — edit WORKFLOW.md to change it", stamped)
+		}
+		profile = stamped
+	} else if profile == "" {
 		detected, ok := scaffold.DetectProfile(opts.Dir)
 		if !ok {
 			return Result{}, fmt.Errorf("cannot detect profile for %s; pass --profile", opts.Dir)
@@ -104,6 +115,24 @@ func Run(opts Options) (Result, error) {
 		}
 	}
 	return res, nil
+}
+
+// stampedProfile reads WORKFLOW.md (if any) and returns its profile: key,
+// but only when that value is a profile tmpl.Defaults actually recognizes —
+// a garbage or missing stamp is not a stamp.
+func stampedProfile(dir string) (string, bool) {
+	raw, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		return "", false
+	}
+	p := update.ExtractKeys(string(raw))["profile"]
+	if p == "" {
+		return "", false
+	}
+	if _, _, err := tmpl.Defaults(p); err != nil {
+		return "", false
+	}
+	return p, true
 }
 
 func gatherInfos(dir string) []Info {
