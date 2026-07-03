@@ -26,12 +26,12 @@ const usage = `usage: spine <command> [flags]
 
 commands:
   init     scaffold the unified workflow into a repo
+  adopt    retrofit a pre-spine repo (dry-run by default; --write applies)
   update   regenerate machine-owned workflow files (dry-run by default; --write applies)
   adr      manage architecture decision records (new, list)
   handoff  manage docs/handoffs (new, list, latest [--fleet DIR])
   eval     manage docs/evals (new, add-run, list)
   doctor   read-only workflow health checks
-  adopt    retrofit a pre-spine repo (dry-run by default; --write applies)
   version  print the compiled template generation
 `
 
@@ -187,6 +187,7 @@ func cmdADR(args []string, stdout, stderr io.Writer) int {
 		fs := flag.NewFlagSet("adr list", flag.ContinueOnError)
 		fs.SetOutput(stderr)
 		dir := fs.String("dir", ".", "repo root")
+		asJSON := fs.Bool("json", false, "machine-readable output")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 2
 		}
@@ -194,6 +195,24 @@ func cmdADR(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			fmt.Fprintln(stderr, "adr list:", err)
 			return 2
+		}
+		if *asJSON {
+			type entryJSON struct {
+				ID             int    `json:"id"`
+				Title          string `json:"title"`
+				Status         string `json:"status"`
+				Path           string `json:"path"`
+				HasFrontMatter bool   `json:"has_front_matter"`
+			}
+			out := make([]entryJSON, 0, len(entries))
+			for _, e := range entries {
+				out = append(out, entryJSON{e.ID, e.Title, e.Status, e.Path, e.HasFrontMatter})
+			}
+			if err := json.NewEncoder(stdout).Encode(out); err != nil {
+				fmt.Fprintln(stderr, "adr list:", err)
+				return 2
+			}
+			return 0
 		}
 		for _, e := range entries {
 			fmt.Fprintf(stdout, "%04d  %-22s  %s\n", e.ID, e.Status, e.Title)

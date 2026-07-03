@@ -145,6 +145,20 @@ func TestADRNewAndList(t *testing.T) {
 	}
 }
 
+func TestADRListJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := runCmd(t, "adr", "new", "--dir", dir, "Some Decision"); code != 0 {
+		t.Fatal(errs)
+	}
+	code, out, _ := runCmd(t, "adr", "list", "--dir", dir, "--json")
+	if code != 0 || !strings.Contains(out, `"title":"Some Decision"`) || !strings.Contains(out, `"has_front_matter":true`) {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
+
 func TestDoctorInfoOnlyExitsZero(t *testing.T) {
 	dir := t.TempDir()
 	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
