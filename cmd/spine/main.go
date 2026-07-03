@@ -14,6 +14,7 @@ import (
 
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/doctor"
+	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/handoff"
 	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/tmpl"
@@ -27,6 +28,7 @@ commands:
   update   regenerate machine-owned workflow files (dry-run by default; --write applies)
   adr      manage architecture decision records (new, list)
   handoff  manage docs/handoffs (new, list, latest [--fleet DIR])
+  eval     manage docs/evals (new, add-run, list)
   doctor   read-only workflow health checks
   version  print the compiled template generation
 `
@@ -47,6 +49,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdADR(args[1:], stdout, stderr)
 	case "handoff":
 		return cmdHandoff(args[1:], stdout, stderr)
+	case "eval":
+		return cmdEval(args[1:], stdout, stderr)
 	case "doctor":
 		return cmdDoctor(args[1:], stdout, stderr)
 	case "version":
@@ -371,4 +375,105 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return 0
+}
+
+func cmdEval(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, `usage: spine eval <new|add-run|list> [flags]  (eval new [--dir D] "Title"; eval add-run --eval E --name N)`)
+		return 2
+	}
+	switch args[0] {
+	case "new":
+		fs := flag.NewFlagSet("eval new", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", ".", "repo root")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if fs.NArg() != 1 {
+			fmt.Fprintln(stderr, `usage: spine eval new [--dir D] "Title" (flags before title)`)
+			return 2
+		}
+		path, err := eval.New(*dir, fs.Arg(0))
+		if err != nil {
+			fmt.Fprintln(stderr, "eval new:", err)
+			return 2
+		}
+		fmt.Fprintln(stdout, path)
+		return 0
+	case "add-run":
+		fs := flag.NewFlagSet("eval add-run", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", ".", "repo root")
+		evalRef := fs.String("eval", "", "eval dir name (date prefix optional)")
+		name := fs.String("name", "", "run name (becomes runs/<name>.md)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if *evalRef == "" || *name == "" {
+			fmt.Fprintln(stderr, "eval add-run: --eval and --name are required")
+			return 2
+		}
+		path, err := eval.AddRun(*dir, *evalRef, *name)
+		if err != nil {
+			fmt.Fprintln(stderr, "eval add-run:", err)
+			return 2
+		}
+		fmt.Fprintln(stdout, path)
+		return 0
+	case "list":
+		fs := flag.NewFlagSet("eval list", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", ".", "repo root")
+		asJSON := fs.Bool("json", false, "machine-readable output")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 2
+		}
+		evals, problems, err := eval.List(*dir)
+		if err != nil {
+			fmt.Fprintln(stderr, "eval list:", err)
+			return 2
+		}
+		for _, p := range problems {
+			fmt.Fprintf(stderr, "warning: %s: %s\n", p.Path, p.Message)
+		}
+		if *asJSON {
+			type runJSON struct {
+				Name  string `json:"name"`
+				Stage string `json:"stage"`
+				Score string `json:"score"`
+				Path  string `json:"path"`
+			}
+			type evalJSON struct {
+				Name string    `json:"name"`
+				Path string    `json:"path"`
+				Runs []runJSON `json:"runs"`
+			}
+			out := make([]evalJSON, 0, len(evals))
+			for _, e := range evals {
+				ej := evalJSON{Name: e.Name, Path: e.Path, Runs: []runJSON{}}
+				for _, r := range e.Runs {
+					ej.Runs = append(ej.Runs, runJSON{Name: r.Name, Stage: r.Stage, Score: r.Score, Path: r.Path})
+				}
+				out = append(out, ej)
+			}
+			if err := json.NewEncoder(stdout).Encode(out); err != nil {
+				fmt.Fprintln(stderr, "eval list:", err)
+				return 2
+			}
+			return 0
+		}
+		for _, e := range evals {
+			if len(e.Runs) == 0 {
+				fmt.Fprintf(stdout, "%-30s  %-20s  %-10s  %s\n", e.Name, "-", "-", "-")
+			}
+			for _, r := range e.Runs {
+				fmt.Fprintf(stdout, "%-30s  %-20s  %-10s  %s\n", e.Name, r.Name, r.Stage, r.Score)
+			}
+		}
+		return 0
+	default:
+		fmt.Fprintf(stderr, "unknown eval subcommand %q\n", args[0])
+		return 2
+	}
 }

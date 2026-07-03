@@ -207,6 +207,30 @@ func TestHandoffEndToEnd(t *testing.T) {
 	}
 }
 
+func TestEvalEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	code, out, errs := runCmd(t, "eval", "new", "--dir", dir, "govmomi cli")
+	if code != 0 || !strings.Contains(out, "-govmomi-cli") {
+		t.Fatalf("new: code=%d out=%q err=%q", code, out, errs)
+	}
+	code, out, errs = runCmd(t, "eval", "add-run", "--dir", dir, "--eval", "govmomi-cli", "--name", "qwen-3.6-27b")
+	if code != 0 || !strings.Contains(out, "qwen-3.6-27b.md") {
+		t.Fatalf("add-run: code=%d out=%q err=%q", code, out, errs)
+	}
+	code, out, _ = runCmd(t, "eval", "list", "--dir", dir)
+	if code != 0 || !strings.Contains(out, "qwen-3.6-27b") {
+		t.Fatalf("list: code=%d out=%q", code, out)
+	}
+	code, out, _ = runCmd(t, "eval", "list", "--dir", dir, "--json")
+	if code != 0 || !strings.Contains(out, `"name":"qwen-3.6-27b"`) {
+		t.Fatalf("list --json: code=%d out=%q", code, out)
+	}
+	code, _, errs = runCmd(t, "eval", "add-run", "--dir", dir, "--eval", "nope", "--name", "m")
+	if code != 2 || !strings.Contains(errs, "no eval matches") {
+		t.Fatalf("code=%d errs=%q", code, errs)
+	}
+}
+
 func TestHandoffFleet(t *testing.T) {
 	parent := t.TempDir()
 	repo := filepath.Join(parent, "demo")
