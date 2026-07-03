@@ -73,7 +73,10 @@ boundary cases: same-day = 0, local-evening-west-of-UTC = 0, yesterday = 1.
 
 1. `eval` doctor `checkDoc`: non-ENOENT read errors currently report as
    "missing eval.md". Distinguish: missing stays a D7 finding; read errors
-   return as errors (doctor's exit-2 path).
+   surface as D7 error findings (exit 1) — doctor's evalCheck converts eval.List
+   errors into a D7 "evals tree unreadable" finding, consistent with the
+   ratified always-nil doctor.Run signature.
+   (Amended 2026-07-03 post-final-review: the original text promised doctor's exit-2 path, contradicting the ratified always-nil doctor.Run signature in Non-goals; actual shipped behavior is the D7 error finding → exit 1, verified live.)
 2. `handoff.List` (correction 2026-07-03, post-approval: the v2 ledger's
    "List swallows per-file read errors" was a Task 7 = handoff-package minor;
    `eval.List` already fails loud, eval.go:191–193): the `os.ReadFile` at

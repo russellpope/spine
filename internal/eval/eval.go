@@ -59,9 +59,9 @@ func New(dir, title string) (string, error) {
 	if _, err := os.Stat(evalDir); err == nil {
 		return "", fmt.Errorf("%s already exists", evalDir)
 	} else if !os.IsNotExist(err) {
-		// A Stat failure that is not "absent" (EACCES, ELOOP, ...) must not
-		// fall through: WriteFileAtomic replaces the target unconditionally,
-		// which would break the never-overwrite contract.
+		// Fast-path existence check: if evalDir exists, return the user-facing
+		// "already exists" error up front. Non-NotExist Stat errors (EACCES,
+		// ELOOP, ...) must still propagate to avoid silent failures.
 		return "", err
 	}
 	if err := os.MkdirAll(filepath.Join(evalDir, "runs"), 0o755); err != nil {

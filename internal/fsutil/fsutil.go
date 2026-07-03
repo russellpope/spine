@@ -1,4 +1,4 @@
-// Package fsutil holds the one write primitive every spine command uses.
+// Package fsutil holds the write primitives every spine command uses.
 package fsutil
 
 import (
