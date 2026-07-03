@@ -1,0 +1,4 @@
+# helm repo add <name> <url> for each entry below.
+repositories:
+  - name: gatekeeper
+    url: https://open-policy-agent.github.io/gatekeeper/charts
