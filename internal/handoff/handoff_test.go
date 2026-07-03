@@ -123,6 +123,21 @@ func TestFleet(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(parent, "no-handoffs-repo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// broken-repo: docs/handoffs is a regular FILE, so List's os.ReadDir
+	// fails ENOTDIR — a real (non-NotExist) error, unlike no-handoffs-repo
+	// which exercises the ok=false path. Fleet must skip it silently via
+	// its err != nil branch, not fail the whole scan.
+	if err := os.MkdirAll(filepath.Join(parent, "broken-repo", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "broken-repo", "docs", "handoffs"), []byte("not a dir\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Guard: the fixture must produce a real List error, or this case would
+	// silently degrade into a duplicate of the ok=false path above.
+	if _, err := List(filepath.Join(parent, "broken-repo")); err == nil {
+		t.Fatal("fixture broken: List on broken-repo must error (ENOTDIR)")
+	}
 	rows, err := Fleet(parent)
 	if err != nil {
 		t.Fatal(err)
