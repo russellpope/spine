@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -297,6 +298,34 @@ func TestAdoptEndToEnd(t *testing.T) {
 	code, out, _ = runCmd(t, "adopt", "--dir", dir, "--json")
 	if code != 0 || !strings.Contains(out, `"profile":"go-service"`) {
 		t.Fatalf("json: code=%d out=%q", code, out)
+	}
+}
+
+// I1: adopt --json in a pending state must emit ONLY the JSON payload — no
+// trailing "rerun with --write to apply" prose corrupting the stream — and
+// the payload itself must carry the pending-ness that the exit code used to
+// be the only signal for.
+func TestAdoptJSONNoTrailingProse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCmd(t, "adopt", "--dir", dir, "--json")
+	if code != 1 {
+		t.Fatalf("want exit 1 (pending), got %d out=%q", code, out)
+	}
+	dec := json.NewDecoder(strings.NewReader(out))
+	var payload struct {
+		Pending bool `json:"pending"`
+	}
+	if err := dec.Decode(&payload); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\nout=%q", err, out)
+	}
+	if dec.More() {
+		t.Fatalf("trailing content after JSON payload: out=%q", out)
+	}
+	if !payload.Pending {
+		t.Errorf("payload.pending = false, want true (adopt is pending)")
 	}
 }
 

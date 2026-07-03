@@ -551,7 +551,8 @@ func cmdAdopt(args []string, stdout, stderr io.Writer) int {
 			Dirs    []string   `json:"dirs"`
 			Files   []fileJSON `json:"files"`
 			Infos   []infoJSON `json:"infos"`
-		}{Profile: res.Profile, Dirs: res.DirsToCreate, Files: []fileJSON{}, Infos: []infoJSON{}}
+			Pending bool       `json:"pending"`
+		}{Profile: res.Profile, Dirs: res.DirsToCreate, Files: []fileJSON{}, Infos: []infoJSON{}, Pending: res.Pending()}
 		if payload.Dirs == nil {
 			payload.Dirs = []string{}
 		}
@@ -587,7 +588,9 @@ func cmdAdopt(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if !*write && res.Pending() {
-		fmt.Fprintln(stdout, "rerun with --write to apply")
+		if !*asJSON {
+			fmt.Fprintln(stdout, "rerun with --write to apply")
+		}
 		return 1
 	}
 	skipped := false

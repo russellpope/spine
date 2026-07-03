@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/scaffold"
@@ -136,9 +135,8 @@ func gatherInfos(dir string) []Info {
 			}
 		}
 		sort.Strings(unknown)
-		if len(unknown) > 0 {
-			infos = append(infos, Info{Path: strings.Join(unknown, ", "),
-				Message: "not spine's — left alone"})
+		for _, u := range unknown {
+			infos = append(infos, Info{Path: u, Message: "not spine's — left alone"})
 		}
 	}
 	return infos

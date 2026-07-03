@@ -122,6 +122,43 @@ func TestAdoptPreservesHandAuthoredADRReadme(t *testing.T) {
 	}
 }
 
+// I1: multiple unrecognized docs/ entries must each get their own Info
+// (path + message), not one comma-joined path — comma-joining defeats any
+// consumer that keys on Info.Path for a single entry.
+func TestAdoptUnknownDocsDirsEachGetOwnInfo(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"go.mod":                     "module demo\n",
+		"docs/decisions/nonce.md":    "x\n",
+		"docs/legacy-notes/nonce.md": "x\n",
+	})
+	res, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotDecisions, gotLegacy bool
+	for _, i := range res.Infos {
+		if i.Path == "docs/decisions" {
+			gotDecisions = true
+			if !strings.Contains(i.Message, "not spine's") {
+				t.Errorf("docs/decisions message = %q", i.Message)
+			}
+		}
+		if i.Path == "docs/legacy-notes" {
+			gotLegacy = true
+			if !strings.Contains(i.Message, "not spine's") {
+				t.Errorf("docs/legacy-notes message = %q", i.Message)
+			}
+		}
+		if strings.Contains(i.Path, ",") {
+			t.Errorf("Info.Path must be a single entry, got comma-joined: %q", i.Path)
+		}
+	}
+	if !gotDecisions || !gotLegacy {
+		t.Fatalf("want separate infos for both unknown dirs, got %#v", res.Infos)
+	}
+}
+
 func TestAdoptUndetectableErrors(t *testing.T) {
 	if _, err := Run(Options{Dir: t.TempDir()}); err == nil {
 		t.Fatal("want detection error")
