@@ -234,6 +234,22 @@ func TestLegacyADRNoFrontMatterD6Info(t *testing.T) {
 	}
 }
 
+func TestD1ProfileAwareKnowledge(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "knowledge", "vault"); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range findings {
+		if f.ID == "D1" {
+			t.Errorf("unexpected D1 on fresh knowledge repo: %+v", f)
+		}
+	}
+}
+
 func TestADRProblemsD6(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {

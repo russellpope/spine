@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/russellpope/spine/internal/adr"
+	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
 )
 
@@ -21,13 +22,22 @@ type Finding struct {
 	Message  string `json:"message"`
 }
 
-var required = []string{
-	"WORKFLOW.md", "CLAUDE.md", "docs/harness-interface.md",
-	"docs/specs", "docs/adr", "docs/issues", "docs/handoffs",
-}
-
 // Run executes all checks. It never writes.
 func Run(dir string) ([]Finding, error) {
+	required := []string{"WORKFLOW.md", "CLAUDE.md", "docs/harness-interface.md",
+		"docs/specs", "docs/adr", "docs/issues", "docs/handoffs"}
+	if raw, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md")); err == nil {
+		if p := update.ExtractKeys(string(raw))["profile"]; p != "" {
+			if _, _, err := tmpl.Defaults(p); err == nil {
+				required = []string{"WORKFLOW.md", "CLAUDE.md"}
+				required = append(required, tmpl.ProfileDirs(p)...)
+				if tmpl.ProfileOwns(p, "docs/harness-interface.md") {
+					required = append(required, "docs/harness-interface.md")
+				}
+			}
+		}
+	}
+
 	findings := []Finding{}
 	missingCore := false
 	for _, rel := range required {
