@@ -5,7 +5,9 @@
 package eval
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -66,14 +68,12 @@ func New(dir, title string) (string, error) {
 		return "", err
 	}
 	readme := filepath.Join(root, "README.md")
-	if _, err := os.Stat(readme); os.IsNotExist(err) {
-		raw, rerr := templates.FS.ReadFile("current/evals-README.md")
-		if rerr != nil {
-			return "", rerr
-		}
-		if werr := fsutil.WriteFileAtomic(readme, raw); werr != nil {
-			return "", werr
-		}
+	rawReadme, rerr := templates.FS.ReadFile("current/evals-README.md")
+	if rerr != nil {
+		return "", rerr
+	}
+	if werr := fsutil.WriteFileExclusive(readme, rawReadme); werr != nil && !errors.Is(werr, fs.ErrExist) {
+		return "", werr
 	}
 	raw, err := templates.FS.ReadFile("current/eval.tmpl.md")
 	if err != nil {
@@ -83,7 +83,10 @@ func New(dir, title string) (string, error) {
 		"{{EVAL_TITLE}}", title,
 		"{{EVAL_DATE}}", today,
 	).Replace(string(raw))
-	if err := fsutil.WriteFileAtomic(filepath.Join(evalDir, "eval.md"), []byte(content)); err != nil {
+	if err := fsutil.WriteFileExclusive(filepath.Join(evalDir, "eval.md"), []byte(content)); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return "", fmt.Errorf("%s already exists", evalDir)
+		}
 		return "", err
 	}
 	return evalDir, nil
@@ -135,13 +138,6 @@ func AddRun(dir, evalRef, name string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(runsDir, name+".md")
-	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("%s already exists", path)
-	} else if !os.IsNotExist(err) {
-		// Same never-overwrite guard as New's evalDir check above: a
-		// non-NotExist Stat error must not fall through to WriteFileAtomic.
-		return "", err
-	}
 	raw, err := templates.FS.ReadFile("current/run.tmpl.md")
 	if err != nil {
 		return "", err
@@ -150,7 +146,10 @@ func AddRun(dir, evalRef, name string) (string, error) {
 		"{{RUN_NAME}}", name,
 		"{{RUN_DATE}}", time.Now().Format("2006-01-02"),
 	).Replace(string(raw))
-	if err := fsutil.WriteFileAtomic(path, []byte(content)); err != nil {
+	if err := fsutil.WriteFileExclusive(path, []byte(content)); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return "", fmt.Errorf("%s already exists", path)
+		}
 		return "", err
 	}
 	return path, nil

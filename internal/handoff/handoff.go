@@ -3,7 +3,9 @@
 package handoff
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -55,14 +57,6 @@ func New(dir, topic string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(hdir, today+"-"+slug+".md")
-	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("%s already exists — pick a more specific topic", path)
-	} else if !os.IsNotExist(err) {
-		// A Stat failure that is not "absent" (EACCES, ELOOP, ...) must not
-		// fall through: WriteFileAtomic replaces the target unconditionally,
-		// which would break the never-overwrite contract.
-		return "", err
-	}
 	raw, err := templates.FS.ReadFile("current/handoff.tmpl.md")
 	if err != nil {
 		return "", err
@@ -71,7 +65,10 @@ func New(dir, topic string) (string, error) {
 		"{{HANDOFF_TITLE}}", topic,
 		"{{HANDOFF_DATE}}", today,
 	).Replace(string(raw))
-	if err := fsutil.WriteFileAtomic(path, []byte(content)); err != nil {
+	if err := fsutil.WriteFileExclusive(path, []byte(content)); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return "", fmt.Errorf("%s already exists — pick a more specific topic", path)
+		}
 		return "", err
 	}
 	return path, nil

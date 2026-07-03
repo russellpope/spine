@@ -149,3 +149,14 @@ func TestFleet(t *testing.T) {
 		t.Fatal("missing parent must error")
 	}
 }
+
+func TestNewSecondSameTopicSameDayFails(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, "same topic"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := New(dir, "same topic")
+	if err == nil || !strings.Contains(err.Error(), "already exists — pick a more specific topic") {
+		t.Fatalf("want already-exists error, got %v", err)
+	}
+}

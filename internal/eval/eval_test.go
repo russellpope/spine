@@ -95,3 +95,18 @@ func TestListFlagsMalformedRun(t *testing.T) {
 		t.Fatalf("problems=%v err=%v", problems, err)
 	}
 }
+
+func TestAddRunSecondSameNameFails(t *testing.T) {
+	dir := t.TempDir()
+	evalDir, err := New(dir, "collision eval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AddRun(dir, filepath.Base(evalDir), "run1"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = AddRun(dir, filepath.Base(evalDir), "run1")
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("want already-exists error, got %v", err)
+	}
+}

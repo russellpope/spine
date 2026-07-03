@@ -3,7 +3,9 @@
 package adr
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -136,7 +138,10 @@ func New(dir, title string, supersedes int) (string, error) {
 		"{{ADR_SUPERSEDES}}", sup,
 	).Replace(string(raw))
 	path := filepath.Join(dir, "docs", "adr", id+"-"+slug+".md")
-	if err := fsutil.WriteFileAtomic(path, []byte(content)); err != nil {
+	if err := fsutil.WriteFileExclusive(path, []byte(content)); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return "", fmt.Errorf("%s already exists — a concurrent adr new likely took id %s; re-run", path, id)
+		}
 		return "", err
 	}
 	if target != nil {
