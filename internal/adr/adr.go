@@ -74,7 +74,15 @@ func parseFrontMatter(content string) (title, status string, hasFrontMatter bool
 	if !has {
 		return "", "", false
 	}
-	return kv["title"], kv["status"], true
+	title = kv["title"]
+	// Gen-3 templates YAML-quote the title (strconv.Quote in New). Unquote
+	// for display; unquoted pre-gen-3 titles pass through verbatim.
+	if len(title) >= 2 && title[0] == '"' && title[len(title)-1] == '"' {
+		if u, err := strconv.Unquote(title); err == nil {
+			title = u
+		}
+	}
+	return title, kv["status"], true
 }
 
 // New writes the next-numbered ADR; supersedes > 0 also flips that ADR's
@@ -128,11 +136,12 @@ func New(dir, title string, supersedes int) (string, error) {
 	}
 	sup := ""
 	if supersedes > 0 {
-		sup = fmt.Sprintf("\nsupersedes: %04d", supersedes)
+		sup = fmt.Sprintf("\nsupersedes: %q", fmt.Sprintf("%04d", supersedes))
 	}
 	id := fmt.Sprintf("%04d", next)
 	content := strings.NewReplacer(
 		"{{ADR_ID}}", id,
+		"{{ADR_TITLE_YAML}}", strconv.Quote(title),
 		"{{ADR_TITLE}}", title,
 		"{{ADR_DATE}}", time.Now().Format("2006-01-02"),
 		"{{ADR_SUPERSEDES}}", sup,

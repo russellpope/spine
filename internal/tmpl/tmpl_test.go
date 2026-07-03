@@ -7,9 +7,9 @@ import (
 	"github.com/russellpope/spine/internal/tmpl"
 )
 
-func TestVersionIsOne(t *testing.T) {
-	if got := tmpl.Version(); got != 2 {
-		t.Fatalf("Version() = %d, want 2", got)
+func TestVersionMatchesCurrentGeneration(t *testing.T) {
+	if got := tmpl.Version(); got != 3 {
+		t.Fatalf("Version() = %d, want 3", got)
 	}
 }
 

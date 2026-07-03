@@ -3,6 +3,7 @@ package adr_test
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestNewNumbersFromOne(t *testing.T) {
 		t.Fatalf("path = %s", path)
 	}
 	raw, _ := os.ReadFile(path)
-	for _, want := range []string{"id: 0001", "title: Go with stdlib only", "status: Accepted",
+	for _, want := range []string{`id: "0001"`, `title: "Go with stdlib only"`, "status: Accepted",
 		"# 0001: Go with stdlib only", "## Decision"} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("missing %q in:\n%s", want, raw)
@@ -73,7 +74,7 @@ func TestSupersedeFlipsStatus(t *testing.T) {
 		t.Errorf("new ADR status = %q", entries[1].Status)
 	}
 	raw2, _ := os.ReadFile(filepath.Join(dir, "docs", "adr", "0002-new-way.md"))
-	if !strings.Contains(string(raw2), "supersedes: 0001") {
+	if !strings.Contains(string(raw2), `supersedes: "0001"`) {
 		t.Errorf("new ADR missing supersedes line:\n%s", raw2)
 	}
 }
@@ -217,5 +218,59 @@ func TestSupersedeValidatesBeforeWriting(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "Superseded") {
 		t.Fatalf("target must be untouched when validation fails:\n%s", raw)
+	}
+}
+
+func TestNewQuotesFrontMatterScalars(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	title := `spine v3: the "sweep" release`
+	path, err := adr.New(dir, title, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if !strings.Contains(s, "\nid: \"0001\"\n") {
+		t.Errorf("id not quoted:\n%s", s)
+	}
+	if !strings.Contains(s, "\ntitle: "+strconv.Quote(title)+"\n") {
+		t.Errorf("title not quoted/escaped:\n%s", s)
+	}
+	if !strings.Contains(s, "# 0001: "+title+"\n") {
+		t.Errorf("body H1 must keep the raw title:\n%s", s)
+	}
+	entries, err := adr.List(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries=%v err=%v", entries, err)
+	}
+	if entries[0].Title != title {
+		t.Errorf("display Title = %q, want unquoted %q", entries[0].Title, title)
+	}
+}
+
+func TestNewQuotesSupersedes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adr.New(dir, "first", 0); err != nil {
+		t.Fatal(err)
+	}
+	path, err := adr.New(dir, "second", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "\nsupersedes: \"0001\"\n") {
+		t.Errorf("supersedes not quoted (octal quirk lives):\n%s", raw)
 	}
 }

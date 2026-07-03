@@ -1,6 +1,6 @@
 ---
-id: {{ADR_ID}}
-title: {{ADR_TITLE}}
+id: "{{ADR_ID}}"
+title: {{ADR_TITLE_YAML}}
 status: Accepted
 date: {{ADR_DATE}}{{ADR_SUPERSEDES}}
 ---
