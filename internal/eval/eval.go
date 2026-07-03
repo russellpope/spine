@@ -173,7 +173,11 @@ func List(dir string) ([]Eval, []Problem, error) {
 			continue
 		}
 		e := Eval{Name: de.Name(), Path: filepath.Join(root, de.Name())}
-		problems = append(problems, checkDoc(filepath.Join(e.Path, "eval.md"), evalKeys)...)
+		probs, err := checkDoc(filepath.Join(e.Path, "eval.md"), evalKeys)
+		if err != nil {
+			return nil, nil, err
+		}
+		problems = append(problems, probs...)
 		runsDir := filepath.Join(e.Path, "runs")
 		rdes, err := os.ReadDir(runsDir)
 		if err != nil && !os.IsNotExist(err) {
@@ -205,13 +209,16 @@ func List(dir string) ([]Eval, []Problem, error) {
 	return evals, problems, nil
 }
 
-func checkDoc(path string, keys []string) []Problem {
+func checkDoc(path string, keys []string) ([]Problem, error) {
 	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return []Problem{{Path: path, Message: "missing eval.md"}}, nil
+	}
 	if err != nil {
-		return []Problem{{Path: path, Message: "missing eval.md"}}
+		return nil, err
 	}
 	kv, has := meta.Parse(string(raw))
-	return checkKeys(path, kv, has, keys)
+	return checkKeys(path, kv, has, keys), nil
 }
 
 func checkKeys(path string, kv map[string]string, has bool, keys []string) []Problem {

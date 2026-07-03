@@ -110,3 +110,19 @@ func TestAddRunSecondSameNameFails(t *testing.T) {
 		t.Fatalf("want already-exists error, got %v", err)
 	}
 }
+
+func TestListSurfacesEvalDocReadError(t *testing.T) {
+	dir := t.TempDir()
+	evalDir := filepath.Join(dir, "docs", "evals", "2026-07-03-loop")
+	if err := os.MkdirAll(filepath.Join(evalDir, "runs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Self-referential symlink: ReadFile fails ELOOP — a read error, not absence.
+	if err := os.Symlink("eval.md", filepath.Join(evalDir, "eval.md")); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := List(dir)
+	if err == nil {
+		t.Fatal("want read error surfaced, got nil (was mislabeled 'missing eval.md')")
+	}
+}

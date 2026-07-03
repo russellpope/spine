@@ -100,12 +100,16 @@ func Run(opts Options) ([]FileReport, error) {
 	}
 	// docs/evals/README.md is opt-in machine-owned: managed only where the
 	// convention is in use (the directory exists); never created by init/adopt.
-	if fi, err := os.Stat(filepath.Join(opts.Dir, "docs", "evals")); err == nil && fi.IsDir() {
+	fi, err := os.Stat(filepath.Join(opts.Dir, "docs", "evals"))
+	switch {
+	case err == nil && fi.IsDir():
 		r, err := planSimple(opts.Dir, gen, "evals-README.md", "docs/evals/README.md", false, vals)
 		if err != nil {
 			return nil, err
 		}
 		reports = append(reports, r)
+	case err != nil && !os.IsNotExist(err):
+		return nil, err
 	}
 	// policy: unrecognized edits skip the file unless --force; files with no
 	// regenerable content (nil newContent) stay skipped regardless. The one

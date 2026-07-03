@@ -95,10 +95,12 @@ func List(dir string) ([]Entry, error) {
 			continue
 		}
 		e := Entry{Date: d, Topic: topic, Title: topic, Path: filepath.Join(hdir, de.Name())}
-		if raw, err := os.ReadFile(e.Path); err == nil {
-			if kv, has := meta.Parse(string(raw)); has && kv["title"] != "" {
-				e.Title = kv["title"]
-			}
+		raw, err := os.ReadFile(e.Path)
+		if err != nil {
+			return nil, err
+		}
+		if kv, has := meta.Parse(string(raw)); has && kv["title"] != "" {
+			e.Title = kv["title"]
 		}
 		out = append(out, e)
 	}

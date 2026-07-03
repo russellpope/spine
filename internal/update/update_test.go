@@ -417,3 +417,26 @@ func TestVersionDowngradeGuard(t *testing.T) {
 		t.Fatalf("want error mentioning generation, got %v", err)
 	}
 }
+
+func TestRunSurfacesEvalsDirStatError(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"WORKFLOW.md", "CLAUDE.md"} {
+		raw, err := os.ReadFile(filepath.Join("testdata", "ccq", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// docs/evals as a symlink loop: Stat fails with ELOOP, not ENOENT.
+	if err := os.Symlink("evals", filepath.Join(dir, "docs", "evals")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(Options{Dir: dir}); err == nil {
+		t.Fatal("want Stat error surfaced, got nil (silently skipped evals-README before v3)")
+	}
+}

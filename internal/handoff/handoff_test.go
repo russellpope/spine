@@ -160,3 +160,19 @@ func TestNewSecondSameTopicSameDayFails(t *testing.T) {
 		t.Fatalf("want already-exists error, got %v", err)
 	}
 }
+
+func TestListSurfacesHandoffReadError(t *testing.T) {
+	dir := t.TempDir()
+	hdir := filepath.Join(dir, "docs", "handoffs")
+	if err := os.MkdirAll(hdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "2026-07-03-loop.md"
+	if err := os.Symlink(name, filepath.Join(hdir, name)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := List(dir)
+	if err == nil {
+		t.Fatal("want read error surfaced, got nil (Title silently degraded before v3)")
+	}
+}
