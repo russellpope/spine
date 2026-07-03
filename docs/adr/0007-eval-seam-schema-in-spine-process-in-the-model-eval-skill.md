@@ -1,11 +1,11 @@
 ---
 id: 0007
-title: eval seam: schema in spine, process in the model-eval skill
+title: eval seam — schema in spine, process in the model-eval skill
 status: Accepted
 date: 2026-07-02
 ---
 
-# 0007: eval seam: schema in spine, process in the model-eval skill
+# 0007: eval seam — schema in spine, process in the model-eval skill
 
 ## Context
 

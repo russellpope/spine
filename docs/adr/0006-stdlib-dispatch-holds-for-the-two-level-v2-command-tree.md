@@ -10,9 +10,11 @@ date: 2026-07-02
 ## Context
 
 ADR 0001 kept spine on stdlib-only map-based dispatch and flagged one reconsider-trigger: v2
-growing nested command trees. v2 landed exactly that growth — `adopt`, `handoff`, and `eval` —
-so the trigger fired and dispatch needed a real look, not a rubber stamp. The question was
-whether the resulting tree actually needs cobra, or whether stdlib dispatch still holds it.
+growing nested command trees. v2 grew the command surface with `adopt`, `handoff`, and `eval`,
+and two of those — `handoff` and `eval` — are two-level trees (`adopt` stays flat and
+flag-driven, per ADR 0008). That nesting fired the trigger, so dispatch needed a real look,
+not a rubber stamp: does the resulting tree actually need cobra, or does stdlib dispatch
+still hold it?
 
 ## Decision
 
