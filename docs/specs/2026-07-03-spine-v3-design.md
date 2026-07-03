@@ -1,7 +1,7 @@
 ---
 title: spine v3 design — ledger sweep + gen-3 template batch
 created: 2026-07-03
-status: draft — awaiting Russell's review
+status: approved (Russell, 2026-07-03)
 ---
 
 # spine v3 — ledger sweep + gen-3 template batch
