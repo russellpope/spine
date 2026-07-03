@@ -122,3 +122,37 @@ func Latest(dir string) (Entry, bool, error) {
 	}
 	return entries[0], true, nil
 }
+
+// FleetEntry is one repo's latest handoff in a --fleet scan.
+type FleetEntry struct {
+	Repo string
+	Entry
+}
+
+// Fleet scans every immediate child dir of parent for docs/handoffs and
+// returns each repo's latest handoff, newest first (repo name as tiebreak).
+// Children without handoffs are silently skipped; a missing parent errors.
+func Fleet(parent string) ([]FleetEntry, error) {
+	des, err := os.ReadDir(parent)
+	if err != nil {
+		return nil, err
+	}
+	var out []FleetEntry
+	for _, de := range des {
+		if !de.IsDir() || strings.HasPrefix(de.Name(), ".") {
+			continue
+		}
+		e, ok, err := Latest(filepath.Join(parent, de.Name()))
+		if err != nil || !ok {
+			continue
+		}
+		out = append(out, FleetEntry{Repo: de.Name(), Entry: e})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].Date.Equal(out[j].Date) {
+			return out[i].Date.After(out[j].Date)
+		}
+		return out[i].Repo < out[j].Repo
+	})
+	return out, nil
+}

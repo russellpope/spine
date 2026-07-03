@@ -206,3 +206,22 @@ func TestHandoffEndToEnd(t *testing.T) {
 		t.Fatalf("latest on empty repo: want exit 1, got %d", code)
 	}
 }
+
+func TestHandoffFleet(t *testing.T) {
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "demo")
+	if err := os.MkdirAll(filepath.Join(repo, "docs", "handoffs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "docs", "handoffs", "2026-07-01-x.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCmd(t, "handoff", "latest", "--fleet", parent)
+	if code != 0 || !strings.Contains(out, "demo") {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+	code, _, _ = runCmd(t, "handoff", "latest", "--fleet", filepath.Join(parent, "nope"))
+	if code != 2 {
+		t.Fatalf("want 2, got %d", code)
+	}
+}

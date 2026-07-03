@@ -106,3 +106,31 @@ func TestListMissingDirIsEmpty(t *testing.T) {
 		t.Fatalf("want nil,nil got %v,%v", entries, err)
 	}
 }
+
+func TestFleet(t *testing.T) {
+	parent := t.TempDir()
+	mk := func(repo, name string) {
+		p := filepath.Join(parent, repo, "docs", "handoffs")
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(p, name), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("alpha", "2026-07-01-older.md")
+	mk("beta", "2026-07-02-newer.md")
+	if err := os.MkdirAll(filepath.Join(parent, "no-handoffs-repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := Fleet(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Repo != "beta" || rows[1].Repo != "alpha" {
+		t.Fatalf("rows=%v", rows)
+	}
+	if _, err := Fleet(filepath.Join(parent, "does-not-exist")); err == nil {
+		t.Fatal("missing parent must error")
+	}
+}

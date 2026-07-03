@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/doctor"
@@ -277,7 +278,7 @@ func cmdHandoffLatest(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *fleet != "" {
-		return handoffFleet(*fleet, *asJSON, stdout, stderr) // Task 8
+		return handoffFleet(*fleet, *asJSON, stdout, stderr)
 	}
 	e, ok, err := handoff.Latest(*dir)
 	if err != nil {
@@ -300,8 +301,39 @@ func cmdHandoffLatest(args []string, stdout, stderr io.Writer) int {
 }
 
 func handoffFleet(parent string, asJSON bool, stdout, stderr io.Writer) int {
-	fmt.Fprintln(stderr, "handoff latest --fleet: not implemented yet")
-	return 2
+	rows, err := handoff.Fleet(parent)
+	if err != nil {
+		fmt.Fprintln(stderr, "handoff latest --fleet:", err)
+		return 2
+	}
+	if asJSON {
+		type row struct {
+			Repo string `json:"repo"`
+			handoffJSON
+			AgeDays int `json:"age_days"`
+		}
+		out := make([]row, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, row{Repo: r.Repo, handoffJSON: handoffToJSON(r.Entry), AgeDays: ageDays(r.Date)})
+		}
+		if err := json.NewEncoder(stdout).Encode(out); err != nil {
+			fmt.Fprintln(stderr, "handoff latest --fleet:", err)
+			return 2
+		}
+		return 0
+	}
+	for _, r := range rows {
+		fmt.Fprintf(stdout, "%-24s %4dd  %s\n", r.Repo, ageDays(r.Date), r.Path)
+	}
+	return 0
+}
+
+func ageDays(d time.Time) int {
+	age := int(time.Since(d).Hours() / 24)
+	if age < 0 {
+		return 0
+	}
+	return age
 }
 
 func cmdDoctor(args []string, stdout, stderr io.Writer) int {
