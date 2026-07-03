@@ -6,6 +6,30 @@ import (
 	"path/filepath"
 )
 
+// writeTemp stages data in a temp file in dir, mode 0644, ready for an
+// atomic commit (rename or link). On any error the temp file is removed.
+func writeTemp(dir string, data []byte) (string, error) {
+	tmp, err := os.CreateTemp(dir, ".spine-*")
+	if err != nil {
+		return "", err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return "", err
+	}
+	if err := os.Chmod(name, 0o644); err != nil {
+		os.Remove(name)
+		return "", err
+	}
+	return name, nil
+}
+
 // WriteFileAtomic writes data via temp-file + rename in the same directory,
 // so a crash never leaves a partial file. The rename has POSIX rename(2)
 // semantics: if path is a symlink, the link itself is replaced (not the
@@ -14,22 +38,8 @@ import (
 // pre-existing file's mode at path.
 func WriteFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".spine-*")
+	name, err := writeTemp(dir, data)
 	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(name)
-		return err
-	}
-	if err := os.Chmod(name, 0o644); err != nil {
-		os.Remove(name)
 		return err
 	}
 	if err := os.Rename(name, path); err != nil {
@@ -47,22 +57,8 @@ func WriteFileAtomic(path string, data []byte) error {
 // message. Mode is normalized to 0644, matching WriteFileAtomic.
 func WriteFileExclusive(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".spine-*")
+	name, err := writeTemp(dir, data)
 	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(name)
-		return err
-	}
-	if err := os.Chmod(name, 0o644); err != nil {
-		os.Remove(name)
 		return err
 	}
 	if err := os.Link(name, path); err != nil {
