@@ -2,6 +2,7 @@ package scaffold_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -97,5 +98,93 @@ func TestInitIdempotent(t *testing.T) {
 func TestInitUnknownProfile(t *testing.T) {
 	if _, err := scaffold.Init(t.TempDir(), "nope", ""); err == nil {
 		t.Fatal("want error for unknown profile")
+	}
+}
+
+func TestDetectNewProfiles(t *testing.T) {
+	mk := func(t *testing.T, paths ...string) string {
+		dir := t.TempDir()
+		for _, p := range paths {
+			full := filepath.Join(dir, p)
+			if strings.HasSuffix(p, "/") {
+				if err := os.MkdirAll(full, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		return dir
+	}
+	cases := []struct {
+		name, want string
+		paths      []string
+	}{
+		{"package-swift", "swift", []string{"Package.swift"}},
+		{"xcodeproj", "swift", []string{"App.xcodeproj/"}},
+		{"ansible-cfg", "infra", []string{"ansible/ansible.cfg"}},
+		{"ansible-playbooks", "infra", []string{"ansible/playbooks/"}},
+		{"helm", "infra", []string{"helm/"}},
+		{"terraform", "infra", []string{"terraform/"}},
+		{"k8s", "infra", []string{"k8s/"}},
+		{"obsidian", "knowledge", []string{".obsidian/"}},
+		{"code-beats-infra", "go-service", []string{"go.mod", "ansible/ansible.cfg"}},
+		{"infra-beats-knowledge", "infra", []string{"helm/", ".obsidian/"}},
+	}
+	for _, c := range cases {
+		got, ok := scaffold.DetectProfile(mk(t, c.paths...))
+		if !ok || got != c.want {
+			t.Errorf("%s: got %q,%v want %q", c.name, got, ok, c.want)
+		}
+	}
+}
+
+func TestDetectKnowledgeByMdMajority(t *testing.T) {
+	dir := t.TempDir()
+	files := []string{"a.md", "b.md", "c.md", "d.md", "notes/e.md", "x.txt"}
+	for _, f := range files {
+		full := filepath.Join(dir, f)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("git unavailable: %v %s", err, out)
+		}
+	}
+	got, ok := scaffold.DetectProfile(dir)
+	if !ok || got != "knowledge" {
+		t.Fatalf("got %q,%v want knowledge", got, ok)
+	}
+}
+
+func TestInitKnowledgeManifest(t *testing.T) {
+	dir := t.TempDir()
+	res, err := scaffold.Init(dir, "knowledge", "vault")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range res.Created {
+		if f == "docs/harness-interface.md" || f == "docs/issues/README.md" {
+			t.Errorf("knowledge must not create %s", f)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "docs", "specs")); !os.IsNotExist(err) {
+		t.Error("knowledge must not create docs/specs")
+	}
+	for _, rel := range []string{"WORKFLOW.md", "CLAUDE.md", "docs/adr/README.md", "docs/adr", "docs/handoffs"} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Errorf("missing %s: %v", rel, err)
+		}
 	}
 }

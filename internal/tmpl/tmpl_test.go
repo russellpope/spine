@@ -64,7 +64,41 @@ func TestDefaults(t *testing.T) {
 	if _, _, err := tmpl.Defaults("nope"); err == nil {
 		t.Fatal("unknown profile should error")
 	}
-	if len(tmpl.Profiles()) != 6 {
-		t.Fatalf("Profiles() = %v, want 6 entries", tmpl.Profiles())
+	if len(tmpl.Profiles()) != 9 {
+		t.Fatalf("Profiles() = %v, want 9 entries", tmpl.Profiles())
+	}
+}
+
+func TestNewProfileDefaults(t *testing.T) {
+	cases := map[string][2]string{
+		"swift":     {"swift-reviewer, security-review", "framebuffer"},
+		"infra":     {"security-review", "none"},
+		"knowledge": {"", "none"},
+	}
+	for p, want := range cases {
+		rev, harness, err := tmpl.Defaults(p)
+		if err != nil || rev != want[0] || harness != want[1] {
+			t.Errorf("Defaults(%q) = %q,%q,%v", p, rev, harness, err)
+		}
+	}
+}
+
+func TestProfileManifest(t *testing.T) {
+	if d := tmpl.ProfileDirs("knowledge"); len(d) != 2 || d[0] != "docs/adr" || d[1] != "docs/handoffs" {
+		t.Fatalf("knowledge dirs=%v", d)
+	}
+	if d := tmpl.ProfileDirs("go-service"); len(d) != 4 {
+		t.Fatalf("go-service dirs=%v", d)
+	}
+	for _, rel := range []string{"docs/harness-interface.md", "docs/issues/README.md", "docs/issues/_template.md"} {
+		if tmpl.ProfileOwns("knowledge", rel) {
+			t.Errorf("knowledge should not own %s", rel)
+		}
+		if !tmpl.ProfileOwns("swift", rel) {
+			t.Errorf("swift should own %s", rel)
+		}
+	}
+	if !tmpl.ProfileOwns("knowledge", "WORKFLOW.md") || !tmpl.ProfileOwns("knowledge", "CLAUDE.md") || !tmpl.ProfileOwns("knowledge", "docs/adr/README.md") {
+		t.Error("knowledge must own WORKFLOW.md, CLAUDE.md, docs/adr/README.md")
 	}
 }

@@ -28,6 +28,9 @@ var profiles = map[string]profileDefaults{
 	"library-cli":  {"go-reviewer, python-reviewer", "cli"},
 	"presentation": {"", "none"},
 	"ui":           {"typescript-reviewer", "framebuffer"},
+	"swift":        {"swift-reviewer, security-review", "framebuffer"},
+	"infra":        {"security-review", "none"},
+	"knowledge":    {"", "none"},
 }
 
 // Profiles lists the known profile names, sorted.
@@ -64,6 +67,28 @@ func Version() int {
 		panic("templates/VERSION must be a positive integer")
 	}
 	return n
+}
+
+// ProfileDirs is the directory set init/adopt create for a profile.
+// knowledge repos center on decisions + handoffs; specs/issues are opt-in.
+func ProfileDirs(profile string) []string {
+	if profile == "knowledge" {
+		return []string{"docs/adr", "docs/handoffs"}
+	}
+	return []string{"docs/specs", "docs/adr", "docs/issues", "docs/handoffs"}
+}
+
+// ProfileOwns reports whether a machine-owned file belongs to the profile's
+// manifest. knowledge has no build/test harness and no issue ledger.
+func ProfileOwns(profile, relPath string) bool {
+	if profile != "knowledge" {
+		return true
+	}
+	switch relPath {
+	case "docs/harness-interface.md", "docs/issues/README.md", "docs/issues/_template.md":
+		return false
+	}
+	return true
 }
 
 // Render fills placeholders in templates/<gen>/<name>; gen is "current" or "gen0".

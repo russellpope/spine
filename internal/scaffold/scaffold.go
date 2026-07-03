@@ -5,6 +5,7 @@ package scaffold
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -28,11 +29,17 @@ var Files = []struct{ TmplName, RelPath string }{
 	{"adr-README.md", "docs/adr/README.md"},
 }
 
-// DetectProfile inspects dir and returns a profile when signals are unambiguous.
+// DetectProfile inspects dir and returns a profile when signals are
+// unambiguous. Precedence: code signals, then infra, then knowledge — a repo
+// with go.mod AND ansible/ is a go service that carries some automation.
 func DetectProfile(dir string) (string, bool) {
 	has := func(name string) bool {
 		_, err := os.Stat(filepath.Join(dir, name))
 		return err == nil
+	}
+	hasDir := func(name string) bool {
+		fi, err := os.Stat(filepath.Join(dir, name))
+		return err == nil && fi.IsDir()
 	}
 	switch {
 	case has("Cargo.toml"):
@@ -41,6 +48,8 @@ func DetectProfile(dir string) (string, bool) {
 		return "go-service", true
 	case has("pyproject.toml"), has("setup.py"):
 		return "py-tool", true
+	case has("Package.swift"):
+		return "swift", true
 	}
 	for _, pat := range []string{"*.pptx", "*.key"} {
 		if m, _ := filepath.Glob(filepath.Join(dir, pat)); len(m) > 0 {
@@ -55,7 +64,39 @@ func DetectProfile(dir string) (string, bool) {
 			}
 		}
 	}
+	if m, _ := filepath.Glob(filepath.Join(dir, "*.xcodeproj")); len(m) > 0 {
+		return "swift", true
+	}
+	// infra signals live one level below root (the home-lab-admin lesson).
+	if has(filepath.Join("ansible", "ansible.cfg")) || hasDir(filepath.Join("ansible", "playbooks")) ||
+		hasDir("helm") || hasDir("terraform") || hasDir("k8s") {
+		return "infra", true
+	}
+	if hasDir(".obsidian") || mdMajority(dir) {
+		return "knowledge", true
+	}
 	return "", false
+}
+
+// mdMajority reports whether ≥80% of git-tracked files are .md. Repos
+// without git (or with nothing tracked) never qualify — .obsidian is then
+// the only knowledge signal.
+func mdMajority(dir string) bool {
+	out, err := exec.Command("git", "-C", dir, "ls-files").Output()
+	if err != nil {
+		return false
+	}
+	var md, total int
+	for _, f := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if f == "" {
+			continue
+		}
+		total++
+		if strings.HasSuffix(strings.ToLower(f), ".md") {
+			md++
+		}
+	}
+	return total > 0 && md*100 >= total*80
 }
 
 // Init scaffolds dir with the current-generation file set; existing files are
@@ -72,7 +113,7 @@ func Init(dir, profile, name string) (Result, error) {
 		}
 		name = filepath.Base(abs)
 	}
-	for _, d := range []string{"docs/specs", "docs/adr", "docs/issues", "docs/handoffs"} {
+	for _, d := range tmpl.ProfileDirs(profile) {
 		target := filepath.Join(dir, d)
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return Result{}, fmt.Errorf("mkdir %s: %w", target, err)
@@ -81,6 +122,9 @@ func Init(dir, profile, name string) (Result, error) {
 	v := tmpl.Values{Project: name, Profile: profile, Reviewers: reviewers, Harness: harness, Version: tmpl.Version()}
 	var res Result
 	for _, f := range Files {
+		if !tmpl.ProfileOwns(profile, f.RelPath) {
+			continue
+		}
 		dst := filepath.Join(dir, f.RelPath)
 		if _, err := os.Stat(dst); err == nil {
 			res.Skipped = append(res.Skipped, f.RelPath)
