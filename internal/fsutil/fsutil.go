@@ -38,3 +38,37 @@ func WriteFileAtomic(path string, data []byte) error {
 	}
 	return nil
 }
+
+// WriteFileExclusive writes data to path only if path does not already
+// exist. The content lands via temp-file + link(2), so the create is atomic
+// and a crash never leaves a partial file at path. Any pre-existing path —
+// regular file, directory, or symlink (even dangling) — fails with an error
+// satisfying errors.Is(err, fs.ErrExist); callers own the user-facing
+// message. Mode is normalized to 0644, matching WriteFileAtomic.
+func WriteFileExclusive(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".spine-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Chmod(name, 0o644); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Link(name, path); err != nil {
+		os.Remove(name)
+		return err
+	}
+	os.Remove(name)
+	return nil
+}
