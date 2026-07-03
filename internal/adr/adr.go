@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/russellpope/spine/internal/fsutil"
+	"github.com/russellpope/spine/internal/meta"
 	"github.com/russellpope/spine/templates"
 )
 
@@ -57,26 +58,6 @@ func List(dir string) ([]Entry, error) {
 	return out, nil
 }
 
-// frontMatterBounds returns the line indices of the first "---" ... "---"
-// block: start is the opening fence, end is the closing fence. Returns
-// -1, -1 if no such block exists (e.g. pre-spine, hand-rolled ADRs that
-// predate spine's front-matter convention).
-func frontMatterBounds(lines []string) (start, end int) {
-	start, end = -1, -1
-	for i, line := range lines {
-		if line != "---" {
-			continue
-		}
-		if start == -1 {
-			start = i
-			continue
-		}
-		end = i
-		break
-	}
-	return start, end
-}
-
 // parseFrontMatter reads title/status only from the front-matter block: the
 // lines strictly between the first line that is exactly "---" and the next
 // line that is exactly "---". Within that block the first matching
@@ -87,24 +68,11 @@ func frontMatterBounds(lines []string) (start, end int) {
 // with no such block get empty title/status and hasFrontMatter=false, which
 // callers must treat as "not applicable" rather than "invalid".
 func parseFrontMatter(content string) (title, status string, hasFrontMatter bool) {
-	lines := strings.Split(content, "\n")
-	start, end := frontMatterBounds(lines)
-	if start == -1 || end == -1 {
+	kv, has := meta.Parse(content)
+	if !has {
 		return "", "", false
 	}
-	for _, line := range lines[start+1 : end] {
-		if title == "" {
-			if t, ok := strings.CutPrefix(line, "title: "); ok {
-				title = strings.TrimSpace(t)
-			}
-		}
-		if status == "" {
-			if s, ok := strings.CutPrefix(line, "status: "); ok {
-				status = strings.TrimSpace(s)
-			}
-		}
-	}
-	return title, status, true
+	return kv["title"], kv["status"], true
 }
 
 // New writes the next-numbered ADR; supersedes > 0 also flips that ADR's
@@ -113,7 +81,7 @@ func New(dir, title string, supersedes int) (string, error) {
 	if strings.ContainsAny(title, "\n\r") {
 		return "", fmt.Errorf("title %q contains a newline, which would inject fake front matter", title)
 	}
-	slug := slugify(title)
+	slug := meta.Slugify(title)
 	if slug == "" {
 		return "", fmt.Errorf("title %q produces an empty slug — use at least one ASCII letter or digit", title)
 	}
@@ -182,28 +150,6 @@ func New(dir, title string, supersedes int) (string, error) {
 	return path, nil
 }
 
-// slugify lowercases s and keeps only ASCII letters/digits, collapsing every
-// other rune into a single '-' separator (trimmed at both ends). Non-ASCII
-// runes (e.g. CJK, accented letters) are not transliterated — they collapse
-// to separators just like punctuation, so this is lossy by design. A title
-// made entirely of non-ASCII or punctuation runes yields an empty string;
-// callers must treat that as invalid rather than writing "NNNN-.md".
-func slugify(s string) string {
-	s = strings.ToLower(s)
-	var b []rune
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b = append(b, r)
-		default:
-			if len(b) > 0 && b[len(b)-1] != '-' {
-				b = append(b, '-')
-			}
-		}
-	}
-	return strings.Trim(string(b), "-")
-}
-
 // flippedContent reads the ADR at path and returns its content with the
 // front-matter status line rewritten to "Superseded by NNNN". It performs no
 // writes, so New can validate a supersede target (and get its would-be new
@@ -221,7 +167,7 @@ func flippedContent(path string, by int) ([]byte, error) {
 		return nil, err
 	}
 	lines := strings.Split(string(raw), "\n")
-	start, end := frontMatterBounds(lines)
+	start, end := meta.Bounds(lines)
 	if start != -1 && end != -1 {
 		for i := start + 1; i < end; i++ {
 			if strings.HasPrefix(lines[i], "status: ") {
