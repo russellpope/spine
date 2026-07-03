@@ -24,8 +24,11 @@ func Bounds(lines []string) (start, end int) {
 }
 
 // Parse returns every "key: value" (and bare "key:") pair inside the front-
-// matter block, first occurrence winning. has is false when no block exists;
-// body content outside the block can never contribute keys.
+// matter block, first occurrence winning. The colon must end the line (bare
+// "key:") or be followed by a space — "key:value" with no space is not a
+// pair, preserving parity with the "key: " prefix rule flippedContent-style
+// consumers match on. has is false when no block exists; body content
+// outside the block can never contribute keys.
 func Parse(content string) (kv map[string]string, has bool) {
 	lines := strings.Split(content, "\n")
 	start, end := Bounds(lines)
@@ -36,6 +39,9 @@ func Parse(content string) (kv map[string]string, has bool) {
 	for _, line := range lines[start+1 : end] {
 		k, v, ok := strings.Cut(line, ":")
 		if !ok || strings.TrimSpace(k) == "" || strings.ContainsAny(k, " \t") {
+			continue
+		}
+		if v != "" && !strings.HasPrefix(v, " ") {
 			continue
 		}
 		if _, seen := kv[k]; !seen {

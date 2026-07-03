@@ -23,6 +23,24 @@ func TestParseFirstOccurrenceWins(t *testing.T) {
 	}
 }
 
+func TestParseRequiresSpaceAfterColon(t *testing.T) {
+	// "key:value" with no space after the colon is not a pair — parity with
+	// adr's original "title: "/"status: " prefix rule. Only bare "key:"
+	// (empty value, the one disclosed widening) and "key: value" match.
+	kv, has := Parse("---\ntitle:NoSpace\n---\n")
+	if !has {
+		t.Fatal("want has=true")
+	}
+	if v, ok := kv["title"]; ok {
+		t.Fatalf("title:NoSpace must not parse as a pair; got title=%q", v)
+	}
+
+	kv, _ = Parse("---\ntitle: X\n---\n")
+	if kv["title"] != "X" {
+		t.Fatalf(`want title="X"; kv=%v`, kv)
+	}
+}
+
 func TestParseNoBlock(t *testing.T) {
 	if kv, has := Parse("# Just a doc\n"); has || kv != nil {
 		t.Fatalf("want nil,false; got %v,%v", kv, has)
