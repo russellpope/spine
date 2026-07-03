@@ -29,7 +29,11 @@ type FileReport struct {
 	Unrecognized []string
 	// Created is true when the file did not exist on disk at plan time, so a
 	// Pending state means "will be created" rather than "will be updated".
-	Created    bool
+	Created bool
+	// Preserved is true for a legacyPreserve file (docs/adr/README.md) whose
+	// unrecognized hand-authored content was left as-is rather than flagged.
+	// Only set when State == UpToDate. --force clears this and regenerates.
+	Preserved  bool
 	newContent string
 }
 
@@ -51,15 +55,18 @@ const (
 )
 
 // simple machine-owned files: regenerate wholesale, no key extraction.
-// inGen0 marks files whose gen0 content differs from current.
+// inGen0 marks files whose gen0 content differs from current. legacyPreserve
+// marks the one file (docs/adr/README.md) where unrecognized hand-authored
+// content is a deliberate choice, not drift: ADR 0009.
 var simpleFiles = []struct {
 	tmplName, relPath string
 	inGen0            bool
+	legacyPreserve    bool
 }{
-	{"harness-interface.md", "docs/harness-interface.md", true},
-	{"issues-README.md", "docs/issues/README.md", false},
-	{"issue.tmpl.md", "docs/issues/_template.md", false},
-	{"adr-README.md", "docs/adr/README.md", false},
+	{"harness-interface.md", "docs/harness-interface.md", true, false},
+	{"issues-README.md", "docs/issues/README.md", false, false},
+	{"issue.tmpl.md", "docs/issues/_template.md", false, false},
+	{"adr-README.md", "docs/adr/README.md", false, true},
 }
 
 // Run plans (and with opts.Write, applies) regeneration of every managed file.
@@ -77,7 +84,11 @@ func Run(opts Options) ([]FileReport, error) {
 		return nil, err
 	}
 	reports = append(reports, cl)
+	legacyPreserve := map[string]bool{}
 	for _, f := range simpleFiles {
+		if f.legacyPreserve {
+			legacyPreserve[f.relPath] = true
+		}
 		if !tmpl.ProfileOwns(vals.Profile, f.relPath) {
 			continue
 		}
@@ -97,10 +108,20 @@ func Run(opts Options) ([]FileReport, error) {
 		reports = append(reports, r)
 	}
 	// policy: unrecognized edits skip the file unless --force; files with no
-	// regenerable content (nil newContent) stay skipped regardless.
+	// regenerable content (nil newContent) stay skipped regardless. The one
+	// exception is legacyPreserve (docs/adr/README.md, ADR 0009): a
+	// hand-authored index is a deliberate choice, not drift, so it's treated
+	// as up-to-date rather than skipped/warned — --force is the explicit
+	// opt-in to regenerate it from the template.
 	for i := range reports {
 		r := &reports[i]
 		if len(r.Unrecognized) > 0 {
+			if legacyPreserve[r.Path] && !opts.Force {
+				r.State = UpToDate
+				r.Preserved = true
+				r.Diff = ""
+				continue
+			}
 			if opts.Force && r.newContent != "" {
 				r.State = Pending
 			} else {

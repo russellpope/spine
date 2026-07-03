@@ -204,6 +204,45 @@ func TestUnrecognizedEditsD4(t *testing.T) {
 	}
 }
 
+// C1: a hand-authored docs/adr/README.md (praxis-style index) must be
+// reported as D4 info — "preserved", not warn/skip — and must not also
+// trigger the generic unrecognized-edits warn.
+func TestPreservedADRReadmeD4Info(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "go-service", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	handAuthored := "# Architecture Decision Records\n\nSee the index below.\n\n| # | Decision |\n|---|---|\n| 0001 | Something |\n"
+	if err := os.WriteFile(filepath.Join(dir, "docs", "adr", "README.md"), []byte(handAuthored), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range fs {
+		if f.Path != "docs/adr/README.md" {
+			continue
+		}
+		found = true
+		if f.ID != "D4" || f.Severity != "info" {
+			t.Errorf("finding = %#v, want D4 info", f)
+		}
+		if !strings.Contains(f.Message, "preserved") || !strings.Contains(f.Message, "--force") {
+			t.Errorf("message = %q, want mention of preserved + --force", f.Message)
+		}
+	}
+	if !found {
+		t.Fatalf("want a finding for docs/adr/README.md, got %#v", fs)
+	}
+	for _, f := range fs {
+		if f.Severity == "warn" || f.Severity == "error" {
+			t.Errorf("preserved ADR README must not also warn/error: %#v", f)
+		}
+	}
+}
+
 func TestLegacyADRNoFrontMatterD6Info(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {

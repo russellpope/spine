@@ -98,6 +98,12 @@ func Run(opts Options) (Result, error) {
 	}
 	res.Reports = reports
 	res.Infos = gatherInfos(opts.Dir)
+	for _, r := range res.Reports {
+		if r.Preserved {
+			res.Infos = append(res.Infos, Info{Path: r.Path,
+				Message: "hand-authored ADR index preserved (spine template via --force)"})
+		}
+	}
 	return res, nil
 }
 

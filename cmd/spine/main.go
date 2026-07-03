@@ -522,6 +522,9 @@ func cmdAdopt(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	action := func(r update.FileReport) string {
+		if r.Preserved {
+			return "preserve"
+		}
 		switch r.State {
 		case update.UpToDate:
 			return "up-to-date"

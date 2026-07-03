@@ -69,6 +69,11 @@ func updateChecks(dir string) []Finding {
 		return []Finding{{"D2", "error", "WORKFLOW.md", "update cannot run: " + err.Error()}}
 	}
 	for _, r := range reports {
+		if r.Preserved {
+			findings = append(findings, Finding{"D4", "info", r.Path,
+				"hand-authored file preserved — spine update --force regenerates from template"})
+			continue
+		}
 		switch r.State {
 		case update.Pending:
 			msg := "behind template generation — run spine update"

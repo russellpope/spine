@@ -299,3 +299,30 @@ func TestAdoptEndToEnd(t *testing.T) {
 		t.Fatalf("json: code=%d out=%q", code, out)
 	}
 }
+
+// C1: adopt reports a hand-authored docs/adr/README.md as "preserve" (text
+// and JSON), with an info line, rather than warning or destroying it.
+func TestAdoptPreservedADRReadmeCmd(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	handAuthored := "# Architecture Decision Records\n\nSee the index below.\n\n| # | Decision |\n|---|---|\n| 0001 | Something |\n"
+	if err := os.WriteFile(filepath.Join(dir, "docs", "adr", "README.md"), []byte(handAuthored), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCmd(t, "adopt", "--dir", dir)
+	if !strings.Contains(out, "preserve") || !strings.Contains(out, "docs/adr/README.md") {
+		t.Fatalf("text: code=%d out=%q", code, out)
+	}
+	if !strings.Contains(out, "preserved") {
+		t.Fatalf("text missing preserved info line: out=%q", out)
+	}
+	_, out, _ = runCmd(t, "adopt", "--dir", dir, "--json")
+	if !strings.Contains(out, `"action":"preserve"`) {
+		t.Fatalf("json missing preserve action: out=%q", out)
+	}
+}

@@ -336,6 +336,65 @@ func TestMissingWorkflowStillErrorsWithoutAdoptMode(t *testing.T) {
 	}
 }
 
+// C1: docs/adr/README.md is the one machine-owned file where unrecognized
+// hand-authored content is preserved as-is, not skipped/warned. --force
+// remains the explicit opt-in to regenerate it from the template.
+func TestLegacyADRReadmePreserved(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "go-service", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	handAuthored := "# Architecture Decision Records\n\nSee the index below.\n\n| # | Decision |\n|---|---|\n| 0001 | Something |\n"
+	if err := os.WriteFile(filepath.Join(dir, "docs", "adr", "README.md"), []byte(handAuthored), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := report(t, reports, "docs/adr/README.md")
+	if r.State != UpToDate || !r.Preserved || r.Diff != "" {
+		t.Fatalf("state=%v preserved=%v diff=%q", r.State, r.Preserved, r.Diff)
+	}
+	// preserved files must not count as outstanding work.
+	reports2, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rr := range reports2 {
+		if rr.Path == "docs/adr/README.md" && rr.State != UpToDate {
+			t.Errorf("preserved file counted as outstanding: state=%v", rr.State)
+		}
+	}
+	// --force is the explicit opt-in to regenerate from the template.
+	forced, err := Run(Options{Dir: dir, Force: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fr := report(t, forced, "docs/adr/README.md")
+	if fr.State != Pending || fr.Preserved {
+		t.Fatalf("force: state=%v preserved=%v", fr.State, fr.Preserved)
+	}
+}
+
+// Absent or template-matched docs/adr/README.md keeps existing behavior:
+// create when missing, up-to-date (not preserved) when it already matches
+// the template.
+func TestFreshInitADRReadmeNotPreserved(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "go-service", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := report(t, reports, "docs/adr/README.md")
+	if r.State != UpToDate || r.Preserved {
+		t.Fatalf("state=%v preserved=%v (template-matched file must not be marked preserved)", r.State, r.Preserved)
+	}
+}
+
 func TestVersionDowngradeGuard(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {

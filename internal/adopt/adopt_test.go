@@ -94,6 +94,34 @@ func TestAdoptPraxisShape(t *testing.T) {
 	}
 }
 
+// C1: a hand-authored docs/adr/README.md (praxis-style index) is preserved,
+// not flagged — the plan must say so via an Info line, and must not count
+// the file as pending.
+func TestAdoptPreservesHandAuthoredADRReadme(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"go.mod": "module demo\n",
+		"docs/adr/README.md": "# Architecture Decision Records\n\n" +
+			"See the index below.\n\n| # | Decision |\n|---|---|\n| 0001 | Something |\n",
+	})
+	res, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range res.Reports {
+		if r.Path == "docs/adr/README.md" && (r.State != update.UpToDate || !r.Preserved) {
+			t.Fatalf("docs/adr/README.md state=%v preserved=%v", r.State, r.Preserved)
+		}
+	}
+	var infoText string
+	for _, i := range res.Infos {
+		infoText += i.Path + ": " + i.Message + "\n"
+	}
+	if !strings.Contains(infoText, "docs/adr/README.md") || !strings.Contains(infoText, "preserved") {
+		t.Errorf("infos missing preserved ADR README note:\n%s", infoText)
+	}
+}
+
 func TestAdoptUndetectableErrors(t *testing.T) {
 	if _, err := Run(Options{Dir: t.TempDir()}); err == nil {
 		t.Fatal("want detection error")
