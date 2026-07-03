@@ -1,7 +1,7 @@
 # Workflow — spine
 
 profile: library-cli
-template_version: 2
+template_version: 3
 reviewers: [go-reviewer, python-reviewer]
 functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
