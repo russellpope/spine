@@ -2802,7 +2802,9 @@ go test ./...
 git add -A && git commit -m "test: real-file fixtures — 4 adopt targets + ccq gen1→2 stamp-only lock"
 ```
 
----### Task 14: Dogfood — install, self-update, ADRs 0006–0008
+---
+
+### Task 14: Dogfood — install, self-update, ADRs 0006–0008
 
 **Files:**
 - Modify (via the tool, not by hand): spine's own `WORKFLOW.md`/`CLAUDE.md` (gen 2 stamp), `docs/adr/0006-*.md`, `0007-*.md`, `0008-*.md`
