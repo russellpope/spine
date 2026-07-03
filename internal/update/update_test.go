@@ -246,6 +246,60 @@ func TestMissingWorkflowIsHardError(t *testing.T) {
 	}
 }
 
+func TestUpdateKnowledgeManifest(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "knowledge", "vault"); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range reports {
+		if r.Path == "docs/harness-interface.md" || r.Path == "docs/issues/README.md" || r.Path == "docs/issues/_template.md" {
+			t.Errorf("knowledge update must not manage %s", r.Path)
+		}
+		if r.State != UpToDate {
+			t.Errorf("%s not up-to-date after fresh init", r.Path)
+		}
+	}
+}
+
+func TestUpdateManagesEvalsReadmeOnlyWhenPresent(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range reports {
+		if r.Path == "docs/evals/README.md" {
+			t.Fatal("evals README managed without docs/evals/")
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "evals"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reports, err = Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range reports {
+		if r.Path == "docs/evals/README.md" {
+			found = true
+			if r.State != Pending || !r.Created {
+				t.Errorf("want Pending+Created, got state=%v created=%v", r.State, r.Created)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("evals README not planned despite docs/evals/ existing")
+	}
+}
+
 func TestVersionDowngradeGuard(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {

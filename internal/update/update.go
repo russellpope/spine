@@ -73,7 +73,19 @@ func Run(opts Options) ([]FileReport, error) {
 	}
 	reports = append(reports, cl)
 	for _, f := range simpleFiles {
+		if !tmpl.ProfileOwns(vals.Profile, f.relPath) {
+			continue
+		}
 		r, err := planSimple(opts.Dir, gen, f.tmplName, f.relPath, f.inGen0, vals)
+		if err != nil {
+			return nil, err
+		}
+		reports = append(reports, r)
+	}
+	// docs/evals/README.md is opt-in machine-owned: managed only where the
+	// convention is in use (the directory exists); never created by init/adopt.
+	if fi, err := os.Stat(filepath.Join(opts.Dir, "docs", "evals")); err == nil && fi.IsDir() {
+		r, err := planSimple(opts.Dir, gen, "evals-README.md", "docs/evals/README.md", false, vals)
 		if err != nil {
 			return nil, err
 		}
