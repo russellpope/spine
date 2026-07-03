@@ -249,3 +249,33 @@ func TestHandoffFleet(t *testing.T) {
 		t.Fatalf("want 2, got %d", code)
 	}
 }
+
+func TestAdoptEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("## Invariants\n- keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCmd(t, "adopt", "--dir", dir)
+	if code != 1 || !strings.Contains(out, "profile: go-service") || !strings.Contains(out, "WORKFLOW.md") {
+		t.Fatalf("dry-run: code=%d out=%q", code, out)
+	}
+	code, out, errs := runCmd(t, "adopt", "--dir", dir, "--write")
+	if code != 0 {
+		t.Fatalf("write: code=%d out=%q err=%q", code, out, errs)
+	}
+	code, _, _ = runCmd(t, "adopt", "--dir", dir)
+	if code != 0 {
+		t.Fatalf("idempotency: want 0, got %d", code)
+	}
+	code, _, _ = runCmd(t, "doctor", "--dir", dir)
+	if code != 0 {
+		t.Fatalf("doctor after adopt: want 0, got %d", code)
+	}
+	code, out, _ = runCmd(t, "adopt", "--dir", dir, "--json")
+	if code != 0 || !strings.Contains(out, `"profile":"go-service"`) {
+		t.Fatalf("json: code=%d out=%q", code, out)
+	}
+}

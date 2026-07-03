@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/russellpope/spine/internal/adopt"
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/doctor"
 	"github.com/russellpope/spine/internal/eval"
@@ -30,6 +31,7 @@ commands:
   handoff  manage docs/handoffs (new, list, latest [--fleet DIR])
   eval     manage docs/evals (new, add-run, list)
   doctor   read-only workflow health checks
+  adopt    retrofit a pre-spine repo (dry-run by default; --write applies)
   version  print the compiled template generation
 `
 
@@ -53,6 +55,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdEval(args[1:], stdout, stderr)
 	case "doctor":
 		return cmdDoctor(args[1:], stdout, stderr)
+	case "adopt":
+		return cmdAdopt(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "spine template generation %d\n", tmpl.Version())
 		return 0
@@ -476,4 +480,102 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "unknown eval subcommand %q\n", args[0])
 		return 2
 	}
+}
+
+func cmdAdopt(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("adopt", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	profile := fs.String("profile", "", "override profile detection")
+	name := fs.String("name", "", "project name (default: basename of dir)")
+	write := fs.Bool("write", false, "apply the plan (default: dry-run)")
+	force := fs.Bool("force", false, "regenerate files with unrecognized local edits")
+	asJSON := fs.Bool("json", false, "machine-readable plan output")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *write {
+		warnDirty(*dir, stderr)
+	}
+	res, err := adopt.Run(adopt.Options{Dir: *dir, Profile: *profile, Name: *name, Write: *write, Force: *force})
+	if err != nil {
+		fmt.Fprintln(stderr, "adopt:", err)
+		return 2
+	}
+	action := func(r update.FileReport) string {
+		switch r.State {
+		case update.UpToDate:
+			return "up-to-date"
+		case update.SkippedUnrecognized:
+			return "skip"
+		default:
+			if r.Created {
+				return "create"
+			}
+			return "update"
+		}
+	}
+	if *asJSON {
+		type fileJSON struct {
+			Path   string `json:"path"`
+			Action string `json:"action"`
+		}
+		type infoJSON struct {
+			Path    string `json:"path"`
+			Message string `json:"message"`
+		}
+		payload := struct {
+			Profile string     `json:"profile"`
+			Dirs    []string   `json:"dirs"`
+			Files   []fileJSON `json:"files"`
+			Infos   []infoJSON `json:"infos"`
+		}{Profile: res.Profile, Dirs: res.DirsToCreate, Files: []fileJSON{}, Infos: []infoJSON{}}
+		if payload.Dirs == nil {
+			payload.Dirs = []string{}
+		}
+		for _, r := range res.Reports {
+			payload.Files = append(payload.Files, fileJSON{Path: r.Path, Action: action(r)})
+		}
+		for _, i := range res.Infos {
+			payload.Infos = append(payload.Infos, infoJSON{Path: i.Path, Message: i.Message})
+		}
+		if err := json.NewEncoder(stdout).Encode(payload); err != nil {
+			fmt.Fprintln(stderr, "adopt:", err)
+			return 2
+		}
+	} else {
+		fmt.Fprintf(stdout, "profile: %s\n", res.Profile)
+		fmt.Fprintln(stdout, "plan:")
+		for _, d := range res.DirsToCreate {
+			fmt.Fprintf(stdout, "  create dir  %s\n", d)
+		}
+		for _, r := range res.Reports {
+			fmt.Fprintf(stdout, "  %-11s %s\n", action(r), r.Path)
+			if r.State == update.SkippedUnrecognized {
+				for _, l := range r.Unrecognized {
+					fmt.Fprintf(stderr, "    unrecognized: %s\n", l)
+				}
+			}
+		}
+		if len(res.Infos) > 0 {
+			fmt.Fprintln(stdout, "info:")
+			for _, i := range res.Infos {
+				fmt.Fprintf(stdout, "  %s: %s\n", i.Path, i.Message)
+			}
+		}
+	}
+	if !*write && res.Pending() {
+		fmt.Fprintln(stdout, "rerun with --write to apply")
+		return 1
+	}
+	skipped := false
+	for _, r := range res.Reports {
+		if r.State == update.SkippedUnrecognized {
+			skipped = true
+		}
+	}
+	if skipped {
+		return 1
+	}
+	return 0
 }
