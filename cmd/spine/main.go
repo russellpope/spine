@@ -574,6 +574,11 @@ func cmdAdopt(args []string, stdout, stderr io.Writer) int {
 		}
 		for _, r := range res.Reports {
 			fmt.Fprintf(stdout, "  %-11s %s\n", action(r), r.Path)
+			// dry-run only: the T15 human review gate needs to see what
+			// would actually land, not just a one-line create/update label.
+			if !*write && r.State == update.Pending {
+				fmt.Fprint(stdout, r.Diff)
+			}
 			if r.State == update.SkippedUnrecognized {
 				for _, l := range r.Unrecognized {
 					fmt.Fprintf(stderr, "    unrecognized: %s\n", l)

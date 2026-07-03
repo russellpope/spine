@@ -301,6 +301,30 @@ func TestAdoptEndToEnd(t *testing.T) {
 	}
 }
 
+// I3: adopt's text dry-run must show the actual diff for each pending file
+// (same diff `spine update` dry-run shows) — the T15 human review gate needs
+// to see what would land, not just a one-line "create WORKFLOW.md".
+func TestAdoptDryRunShowsDiffs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCmd(t, "adopt", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("want pending exit 1, got %d out=%q", code, out)
+	}
+	if !strings.Contains(out, "+ template_version: 2") {
+		t.Errorf("dry-run text output missing diff content: out=%q", out)
+	}
+	// --json must never carry the diff text as loose prose in the payload
+	// stream; the JSON test above already checks the stream is pure JSON,
+	// this just confirms diffs are a text-mode-only addition.
+	_, jsonOut, _ := runCmd(t, "adopt", "--dir", dir, "--json")
+	if strings.Contains(jsonOut, "+ template_version: 2\n") {
+		t.Errorf("json output should not contain raw diff text: out=%q", jsonOut)
+	}
+}
+
 // I1: adopt --json in a pending state must emit ONLY the JSON payload — no
 // trailing "rerun with --write to apply" prose corrupting the stream — and
 // the payload itself must carry the pending-ness that the exit code used to
