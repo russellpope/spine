@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/russellpope/spine/internal/tmpl"
 )
@@ -45,6 +46,35 @@ func TestVersionCommand(t *testing.T) {
 	code, out, _ := runCmd(t, "version")
 	if code != 0 || !strings.Contains(out, "spine template generation 2") {
 		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
+
+func TestAgeDaysIsCalendarLocal(t *testing.T) {
+	defer func() { now = time.Now }()
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 17:00 PDT on 2026-07-03 == 2026-07-04 00:00 UTC: the old
+	// hours/24-since-UTC-midnight math reported a today-dated handoff as 1d.
+	now = func() time.Time { return time.Date(2026, 7, 3, 17, 0, 0, 0, la) }
+	cases := []struct {
+		filenameDate string
+		want         int
+	}{
+		{"2026-07-03", 0}, // today — the observed off-by-one
+		{"2026-07-02", 1}, // yesterday
+		{"2026-06-26", 7},
+		{"2026-07-04", 0}, // future-dated clamps to 0
+	}
+	for _, c := range cases {
+		d, err := time.Parse("2006-01-02", c.filenameDate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ageDays(d); got != c.want {
+			t.Errorf("ageDays(%s) = %d, want %d", c.filenameDate, got, c.want)
+		}
 	}
 }
 

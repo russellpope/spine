@@ -355,8 +355,19 @@ func handoffFleet(parent string, asJSON bool, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// now is a seam for tests; production code always leaves it as time.Now.
+var now = time.Now
+
+// ageDays is a calendar-day difference. The handoff filename date is a plain
+// local calendar date (handoff.New stamps time.Now().Format("2006-01-02"),
+// handoff.go:52) that arrives parsed as UTC midnight; comparing instants
+// against time.Now() made today's handoffs show "1d" west of UTC. Compare
+// calendar dates instead.
 func ageDays(d time.Time) int {
-	age := int(time.Since(d).Hours() / 24)
+	n := now()
+	today := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
+	that := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)
+	age := int(today.Sub(that).Hours() / 24)
 	if age < 0 {
 		return 0
 	}
