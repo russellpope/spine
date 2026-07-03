@@ -5,9 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/doctor"
+	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/tmpl"
 )
@@ -263,5 +265,61 @@ func TestADRProblemsD6(t *testing.T) {
 	got := ids(fs)
 	if got["D6"] < 2 {
 		t.Fatalf("want duplicate+status D6 findings, got %#v", fs)
+	}
+}
+
+func TestD7EvalStructure(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eval.New(dir, "demo eval"); err != nil {
+		t.Fatal(err)
+	}
+	// well-formed: no D7
+	findings, _ := doctor.Run(dir)
+	for _, f := range findings {
+		if f.ID == "D7" {
+			t.Fatalf("unexpected D7: %+v", f)
+		}
+	}
+	// malformed run: D7 warn
+	today := time.Now().Format("2006-01-02")
+	bad := filepath.Join(dir, "docs", "evals", today+"-demo-eval", "runs", "broken.md")
+	if err := os.WriteFile(bad, []byte("no front matter\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings, _ = doctor.Run(dir)
+	found := false
+	for _, f := range findings {
+		if f.ID == "D7" && f.Severity == "warn" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want D7 warn, findings=%+v", findings)
+	}
+}
+
+func TestD8HandoffNaming(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "handoffs", "notes.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings, _ := doctor.Run(dir)
+	found := false
+	for _, f := range findings {
+		if f.ID == "D8" {
+			found = true
+			if f.Severity != "info" {
+				t.Errorf("D8 must be info, got %s", f.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("want D8, findings=%+v", findings)
 	}
 }

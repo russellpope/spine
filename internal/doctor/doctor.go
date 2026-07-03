@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/russellpope/spine/internal/adr"
+	"github.com/russellpope/spine/internal/eval"
+	"github.com/russellpope/spine/internal/handoff"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
 )
@@ -54,6 +56,8 @@ func Run(dir string) ([]Finding, error) {
 	findings = append(findings, markerCheck(dir)...)
 	findings = append(findings, superpowersCheck(dir)...)
 	findings = append(findings, adrCheck(dir)...)
+	findings = append(findings, evalCheck(dir)...)
+	findings = append(findings, handoffCheck(dir)...)
 	return findings, nil
 }
 
@@ -143,6 +147,40 @@ func adrCheck(dir string) []Finding {
 		}
 		if e.Status != "Accepted" && !strings.HasPrefix(e.Status, "Superseded by ") {
 			findings = append(findings, Finding{"D6", "warn", e.Path, fmt.Sprintf("invalid status %q", e.Status)})
+		}
+	}
+	return findings
+}
+
+// evalCheck maps eval.List structural problems onto D7. Values (stage,
+// score) are never validated — structure only (ADR 0007).
+func evalCheck(dir string) []Finding {
+	_, problems, err := eval.List(dir)
+	if err != nil {
+		return []Finding{{"D7", "error", "docs/evals", "evals tree unreadable: " + err.Error()}}
+	}
+	var findings []Finding
+	for _, p := range problems {
+		findings = append(findings, Finding{"D7", "warn", p.Path, p.Message})
+	}
+	return findings
+}
+
+// handoffCheck flags files in docs/handoffs that don't follow the
+// YYYY-MM-DD-<topic>.md convention. Info only — legacy is legal.
+func handoffCheck(dir string) []Finding {
+	des, err := os.ReadDir(filepath.Join(dir, "docs", "handoffs"))
+	if err != nil {
+		return nil // D1 covers structural absence
+	}
+	var findings []Finding
+	for _, de := range des {
+		if de.IsDir() {
+			continue
+		}
+		if _, _, ok := handoff.ParseName(de.Name()); !ok {
+			findings = append(findings, Finding{"D8", "info", "docs/handoffs/" + de.Name(),
+				"does not match YYYY-MM-DD-<topic>.md — spine handoff new produces conforming names"})
 		}
 	}
 	return findings
