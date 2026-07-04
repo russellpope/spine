@@ -3,7 +3,10 @@
 // handoff, eval, and doctor all consume it.
 package meta
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // Bounds returns the line indices of the first "---" ... "---" block: start
 // is the opening fence, end the closing fence. -1, -1 if no block exists.
@@ -68,4 +71,17 @@ func Slugify(s string) string {
 		}
 	}
 	return strings.Trim(string(b), "-")
+}
+
+// UnquoteScalar returns the Go-unquoted form of s when s parses as a
+// double-quoted string — the front-matter form New writes since gen 3 (adr)
+// and gen 4 (handoff, eval). Anything that does not parse — including every
+// pre-quoting title — passes through verbatim (ratified display contract).
+func UnquoteScalar(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		if u, err := strconv.Unquote(s); err == nil {
+			return u
+		}
+	}
+	return s
 }

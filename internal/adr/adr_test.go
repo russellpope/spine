@@ -274,3 +274,47 @@ func TestNewQuotesSupersedes(t *testing.T) {
 		t.Errorf("supersedes not quoted (octal quirk lives):\n%s", raw)
 	}
 }
+
+func TestNewBackslashTitleRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	title := `back\slash and "quotes" and colon: all at once`
+	if _, err := adr.New(dir, title, 0); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := adr.List(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries=%v err=%v", entries, err)
+	}
+	if entries[0].Title != title {
+		t.Errorf("roundtrip Title = %q, want %q", entries[0].Title, title)
+	}
+}
+
+func TestLegacyUnquotedTitleListsVerbatim(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `---
+id: "0001"
+title: legacy: unquoted title
+status: Accepted
+date: 2026-01-15
+---
+
+# 0001: legacy: unquoted title
+`
+	if err := os.WriteFile(filepath.Join(dir, "docs", "adr", "0001-legacy.md"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := adr.List(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries=%v err=%v", entries, err)
+	}
+	if entries[0].Title != "legacy: unquoted title" {
+		t.Errorf("legacy Title = %q, want verbatim %q", entries[0].Title, "legacy: unquoted title")
+	}
+}

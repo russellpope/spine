@@ -58,3 +58,21 @@ func TestSlugify(t *testing.T) {
 		}
 	}
 }
+
+func TestUnquoteScalar(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`"quoted title"`, "quoted title"},
+		{`"colon: and \"escapes\\\""`, `colon: and "escapes\"`},
+		{`""`, ""},
+		{`plain title`, `plain title`},
+		{`legacy: unquoted title`, `legacy: unquoted title`},
+		{`"unbalanced`, `"unbalanced`},
+		{`"`, `"`},
+		{``, ``},
+	}
+	for _, c := range cases {
+		if got := UnquoteScalar(c.in); got != c.want {
+			t.Errorf("UnquoteScalar(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

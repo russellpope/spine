@@ -74,14 +74,10 @@ func parseFrontMatter(content string) (title, status string, hasFrontMatter bool
 	if !has {
 		return "", "", false
 	}
-	title = kv["title"]
-	// Gen-3 templates YAML-quote the title (strconv.Quote in New). Unquote
-	// for display; unquoted pre-gen-3 titles pass through verbatim.
-	if len(title) >= 2 && title[0] == '"' && title[len(title)-1] == '"' {
-		if u, err := strconv.Unquote(title); err == nil {
-			title = u
-		}
-	}
+	// Gen-3 templates YAML-quote the title (strconv.Quote in New).
+	// UnquoteScalar unquotes for display; unquoted pre-gen-3 titles pass
+	// through verbatim.
+	title = meta.UnquoteScalar(kv["title"])
 	return title, kv["status"], true
 }
 

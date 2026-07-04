@@ -176,3 +176,28 @@ func TestListSurfacesHandoffReadError(t *testing.T) {
 		t.Fatal("want read error surfaced, got nil (Title silently degraded before v3)")
 	}
 }
+
+func TestLegacyUnquotedTitleListsVerbatim(t *testing.T) {
+	dir := t.TempDir()
+	hdir := filepath.Join(dir, "docs", "handoffs")
+	if err := os.MkdirAll(hdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `---
+title: legacy: unquoted title
+created: 2026-01-15
+---
+
+# Handoff — legacy: unquoted title (2026-01-15)
+`
+	if err := os.WriteFile(filepath.Join(hdir, "2026-01-15-legacy.md"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := List(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries=%v err=%v", entries, err)
+	}
+	if entries[0].Title != "legacy: unquoted title" {
+		t.Errorf("legacy Title = %q, want verbatim %q", entries[0].Title, "legacy: unquoted title")
+	}
+}
