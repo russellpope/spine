@@ -3,6 +3,7 @@ package eval
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -124,5 +125,37 @@ func TestListSurfacesEvalDocReadError(t *testing.T) {
 	_, _, err := List(dir)
 	if err == nil {
 		t.Fatal("want read error surfaced, got nil (was mislabeled 'missing eval.md')")
+	}
+}
+
+func TestNewQuotesTitleForYAML(t *testing.T) {
+	dir := t.TempDir()
+	title := `local model bake-off: the "quoting" eval \ round 2`
+	evalDir, err := New(dir, title)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(evalDir, "eval.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if !strings.Contains(s, "\ntitle: "+strconv.Quote(title)+"\n") {
+		t.Errorf("title not quoted/escaped:\n%s", s)
+	}
+	if !strings.Contains(s, "# Eval — "+title+"\n") {
+		t.Errorf("body H1 must keep the raw title:\n%s", s)
+	}
+	// checkDoc requires the title key present and non-empty; a quoted title
+	// must not flag a problem (eval has no title read-back display).
+	evals, problems, err := List(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 0 {
+		t.Errorf("unexpected problems: %v", problems)
+	}
+	if len(evals) != 1 {
+		t.Errorf("evals = %v, want 1", evals)
 	}
 }

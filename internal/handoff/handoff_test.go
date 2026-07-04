@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ func TestNewListLatest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"title: spine v2 spec", "created: " + today, "## Context", "## Gotchas"} {
+	for _, want := range []string{"title: " + strconv.Quote("spine v2 spec"), "created: " + today, "## Context", "## Gotchas"} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("missing %q in %q", want, raw)
 		}
@@ -199,5 +200,47 @@ created: 2026-01-15
 	}
 	if entries[0].Title != "legacy: unquoted title" {
 		t.Errorf("legacy Title = %q, want verbatim %q", entries[0].Title, "legacy: unquoted title")
+	}
+}
+
+func TestNewQuotesTitleForYAML(t *testing.T) {
+	dir := t.TempDir()
+	topic := `spine v4: the "quoting" handoff`
+	path, err := New(dir, topic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if !strings.Contains(s, "\ntitle: "+strconv.Quote(topic)+"\n") {
+		t.Errorf("title not quoted/escaped:\n%s", s)
+	}
+	if !strings.Contains(s, "# Handoff — "+topic+" (") {
+		t.Errorf("body H1 must keep the raw topic:\n%s", s)
+	}
+	entries, err := List(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries=%v err=%v", entries, err)
+	}
+	if entries[0].Title != topic {
+		t.Errorf("display Title = %q, want unquoted %q", entries[0].Title, topic)
+	}
+}
+
+func TestNewBackslashTopicRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	topic := `back\slash and "quotes" and colon: all at once`
+	if _, err := New(dir, topic); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := List(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries=%v err=%v", entries, err)
+	}
+	if entries[0].Title != topic {
+		t.Errorf("roundtrip Title = %q, want %q", entries[0].Title, topic)
 	}
 }

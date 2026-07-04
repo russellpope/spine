@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,6 +81,7 @@ func New(dir, title string) (string, error) {
 		return "", err
 	}
 	content := strings.NewReplacer(
+		"{{EVAL_TITLE_YAML}}", strconv.Quote(title),
 		"{{EVAL_TITLE}}", title,
 		"{{EVAL_DATE}}", today,
 	).Replace(string(raw))

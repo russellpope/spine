@@ -1,5 +1,5 @@
 ---
-title: {{HANDOFF_TITLE}}
+title: {{HANDOFF_TITLE_YAML}}
 created: {{HANDOFF_DATE}}
 ---
 

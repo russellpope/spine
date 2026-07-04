@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,6 +63,7 @@ func New(dir, topic string) (string, error) {
 		return "", err
 	}
 	content := strings.NewReplacer(
+		"{{HANDOFF_TITLE_YAML}}", strconv.Quote(topic),
 		"{{HANDOFF_TITLE}}", topic,
 		"{{HANDOFF_DATE}}", today,
 	).Replace(string(raw))
@@ -100,7 +102,10 @@ func List(dir string) ([]Entry, error) {
 			return nil, err
 		}
 		if kv, has := meta.Parse(string(raw)); has && kv["title"] != "" {
-			e.Title = kv["title"]
+			// Gen-4 templates YAML-quote the title (strconv.Quote in New).
+			// UnquoteScalar unquotes for display; unquoted pre-gen-4 titles
+			// pass through verbatim.
+			e.Title = meta.UnquoteScalar(kv["title"])
 		}
 		out = append(out, e)
 	}

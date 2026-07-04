@@ -1,5 +1,5 @@
 ---
-title: {{EVAL_TITLE}}
+title: {{EVAL_TITLE_YAML}}
 created: {{EVAL_DATE}}
 prompt:
 rubric:

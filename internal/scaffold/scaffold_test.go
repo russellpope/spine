@@ -65,7 +65,7 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 3",
+	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 4",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli"} {
 		if !strings.Contains(string(wf), want) {
 			t.Errorf("WORKFLOW.md missing %q", want)
