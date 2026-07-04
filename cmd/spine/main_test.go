@@ -470,3 +470,26 @@ func TestUpdateTextNamesPreservedFiles(t *testing.T) {
 		t.Errorf("no preservation notice in:\n%s", out)
 	}
 }
+
+func TestHandoffLatestRejectsFlagLikeDirValues(t *testing.T) {
+	cases := []struct {
+		args    []string
+		wantMsg string
+	}{
+		{[]string{"handoff", "latest", "-fleet", "--dir"}, "--fleet needs a directory value"},
+		{[]string{"handoff", "latest", "-dir", "--json"}, "--dir needs a directory value"},
+	}
+	for _, c := range cases {
+		code, _, errs := runCmd(t, c.args...)
+		if code != 2 {
+			t.Errorf("%v: code = %d, want 2 (stderr %q)", c.args, code, errs)
+		}
+		if !strings.Contains(errs, c.wantMsg) {
+			t.Errorf("%v: stderr = %q, want it to contain %q", c.args, errs, c.wantMsg)
+		}
+	}
+	// A legitimate fleet dir (no handoffs anywhere) still parses and runs.
+	if code, _, errs := runCmd(t, "handoff", "latest", "-fleet", t.TempDir()); code != 0 {
+		t.Errorf("legit -fleet dir: code = %d, stderr %q", code, errs)
+	}
+}

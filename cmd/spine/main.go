@@ -309,6 +309,12 @@ func cmdHandoffLatest(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	for _, f := range []struct{ name, value string }{{"fleet", *fleet}, {"dir", *dir}} {
+		if strings.HasPrefix(f.value, "-") {
+			fmt.Fprintf(stderr, "handoff latest: --%s needs a directory value (did a following flag get consumed?)\n", f.name)
+			return 2
+		}
+	}
 	if *fleet != "" {
 		return handoffFleet(*fleet, *asJSON, stdout, stderr)
 	}
