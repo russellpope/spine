@@ -287,9 +287,15 @@ func cmdHandoff(args []string, stdout, stderr io.Writer) int {
 			}
 			return 0
 		}
-		fmt.Fprintf(stdout, "%-10s  %-28s  %s\n", "date", "topic", "path")
+		w := len("topic")
 		for _, e := range entries {
-			fmt.Fprintf(stdout, "%-10s  %-28s  %s\n", e.Date.Format("2006-01-02"), e.Topic, e.Path)
+			if len(e.Topic) > w {
+				w = len(e.Topic)
+			}
+		}
+		fmt.Fprintf(stdout, "%-10s  %-*s  %s\n", "date", w, "topic", "path")
+		for _, e := range entries {
+			fmt.Fprintf(stdout, "%-10s  %-*s  %s\n", e.Date.Format("2006-01-02"), w, e.Topic, e.Path)
 		}
 		return 0
 	case "latest":

@@ -493,3 +493,30 @@ func TestHandoffLatestRejectsFlagLikeDirValues(t *testing.T) {
 		t.Errorf("legit -fleet dir: code = %d, stderr %q", code, errs)
 	}
 }
+
+func TestHandoffListAlignsPathColumnPastDefaultWidth(t *testing.T) {
+	dir := t.TempDir()
+	for _, topic := range []string{"short", "extremely long handoff topic exceeding twenty eight chars"} {
+		if code, _, errs := runCmd(t, "handoff", "new", "-dir", dir, topic); code != 0 {
+			t.Fatal(errs)
+		}
+	}
+	code, out, errs := runCmd(t, "handoff", "list", "-dir", dir)
+	if code != 0 {
+		t.Fatal(errs)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("want header + 2 rows, got %d lines: %q", len(lines), out)
+	}
+	want := strings.Index(lines[0], "path")
+	if want < 0 {
+		t.Fatalf("no path header: %q", lines[0])
+	}
+	prefix := filepath.Join(dir, "docs", "handoffs")
+	for _, row := range lines[1:] {
+		if got := strings.Index(row, prefix); got != want {
+			t.Errorf("path column at %d, want %d: %q", got, want, row)
+		}
+	}
+}
