@@ -2,6 +2,7 @@
 package fsutil
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -55,6 +56,12 @@ func WriteFileAtomic(path string, data []byte) error {
 // regular file, directory, or symlink (even dangling) — fails with an error
 // satisfying errors.Is(err, fs.ErrExist); callers own the user-facing
 // message. Mode is normalized to 0644, matching WriteFileAtomic.
+//
+// Requires a filesystem with hard-link support: os.Link fails with
+// EPERM/ENOTSUP-class errors on filesystems without it (known constraint;
+// the fleet is APFS). If removing the temp file AFTER a successful link
+// fails, that error is returned even though path WAS written with full
+// content — a re-run then truthfully reports "already exists".
 func WriteFileExclusive(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	name, err := writeTemp(dir, data)
@@ -65,6 +72,8 @@ func WriteFileExclusive(path string, data []byte) error {
 		os.Remove(name)
 		return err
 	}
-	os.Remove(name)
+	if err := os.Remove(name); err != nil {
+		return fmt.Errorf("%s was written, but removing temp file failed: %w", path, err)
+	}
 	return nil
 }
