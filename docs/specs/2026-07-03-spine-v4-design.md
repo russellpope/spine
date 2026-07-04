@@ -66,10 +66,12 @@ Mirror the v3 ADR pattern exactly (adr.go:133-148, adr.tmpl.md):
   through verbatim — the v3-ratified display contract. This covers `Latest`,
   `handoff list --json`, and the fleet JSON, all of which read through List.
 - eval has NO title read-back display: `eval list` prints the directory name,
-  and doctor's `checkDoc` only requires the `title` key be present and
-  non-empty — a quoted title still satisfies it. No eval-side unquote path
-  exists or is needed; this sentence is here so a reviewer doesn't hunt for
-  one.
+  and doctor's `checkDoc` only requires the `title` key be present
+  (presence-only — value emptiness is never checked, consistent with ADR
+  0007's values-are-opaque rule; amended 2026-07-03 per final-review RA-3,
+  original text over-claimed "and non-empty") — a quoted title satisfies it
+  either way. No eval-side unquote path exists or is needed; this sentence is
+  here so a reviewer doesn't hunt for one.
 - The newline-injection guards in `handoff.New`/`eval.New`/`adr.New` stay
   (defense in depth; quoting alone would also neutralize injection).
 - `templates/VERSION` 3 → 4 in the SAME commit as the two template edits

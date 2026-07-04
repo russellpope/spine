@@ -897,10 +897,14 @@ Expected: 11 packages green.
 - [ ] **Step 2: Dogfood self-update (mutates spine repo — this is the v4 dogfood commit)**
 
 ```bash
-go run ./cmd/spine update --dir . && go run ./cmd/spine update --dir . --write && go run ./cmd/spine doctor --dir . && go run ./cmd/spine update --dir .
+go run ./cmd/spine update --dir . ; go run ./cmd/spine update --dir . --write && go run ./cmd/spine doctor --dir . && go run ./cmd/spine update --dir .
 ```
 
-Expected: dry-run shows WORKFLOW.md/CLAUDE.md Pending with stamp-only diffs (template_version 3→4, spine:begin v3→v4); write exits 0; doctor exits 0; second dry-run reports everything up-to-date (no-op). Commit the stamped files:
+(Amended 2026-07-03, final-review RA-1: the dry-run exits 1 on pending changes,
+so the original all-`&&` chain short-circuited before the write — first join is
+now `;`, the dry-run's exit 1 is EXPECTED.)
+
+Expected: dry-run shows WORKFLOW.md/CLAUDE.md Pending with stamp-only diffs (template_version 3→4, spine:begin v3→v4) and exits 1; write exits 0; doctor exits 0; second dry-run reports everything up-to-date (no-op, exit 0). Commit the stamped files:
 
 ```bash
 git add WORKFLOW.md CLAUDE.md && git commit -m "chore: self-update to template generation 4 (dogfood)"
@@ -920,6 +924,7 @@ Expected: exit 1 (pending changes), diffs stamp-only (2→4 for gen-2 repos), pr
 make install && spine version
 SCRATCH=$(mktemp -d) && cd "$SCRATCH" && git init -q . && spine init --profile library-cli --dir .
 spine handoff new --dir . 'v4 smoke: "quotes" \ backslash'
+spine handoff new --dir . 'v4 smoke second topic long enough to exceed twenty eight chars'
 spine eval new --dir . 'v4 smoke eval: colon "quotes"'
 spine handoff list --dir .
 spine handoff latest --fleet --dir .
