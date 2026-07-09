@@ -15,3 +15,24 @@ When the ledger has many items (e.g. dozens of deck slides or audit findings), b
 dependency graph from `affects:` / `blocked-by:` so overlapping or conflicting fixes are
 **batched and ordered** — fixed together, never revisited separately. Output an ordered
 remediation plan that respects every `blocked-by` and groups items sharing `affects` links.
+
+## Wayfinding operations
+
+`/wayfinder` and `/to-tickets` treat this ledger as the repo's issue tracker. Wayfinder
+issues use the same files and ids, plus three optional frontmatter fields:
+
+- `labels` — `[wayfinder:map]` on the map; `[wayfinder:research|prototype|grilling|task]` on tickets
+- `parent` — a ticket's map id (e.g. [I020]); the map has none
+- `assignee` — who has claimed the ticket; empty + `status: open` = unclaimed
+
+Operations:
+
+- **Map** — one issue labelled `wayfinder:map`; its body carries the map sections
+  (Destination / Notes / Decisions so far / Not yet specified / Out of scope).
+- **Tickets** — child issues (`parent:` = the map id); the body is the `## Question`.
+- **Claim** — set `assignee:` and `status: in-progress` before any work.
+- **Blocking** — `blocked-by:` frontmatter is the native blocking edge.
+- **Frontier** — open, unclaimed tickets whose `blocked-by` ids are all `fixed`.
+- **Resolve** — append the answer as `## Resolution`, set `status: fixed`, and index the
+  gist in the map's Decisions so far. Out-of-scope tickets close as `wontfix` with a line
+  in the map's Out of scope section.
