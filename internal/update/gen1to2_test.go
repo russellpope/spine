@@ -42,6 +42,9 @@ func TestGen1To2IsStampOnly(t *testing.T) {
 				if strings.Contains(line, "template_version") || strings.Contains(line, "spine:begin") {
 					continue
 				}
+				if isGen5ContentDiffLine(line) { // gen 5's conscious content edit; see gen4to5_test.go
+					continue
+				}
 				t.Errorf("%s: unexpected changed line %q — gen 1→2 must be stamp-only", r.Path, line)
 			}
 		}

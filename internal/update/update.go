@@ -340,8 +340,19 @@ func planSimple(dir, gen, tmplName, relPath string, inGen0 bool, vals tmpl.Value
 	return report, nil
 }
 
+// supersededLines are lines a prior generation emitted that the current one
+// no longer does. Unrecognized-detection renders only gen0 and current, so
+// without this list a machine-emitted line changed by a content-bearing bump
+// would read as a local edit and skip the file. Each generation that changes
+// emitted content appends its predecessors' dropped lines here.
+var supersededLines = map[string]bool{
+	// gen0–4 WORKFLOW.md gates line, reworded in gen 5 (to-spec, spec-review).
+	"Mandatory gates: a PRD up front (grill-with-docs -> to-prd) and verification before completion.": true,
+}
+
 // unrecognizedLines returns non-blank lines of got that expected does not
-// contain anywhere (order-insensitive, trailing-space-insensitive).
+// contain anywhere (order-insensitive, trailing-space-insensitive) and that
+// no prior generation emitted.
 func unrecognizedLines(got, expected string) []string {
 	want := map[string]bool{}
 	for _, l := range splitLines(expected) {
@@ -350,7 +361,7 @@ func unrecognizedLines(got, expected string) []string {
 	var extra []string
 	for _, l := range splitLines(got) {
 		t := strings.TrimRight(l, " ")
-		if t == "" || want[t] {
+		if t == "" || want[t] || supersededLines[t] {
 			continue
 		}
 		extra = append(extra, t)
