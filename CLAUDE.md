@@ -1,4 +1,4 @@
-<!-- spine:begin v5 -->
+<!-- spine:begin v6 -->
 # spine
 
 Uses the **unified workflow** — see `WORKFLOW.md` for the active profile (`library-cli`) and stages.
@@ -13,5 +13,5 @@ Uses the **unified workflow** — see `WORKFLOW.md` for the active profile (`lib
 Issues live as markdown files in `docs/issues/` (the ledger above). `/wayfinder` and `/to-tickets` publish here too — see "Wayfinding operations" in `docs/issues/README.md`.
 
 **Mandatory gates:** a PRD up front (run `/grill-with-docs` -> `/to-spec`), `/spec-review` of the finished diff against the PRD, and verification before completion.
-**Model:** see `WORKFLOW.md` `model_routing` (primary / fallback-on-refusal / routine; swappable).
+**Model:** see `WORKFLOW.md` `model_routing` (primary / routine / mechanical / fallback; swappable).
 <!-- spine:end -->

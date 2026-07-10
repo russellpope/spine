@@ -9,6 +9,19 @@ Each issue is a markdown file in this directory (copy `_template.md`). Frontmatt
 - `affects` — issue ids whose fix this one changes/overlaps (e.g. [I009])
 - `blocked-by` — issue ids that must be resolved first (e.g. [I003])
 
+Optional model-routing annotation fields (build tickets only; plain bug issues stay valid
+without them — `spine audit routing` reports unannotated tickets, never judges them):
+
+- `execution-mode` — inline | subagent-driven | ultracode; how the work runs
+- `tier` — primary | routine | mechanical | fallback; the model tier the work is dispatched at
+- `effort` — override of the tier's default effort; set only on deviation
+- `risk-triggers` — zero or more of cross-task-integration, concurrency-subtle-state,
+  security-surface, plan-flagged-ambiguity; any present forces primary-tier review
+- `review-tier` — the tier review runs at; never below `tier`. Inline tickets carry
+  `review-tier: n/a` — no per-task review cycle exists; verify-stage gates still apply
+
+See `WORKFLOW.md` `model_routing` for the tier→model mapping and the full dispatch contract.
+
 ## Rationalize pass (before remediation)
 
 When the ledger has many items (e.g. dozens of deck slides or audit findings), build the
