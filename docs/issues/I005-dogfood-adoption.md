@@ -2,7 +2,7 @@
 id: I005
 title: Dogfood adoption — spine, deepthought, objectstudio on gen 6
 severity: med
-status: open
+status: fixed
 affects: []
 blocked-by: [I002, I003]
 parent: [I001]
