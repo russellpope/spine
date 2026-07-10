@@ -410,6 +410,54 @@ func TestAdoptPreservedADRReadmeCmd(t *testing.T) {
 	}
 }
 
+func TestAuditRoutingEndToEnd(t *testing.T) {
+	fixture := func(parts ...string) string {
+		return filepath.Join(append([]string{"..", "..", "internal", "audit", "testdata"}, parts...)...)
+	}
+	// clean fixture: all match, exit 0
+	code, out, errs := runCmd(t, "audit", "routing",
+		"--dir", fixture("clean", "repo"), "--transcripts", fixture("clean", "transcripts"))
+	if code != 0 {
+		t.Fatalf("clean: code=%d out=%q err=%q", code, out, errs)
+	}
+	first := strings.SplitN(out, "\n", 2)[0]
+	if !strings.HasPrefix(first, "ticket") || !strings.Contains(first, "tier") ||
+		!strings.Contains(first, "actual") || !strings.Contains(first, "verdict") {
+		t.Errorf("header missing/wrong: %q", first)
+	}
+	if !strings.Contains(out, "I101") || !strings.Contains(out, "match") {
+		t.Errorf("clean out=%q", out)
+	}
+	// mixed fixture: contains a silent-descent, exit 1
+	code, out, _ = runCmd(t, "audit", "routing",
+		"--dir", fixture("mixed", "repo"), "--transcripts", fixture("mixed", "transcripts"))
+	if code != 1 || !strings.Contains(out, "silent-descent") {
+		t.Fatalf("mixed: code=%d (want 1) out=%q", code, out)
+	}
+	if !strings.Contains(out, "housekeeping") {
+		t.Errorf("mixed out should list the unmatched dispatch: %q", out)
+	}
+	// degraded fixture: warnings on stderr, exit 0
+	code, _, errs = runCmd(t, "audit", "routing",
+		"--dir", fixture("degraded", "repo"), "--transcripts", fixture("degraded", "transcripts"))
+	if code != 0 || !strings.Contains(errs, "warning:") || !strings.Contains(errs, "bad.jsonl") {
+		t.Fatalf("degraded: code=%d errs=%q", code, errs)
+	}
+}
+
+func TestAuditUsageErrors(t *testing.T) {
+	if code, _, errs := runCmd(t, "audit"); code != 2 || !strings.Contains(errs, "usage: spine audit") {
+		t.Fatalf("bare audit: code=%d errs=%q", code, errs)
+	}
+	if code, _, errs := runCmd(t, "audit", "bogus"); code != 2 || !strings.Contains(errs, "unknown audit subcommand") {
+		t.Fatalf("bogus sub: code=%d errs=%q", code, errs)
+	}
+	// a repo that is not scaffolded (no docs/issues) is a usage error
+	if code, _, _ := runCmd(t, "audit", "routing", "--dir", t.TempDir(), "--transcripts", t.TempDir()); code != 2 {
+		t.Fatalf("unscaffolded repo: want exit 2, got %d", code)
+	}
+}
+
 func TestHandoffListTextHasHeaderAndPath(t *testing.T) {
 	dir := t.TempDir()
 	if code, _, errs := runCmd(t, "handoff", "new", "-dir", dir, "v3 cosmetics"); code != 0 {

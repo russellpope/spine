@@ -1,0 +1,1 @@
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_210","name":"Agent","input":{"description":"estate housekeeping sweep","model":"sonnet","prompt":"Tidy the estate again."}}]}}

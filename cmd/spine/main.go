@@ -14,6 +14,7 @@ import (
 
 	"github.com/russellpope/spine/internal/adopt"
 	"github.com/russellpope/spine/internal/adr"
+	"github.com/russellpope/spine/internal/audit"
 	"github.com/russellpope/spine/internal/doctor"
 	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/handoff"
@@ -32,6 +33,7 @@ commands:
   handoff  manage docs/handoffs (new, list, latest [--fleet DIR])
   eval     manage docs/evals (new, add-run, list)
   doctor   read-only workflow health checks
+  audit    verify declared model routing against harness transcripts (routing)
   version  print the compiled template generation
 `
 
@@ -57,6 +59,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdDoctor(args[1:], stdout, stderr)
 	case "adopt":
 		return cmdAdopt(args[1:], stdout, stderr)
+	case "audit":
+		return cmdAudit(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "spine template generation %d\n", tmpl.Version())
 		return 0
@@ -528,6 +532,77 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "unknown eval subcommand %q\n", args[0])
 		return 2
 	}
+}
+
+func cmdAudit(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, `usage: spine audit <routing> [flags]  (audit routing [--dir D] [--transcripts DIR])`)
+		return 2
+	}
+	switch args[0] {
+	case "routing":
+		return cmdAuditRouting(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "unknown audit subcommand %q\n", args[0])
+		return 2
+	}
+}
+
+// cmdAuditRouting is a thin printer over audit.Run: table to stdout,
+// warnings to stderr, exit 1 only on a blocking (silent-descent) verdict.
+func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("audit routing", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	transcripts := fs.String("transcripts", "", "harness transcript dir (default: derived from repo path under ~/.claude/projects)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	tdir := *transcripts
+	if tdir == "" {
+		derived, err := audit.DefaultTranscriptsDir(*dir)
+		if err != nil {
+			fmt.Fprintln(stderr, "audit routing:", err)
+			return 2
+		}
+		tdir = derived
+	}
+	rep, err := audit.Run(*dir, tdir)
+	if err != nil {
+		fmt.Fprintln(stderr, "audit routing:", err)
+		return 2
+	}
+	for _, w := range rep.Warnings {
+		fmt.Fprintln(stderr, "warning:", w)
+	}
+	dash := func(s string) string {
+		if s == "" {
+			return "-"
+		}
+		return s
+	}
+	wID, wTier, wActual, wVerdict := len("ticket"), len("tier"), len("actual"), len("verdict")
+	for _, t := range rep.Tickets {
+		wID = max(wID, len(t.ID))
+		wTier = max(wTier, len(dash(t.Tier)))
+		wActual = max(wActual, len(dash(strings.Join(t.Actuals, ","))))
+		wVerdict = max(wVerdict, len(t.Verdict))
+	}
+	fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %-*s  %s\n", wID, "ticket", wTier, "tier", wActual, "actual", wVerdict, "verdict", "detail")
+	for _, t := range rep.Tickets {
+		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %-*s  %s\n",
+			wID, t.ID, wTier, dash(t.Tier), wActual, dash(strings.Join(t.Actuals, ",")), wVerdict, string(t.Verdict), t.Detail)
+	}
+	if len(rep.Unmatched) > 0 {
+		fmt.Fprintln(stdout, "unmatched dispatches (no ticket id, not judged):")
+		for _, d := range rep.Unmatched {
+			fmt.Fprintf(stdout, "  %s  [%s]\n", d.Description, dash(d.Model))
+		}
+	}
+	if rep.Blocking() {
+		return 1
+	}
+	return 0
 }
 
 func cmdAdopt(args []string, stdout, stderr io.Writer) int {

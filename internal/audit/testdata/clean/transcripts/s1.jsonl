@@ -1,0 +1,4 @@
+{"type":"last-prompt","leafUuid":"x","sessionId":"s1"}
+{"type":"user","message":{"role":"user","content":"kick off the build"}}
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"Dispatching alpha."},{"type":"tool_use","id":"toolu_101","name":"Agent","input":{"description":"I101: implement alpha","model":"sonnet","prompt":"You are implementing ticket I101 for the fixture repo."}}]}}
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_102","name":"Task","input":{"description":"I102: build beta","model":"fable","prompt":"You are implementing ticket I102 for the fixture repo."}}]}}

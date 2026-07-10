@@ -1,0 +1,3 @@
+{"parentUuid":null,"isSidechain":true,"agentId":"bbb","type":"user","message":{"role":"user","content":"You are implementing ticket I202 for the mixed fixture."}}
+{"type":"assistant","message":{"model":"claude-sonnet-5","role":"assistant","content":[{"type":"text","text":"gate implemented"}]}}
+{"type":"assistant","message":{"model":"claude-sonnet-5","role":"assistant","content":[{"type":"text","text":"done"}]}}

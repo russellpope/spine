@@ -1,0 +1,2 @@
+{"parentUuid":null,"isSidechain":true,"agentId":"aaa","type":"user","message":{"role":"user","content":"You are implementing ticket I101 for the fixture repo."}}
+{"type":"assistant","message":{"model":"claude-sonnet-5","role":"assistant","content":[{"type":"text","text":"alpha done"}]}}
