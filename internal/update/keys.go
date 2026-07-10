@@ -15,7 +15,7 @@ var topKeys = []string{
 	"effort", "model_default", "security_routing", "stages",
 }
 
-var routingKeys = []string{"primary", "fallback", "routine"}
+var routingKeys = []string{"primary", "fallback", "routine", "mechanical"}
 
 func splitLines(s string) []string { return strings.Split(s, "\n") }
 

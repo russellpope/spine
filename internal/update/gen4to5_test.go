@@ -13,9 +13,9 @@ import (
 // Gen 5 is the first content-bearing bump, so the stamp-only locks
 // consciously allow exactly these lines and nothing else.
 var gen5ContentLines = map[string]bool{
-	"Mandatory gates: a PRD up front (grill-with-docs -> to-prd) and verification before completion.":                                                              true,
-	"Mandatory gates: a PRD up front (grill-with-docs -> to-spec), spec-review of the finished diff against the PRD, and verification before completion.":          true,
-	"**Mandatory gates:** a PRD up front (run `/grill-with-docs` -> `/to-prd`) and verification before completion.":                                                true,
+	"Mandatory gates: a PRD up front (grill-with-docs -> to-prd) and verification before completion.":                                                                      true,
+	"Mandatory gates: a PRD up front (grill-with-docs -> to-spec), spec-review of the finished diff against the PRD, and verification before completion.":                  true,
+	"**Mandatory gates:** a PRD up front (run `/grill-with-docs` -> `/to-prd`) and verification before completion.":                                                        true,
 	"**Mandatory gates:** a PRD up front (run `/grill-with-docs` -> `/to-spec`), `/spec-review` of the finished diff against the PRD, and verification before completion.": true,
 	"### Issue tracker": true,
 	"Issues live as markdown files in `docs/issues/` (the ledger above). `/wayfinder` and `/to-tickets` publish here too — see \"Wayfinding operations\" in `docs/issues/README.md`.": true,
@@ -76,6 +76,9 @@ func TestGen4To5IsStampPlusDeclaredContent(t *testing.T) {
 					continue
 				}
 				if isGen5ContentDiffLine(line) {
+					continue
+				}
+				if isGen6ContentDiffLine(line) { // gen 6's conscious content edit; see gen5to6_test.go
 					continue
 				}
 				t.Errorf("%s: unexpected changed line %q — 4→5 must be stamp plus declared gen-5 content only", r.Path, line)

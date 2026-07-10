@@ -348,6 +348,17 @@ func planSimple(dir, gen, tmplName, relPath string, inGen0 bool, vals tmpl.Value
 var supersededLines = map[string]bool{
 	// gen0–4 WORKFLOW.md gates line, reworded in gen 5 (to-spec, spec-review).
 	"Mandatory gates: a PRD up front (grill-with-docs -> to-prd) and verification before completion.": true,
+	// gen5 WORKFLOW.md model_routing lines, rewritten in gen 6 as the full
+	// dispatch contract: reworded comments, the mechanical tier added, the
+	// standalone security_routing key folded into fallback semantics, and
+	// the old one-line execution-mode rule replaced by the Execution modes
+	// section (I003).
+	"  primary: claude-fable-5          # long-horizon, ambiguous, or first-shot-complex work (design, plan, implement, orchestrate)":           true,
+	"  fallback: claude-opus-4-8        # auto on stop_reason: refusal (cyber/bio/reasoning-extraction); also context/usage exhaustion":         true,
+	"  routine: claude-sonnet-5         # mechanical subagent roles: doc edits, plan-transcription implementers, build fixers, simple reviews":  true,
+	"effort: high                       # default; xhigh for security-critical analysis + final verification; medium/low for routine subagents": true,
+	"security_routing: quality-framing-opus-4-8": true,
+	"Execution mode per plan: live-system mutation, secrets, or interactive steps -> inline with the human; otherwise subagent-driven.": true,
 }
 
 // unrecognizedLines returns non-blank lines of got that expected does not

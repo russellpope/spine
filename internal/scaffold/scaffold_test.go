@@ -65,7 +65,7 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 5",
+	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 6",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli"} {
 		if !strings.Contains(string(wf), want) {
 			t.Errorf("WORKFLOW.md missing %q", want)
@@ -78,6 +78,103 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "docs/adr/README.md")); err != nil {
 		t.Error("missing docs/adr/README.md")
+	}
+}
+
+// Acceptance (I003): the gen-6 WORKFLOW.md carries the full dispatch
+// contract — four tiers with the tier->id mapping, the "auto" fallback
+// wording is gone, tier effort defaults are stated, the escalation ledger
+// grammar is exact, and the verify stage names the audit command.
+func TestInitGen6DispatchContract(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "go-service", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	wf, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(wf)
+
+	for _, want := range []string{
+		// four tiers present in the model_routing mapping
+		"primary: claude-fable-5",
+		"routine: claude-sonnet-5",
+		"mechanical: claude-haiku-4-5",
+		"fallback: claude-opus-4-8",
+		// effort defaults
+		"primary=high, routine=medium, mechanical=low",
+		"xhigh reserved for final verification",
+		// escalation ledger grammar (exact, unspaced arrow)
+		"ESCALATION <ticket-id> <from-tier>-><to-tier> reason: <one line>",
+		"ESCALATION <ticket-id> effort <from>-><to> reason: <one line>",
+		"FALLBACK <ticket-id> reason: <one line>",
+		".superpowers/sdd/progress.md",
+		// reviewer floor + named risk triggers
+		"review-tier is never below tier",
+		"cross-task-integration",
+		"concurrency-subtle-state",
+		"security-surface",
+		"plan-flagged-ambiguity",
+		// fallback semantics (proactive + reactive), security_routing folded in
+		"security-framed work",
+		"push-notifies the owner",
+		// execution modes
+		"subagent-driven is the default",
+		"ultracode",
+		"inline is the rare justified exception",
+		// verify-stage audit line
+		"spine audit routing",
+		"--transcripts <dir>",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("WORKFLOW.md missing %q", want)
+		}
+	}
+	if strings.Contains(content, "auto") {
+		t.Errorf("WORKFLOW.md must not contain \"auto\" (fallback must not read as automatic)")
+	}
+	if strings.Contains(content, "security_routing:") {
+		t.Errorf("WORKFLOW.md must not carry the standalone security_routing key")
+	}
+}
+
+// Acceptance (I003): the ticket template gains the optional model-routing
+// annotation fields, and issues-README documents them.
+func TestIssueTemplateHasAnnotationFields(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "go-service", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	tmplContent, err := os.ReadFile(filepath.Join(dir, "docs/issues/_template.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"execution-mode:", "tier:", "effort:", "risk-triggers: []", "review-tier:"} {
+		if !strings.Contains(string(tmplContent), want) {
+			t.Errorf("issue template missing %q", want)
+		}
+	}
+	// The annotation fields must be optional additions after the pre-gen-6
+	// fields (id/title/severity/status/affects/blocked-by), not a reordering
+	// of them — plain bug issues written against the old field order stay
+	// valid ticket files. (Whether an issue missing the fields entirely is
+	// still audited correctly — unannotated, never judged — is proven
+	// end-to-end in internal/audit's gen-6 proof tests.)
+	for _, want := range []string{"id: I000", "title:", "severity: med", "status: open", "affects: []", "blocked-by: []"} {
+		if !strings.Contains(string(tmplContent), want) {
+			t.Errorf("issue template lost a pre-gen-6 field: missing %q", want)
+		}
+	}
+
+	readme, err := os.ReadFile(filepath.Join(dir, "docs/issues/README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"execution-mode", "tier", "effort", "risk-triggers", "review-tier"} {
+		if !strings.Contains(string(readme), want) {
+			t.Errorf("issues/README.md missing field doc for %q", want)
+		}
 	}
 }
 
