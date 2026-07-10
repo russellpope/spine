@@ -41,7 +41,9 @@ declares exactly one.
   integration, concurrency/subtle state, security surfaces, plan-flagged
   ambiguity) force a primary-tier review; the final whole-branch review +
   acceptance simulation always runs primary. Review procedure (re-run the
-  claims, demand raw transcripts) is mandatory at every tier.
+  claims, demand raw transcripts) is mandatory at every tier. Inline
+  tickets carry `review-tier: n/a` — no per-task review cycle exists;
+  verify-stage gates still apply (refined 2026-07-10, I004 review).
 - **routing purpose** (decided 2026-07-09) — quality ceiling first: the
   primary model is the default thinker; down-routing exists to stop waste on
   provably mechanical work, not to chase spend. Auditability is the
