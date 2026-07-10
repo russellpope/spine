@@ -110,8 +110,12 @@ func TestInitGen6DispatchContract(t *testing.T) {
 		"ESCALATION <ticket-id> effort <from>-><to> reason: <one line>",
 		"FALLBACK <ticket-id> reason: <one line>",
 		".superpowers/sdd/progress.md",
-		// reviewer floor + named risk triggers
+		// malformed records excuse nothing — the general clause, not just
+		// the spaced-arrow example
+		"Any record not matching the grammar exactly excuses nothing",
+		// reviewer floor + named risk triggers + inline n/a nuance
 		"review-tier is never below tier",
+		"review-tier: n/a",
 		"cross-task-integration",
 		"concurrency-subtle-state",
 		"security-surface",
@@ -171,7 +175,8 @@ func TestIssueTemplateHasAnnotationFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"execution-mode", "tier", "effort", "risk-triggers", "review-tier"} {
+	for _, want := range []string{"execution-mode", "tier", "effort", "risk-triggers", "review-tier",
+		"review-tier: n/a"} { // inline tickets: no per-task review cycle, verify-stage gates still apply
 		if !strings.Contains(string(readme), want) {
 			t.Errorf("issues/README.md missing field doc for %q", want)
 		}

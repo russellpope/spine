@@ -27,9 +27,9 @@ Escalation: dispatch may exceed a ticket's annotated tier or effort freely, WITH
     ESCALATION <ticket-id> effort <from>-><to> reason: <one line>
     FALLBACK <ticket-id> reason: <one line>
 
-A record excuses exactly its to-tier, nothing else.
+A record excuses exactly its to-tier, nothing else. Any record not matching the grammar exactly excuses nothing — spaced arrows, missing `reason:`, missing tokens, all of it.
 
-Reviewer floor: review-tier is never below tier. Risk triggers force primary-tier review — cross-task-integration, concurrency-subtle-state, security-surface, plan-flagged-ambiguity. The final whole-branch review and acceptance simulation always run primary. Reviewers re-run claims and demand raw transcripts at every tier.
+Reviewer floor: review-tier is never below tier; inline tickets carry `review-tier: n/a` — no per-task review cycle exists, verify-stage gates still apply. Risk triggers force primary-tier review — cross-task-integration, concurrency-subtle-state, security-surface, plan-flagged-ambiguity. The final whole-branch review and acceptance simulation always run primary. Reviewers re-run claims and demand raw transcripts at every tier.
 
 Fallback routing: proactive — security-framed work (attacker/exploit framing) routes to fallback from the first dispatch; security-touching but quality-framed work stays on its natural tier with the security-surface trigger. Reactive — on a primary refusal the orchestrator re-dispatches on fallback with quality framing, writes a FALLBACK record, and push-notifies the owner.
 

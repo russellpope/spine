@@ -17,7 +17,8 @@ without them — `spine audit routing` reports unannotated tickets, never judges
 - `effort` — override of the tier's default effort; set only on deviation
 - `risk-triggers` — zero or more of cross-task-integration, concurrency-subtle-state,
   security-surface, plan-flagged-ambiguity; any present forces primary-tier review
-- `review-tier` — the tier review runs at; never below `tier`
+- `review-tier` — the tier review runs at; never below `tier`. Inline tickets carry
+  `review-tier: n/a` — no per-task review cycle exists; verify-stage gates still apply
 
 See `WORKFLOW.md` `model_routing` for the tier→model mapping and the full dispatch contract.
 
