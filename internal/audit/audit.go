@@ -38,12 +38,16 @@
 //     match; otherwise the warn-level unexplained-fallback. (A fallback id
 //     shared with an ordered tier below the annotation resolves through the
 //     ordered path and can therefore still be silent-descent.)
-//   - Any model-tier ESCALATION record for a ticket counts as its recorded
-//     reason, up or down — silent-descent is strictly deviation-below with
-//     no record. Deviation above with no record is the warn-level
+//   - A model-tier ESCALATION record excuses exactly its recorded to-tier:
+//     an off-tier token is escalated-with-reason iff some record on that
+//     ticket has a to-tier equal to the token's resolved tier (a reasoned
+//     DOWNWARD record — primary->routine — therefore keeps reasoned descent
+//     advisory). A token matching no record's to-tier is judged against the
+//     annotation: below it is silent-descent; above it is the warn-level
 //     escalated-no-reason (not blocking: quality went up, but the contract
 //     says escalations carry reasons). Effort ESCALATION records are
-//     accepted grammar but are not model evidence.
+//     accepted grammar but are not model evidence; records that do not
+//     parse as <from>-><to> excuse nothing.
 //   - A ticket's verdict is its worst token's verdict: silent-descent >
 //     unmapped-dispatch > unexplained-fallback > escalated-no-reason >
 //     escalated-with-reason > match.
@@ -229,8 +233,10 @@ func judgeToken(token string, t ticket, mapping map[string]string, l ledger) (Ve
 		}
 		return VerdictUnexplainedFallback, fmt.Sprintf("%s (fallback) without a FALLBACK record or fallback annotation", token)
 	}
-	if reason, ok := l.escalation[t.id]; ok {
-		return VerdictEscalatedWithReason, fmt.Sprintf("%s (%s) vs declared %s — ESCALATION reason: %s", token, actual, t.tier, reason)
+	for _, rec := range l.escalation[t.id] {
+		if rec.to == actual { // a record excuses exactly its to-tier
+			return VerdictEscalatedWithReason, fmt.Sprintf("%s (%s) vs declared %s — ESCALATION reason: %s", token, actual, t.tier, rec.reason)
+		}
 	}
 	if t.tier != "fallback" && tierRank[actual] < tierRank[t.tier] {
 		return VerdictSilentDescent, fmt.Sprintf("%s (%s) below declared %s with no ESCALATION record", token, actual, t.tier)
@@ -374,9 +380,16 @@ func stripComment(v string) string {
 	return strings.TrimSpace(v)
 }
 
+// escRecord is one parsed model-tier ESCALATION ledger record; it excuses
+// dispatches on exactly its to-tier.
+type escRecord struct {
+	to     string
+	reason string
+}
+
 type ledger struct {
-	escalation map[string]string // ticket id -> model-tier escalation reason
-	fallback   map[string]string // ticket id -> fallback reason
+	escalation map[string][]escRecord // ticket id -> model-tier escalation records
+	fallback   map[string]string      // ticket id -> fallback reason
 }
 
 // readLedger scans the build ledger for the pinned one-line grammar:
@@ -387,9 +400,10 @@ type ledger struct {
 //
 // A missing ledger is normal (records are then simply absent). Effort
 // escalations are parsed and deliberately unused: they justify effort, not
-// model tier.
+// model tier. A model-tier record keeps its to-tier — it excuses dispatches
+// on that tier only.
 func readLedger(path string) ledger {
-	l := ledger{escalation: map[string]string{}, fallback: map[string]string{}}
+	l := ledger{escalation: map[string][]escRecord{}, fallback: map[string]string{}}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return l
@@ -411,10 +425,16 @@ func readLedger(path string) ledger {
 		reason = strings.TrimSpace(reason)
 		switch kind {
 		case "ESCALATION":
-			if strings.HasPrefix(strings.TrimSpace(rest), "effort ") {
+			rest = strings.TrimSpace(rest)
+			if strings.HasPrefix(rest, "effort ") {
 				continue // effort record: not model evidence
 			}
-			l.escalation[id] = reason
+			fromTo, _, _ := strings.Cut(rest, " ")
+			_, to, ok := strings.Cut(fromTo, "->")
+			if !ok {
+				continue // no <from>-><to> tiers: excuses nothing
+			}
+			l.escalation[id] = append(l.escalation[id], escRecord{to: strings.TrimSpace(to), reason: reason})
 		case "FALLBACK":
 			l.fallback[id] = reason
 		}

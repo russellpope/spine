@@ -151,10 +151,36 @@ func TestEscalationWithoutReasonWarns(t *testing.T) {
 	}
 }
 
+// An escalation record excuses only its recorded to-tier: I210 carries a
+// recorded routine->primary escalation but was later re-dispatched on the
+// mechanical tier — below the annotation and unrelated to the record. That
+// is a genuine silent descent and must block at the Run boundary.
+func TestEscalationRecordDoesNotExcuseUnrelatedDescent(t *testing.T) {
+	rep := runFixture(t, "mixed")
+	rows := rowsByID(t, rep)
+	r := rows["I210"]
+	if r.Verdict != VerdictSilentDescent {
+		t.Fatalf("I210 verdict = %s (%s), want silent-descent — the routine->primary record must not excuse a mechanical dispatch", r.Verdict, r.Detail)
+	}
+	if !rep.Blocking() {
+		t.Error("I210's descent must make the report blocking")
+	}
+}
+
+// A reasoned DOWNWARD record excuses exactly its to-tier: recorded
+// primary->routine descent stays advisory, never blocking.
+func TestReasonedDescentStaysAdvisory(t *testing.T) {
+	rows := rowsByID(t, runFixture(t, "mixed"))
+	r := rows["I211"]
+	if r.Verdict != VerdictEscalatedWithReason || !strings.Contains(r.Detail, "verbatim") {
+		t.Errorf("I211 verdict = %s (%s), want escalated-with-reason carrying the recorded reason", r.Verdict, r.Detail)
+	}
+}
+
 // Template and README files in docs/issues are not tickets.
 func TestNonTicketFilesIgnored(t *testing.T) {
 	rows := rowsByID(t, runFixture(t, "mixed"))
-	want := []string{"I201", "I202", "I203", "I204", "I205", "I206", "I207", "I208", "I209"}
+	want := []string{"I201", "I202", "I203", "I204", "I205", "I206", "I207", "I208", "I209", "I210", "I211"}
 	if len(rows) != len(want) {
 		t.Fatalf("want %d rows, got %v", len(want), rows)
 	}
