@@ -135,6 +135,9 @@ func Run(repoDir, transcriptsDir string) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	if !anyAnnotated(tickets) {
+		rep.Warnings = append(rep.Warnings, "nothing audited — no annotated tickets found (zero docs/issues tickets carry a tier: annotation); an exit-0 run judged nothing")
+	}
 	mapping := readMapping(filepath.Join(repoDir, "WORKFLOW.md"), &rep.Warnings)
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
 	dispatches, agents := readTranscripts(transcriptsDir, &rep.Warnings)
@@ -284,6 +287,19 @@ func pickTier(tiers []string, declared string) string {
 type ticket struct {
 	id   string
 	tier string
+}
+
+// anyAnnotated reports whether at least one ticket carries a tier:
+// annotation. A repo where none do audits vacuously: every row comes back
+// unannotated and unjudged, and the CLI still exits 0 — indistinguishable
+// from a real clean pass unless the report says so.
+func anyAnnotated(tickets []ticket) bool {
+	for _, t := range tickets {
+		if t.tier != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // readTickets parses docs/issues frontmatter. Only the id is required for a

@@ -103,7 +103,7 @@ func TestInitGen6DispatchContract(t *testing.T) {
 		"mechanical: claude-haiku-4-5",
 		"fallback: claude-opus-4-8",
 		// effort defaults
-		"primary=high, routine=medium, mechanical=low",
+		"primary=high, routine=medium, mechanical=low, fallback=high",
 		"xhigh reserved for final verification",
 		// escalation ledger grammar (exact, unspaced arrow)
 		"ESCALATION <ticket-id> <from-tier>-><to-tier> reason: <one line>",

@@ -23,12 +23,12 @@ var gen6ContentLines = map[string]bool{
 	"**Model:** see `WORKFLOW.md` `model_routing` (primary / fallback-on-refusal / routine; swappable).":                                true,
 
 	// gen-6 model_routing lines and effort comment.
-	"primary: claude-fable-5          # default thinker: design, judgment, orchestration, final review":                                                                                                         true,
-	"routine: claude-sonnet-5         # multi-step mechanical subagent roles":                                                                                                                                   true,
-	"mechanical: claude-haiku-4-5     # verbatim plan-transcription + single-file mechanical fixes ONLY":                                                                                                        true,
-	"fallback: claude-opus-4-8        # primary-refused or security-framed work":                                                                                                                                true,
-	"effort: high                       # tier default: primary=high, routine=medium, mechanical=low; xhigh reserved for final verification and security-critical passes; per-ticket effort: only on deviation": true,
-	"**Model:** see `WORKFLOW.md` `model_routing` (primary / routine / mechanical / fallback; swappable).":                                                                                                      true,
+	"primary: claude-fable-5          # default thinker: design, judgment, orchestration, final review":  true,
+	"routine: claude-sonnet-5         # multi-step mechanical subagent roles":                            true,
+	"mechanical: claude-haiku-4-5     # verbatim plan-transcription + single-file mechanical fixes ONLY": true,
+	"fallback: claude-opus-4-8        # primary-refused or security-framed work":                         true,
+	"effort: high                       # tier default: primary=high, routine=medium, mechanical=low, fallback=high; xhigh reserved for final verification and security-critical passes; per-ticket effort: only on deviation": true,
+	"**Model:** see `WORKFLOW.md` `model_routing` (primary / routine / mechanical / fallback; swappable).":                                                                                                                     true,
 
 	// gen-6 "## Model routing" section.
 	"## Model routing": true,
@@ -165,5 +165,62 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 	}
 	if !strings.Contains(string(cl), "primary / routine / mechanical / fallback") {
 		t.Error("migrated CLAUDE.md Model pointer missing the four-tier parenthetical")
+	}
+}
+
+// A user-remapped model_routing tier id survives gen5->6 migration even
+// when the hand edit used non-4-space padding before the trailing comment
+// (keys.go's replaceValue always normalizes new writes to 4 spaces, but a
+// human editing the file by hand has no reason to match that exactly). The
+// remap is a sanctioned choice, not a local edit to flag or lose.
+func TestGen5To6RemapWithNonstandardPaddingRecognized(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "ccq-gen5", "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := "  routine: claude-sonnet-5         # mechanical subagent roles: doc edits, plan-transcription implementers, build fixers, simple reviews\n"
+	// 3 spaces before the comment, not the template's 4.
+	remap := "  routine: local-llama-70b        # mechanical subagent roles: doc edits, plan-transcription implementers, build fixers, simple reviews\n"
+	content := string(raw)
+	if !strings.Contains(content, old) {
+		t.Fatal("fixture line to remap not found")
+	}
+	content = strings.Replace(content, old, remap, 1)
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	claudeRaw, err := os.ReadFile(filepath.Join("testdata", "ccq-gen5", "CLAUDE.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), claudeRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := report(t, reports, "WORKFLOW.md")
+	if wf.State == SkippedUnrecognized {
+		t.Fatalf("3-space-padded remap misread as an unrecognized local edit: %v", wf.Unrecognized)
+	}
+	for _, u := range wf.Unrecognized {
+		if strings.Contains(u, "local-llama-70b") {
+			t.Errorf("remapped routine value flagged as unrecognized: %q", u)
+		}
+	}
+
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "local-llama-70b") {
+		t.Error("remapped routine value did not survive migration")
 	}
 }

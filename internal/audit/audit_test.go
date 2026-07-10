@@ -255,6 +255,32 @@ func TestMissingIssuesDirErrors(t *testing.T) {
 	}
 }
 
+// A repo where zero docs/issues tickets carry a tier: annotation audits
+// vacuously — every row is unannotated, nothing is ever judged, and the
+// report exits 0. That "clean" pass is indistinguishable from a real one
+// unless the report itself says so: a repo-wide warning must call out that
+// nothing was actually audited.
+func TestVacuousAuditWarns(t *testing.T) {
+	rep := runFixture(t, "vacuous")
+	for _, r := range rep.Tickets {
+		if r.Verdict != VerdictUnannotated {
+			t.Errorf("%s: verdict = %s, want unannotated (fixture has no tier: annotations)", r.ID, r.Verdict)
+		}
+	}
+	found := false
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "no annotated tickets") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("vacuous audit (zero tickets carry a tier: annotation) must warn, got %q", rep.Warnings)
+	}
+	if rep.Blocking() {
+		t.Error("a vacuous audit must never block")
+	}
+}
+
 // Rows come back sorted by ticket id for deterministic output.
 func TestRowsSortedByID(t *testing.T) {
 	rep := runFixture(t, "mixed")

@@ -363,11 +363,26 @@ var supersededLines = map[string]bool{
 
 // unrecognizedLines returns non-blank lines of got that expected does not
 // contain anywhere (order-insensitive, trailing-space-insensitive) and that
-// no prior generation emitted.
+// no prior generation emitted, and that is not a sanctioned remap of a
+// known key (see keyLineSignature): a got line whose key+comment match a
+// want or supersededLines line is recognized regardless of its value or
+// comment padding — the value is exactly what a remap changes, and a
+// hand-typed comment column width was never meaningful.
 func unrecognizedLines(got, expected string) []string {
 	want := map[string]bool{}
+	sigs := map[string]bool{}
+	addSig := func(l string) {
+		if sig, ok := keyLineSignature(l); ok {
+			sigs[sig] = true
+		}
+	}
 	for _, l := range splitLines(expected) {
-		want[strings.TrimRight(l, " ")] = true
+		t := strings.TrimRight(l, " ")
+		want[t] = true
+		addSig(t)
+	}
+	for l := range supersededLines {
+		addSig(l)
 	}
 	var extra []string
 	for _, l := range splitLines(got) {
@@ -375,7 +390,41 @@ func unrecognizedLines(got, expected string) []string {
 		if t == "" || want[t] || supersededLines[t] {
 			continue
 		}
+		if sig, ok := keyLineSignature(t); ok && sigs[sig] {
+			continue // sanctioned remap: same key/comment; value and padding may differ
+		}
 		extra = append(extra, t)
 	}
 	return extra
+}
+
+// keyLineSignature is the identifying signature of a "key: value  #
+// comment" line — a top-level key or a two-space-indented model_routing
+// sub-key — with the value dropped and the comment kept verbatim. ok is
+// false for anything that isn't a recognized key: value line (prose,
+// headers, unknown keys), which keeps exact-text comparison for those.
+func keyLineSignature(line string) (sig string, ok bool) {
+	trimmed := strings.TrimSpace(line)
+	for _, k := range topKeys {
+		if _, has := cutKey(trimmed, k); has {
+			return k + "\x00" + commentOf(trimmed, k), true
+		}
+	}
+	for _, k := range routingKeys {
+		if _, has := cutKey(trimmed, k); has {
+			return k + "\x00" + commentOf(trimmed, k), true
+		}
+	}
+	return "", false
+}
+
+// commentOf returns the trailing "# comment" of a "key: value # comment"
+// line (comment padding stripped, comment text verbatim), or "" if the
+// line carries none.
+func commentOf(trimmed, key string) string {
+	rest, _ := strings.CutPrefix(trimmed, key+":")
+	if i := commentIndex(rest); i >= 0 {
+		return strings.TrimSpace(rest[i:])
+	}
+	return ""
 }

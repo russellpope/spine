@@ -81,8 +81,9 @@ makes actual-vs-declared visible every build.
   (primary=claude-fable-5, routine=claude-sonnet-5,
   mechanical=claude-haiku-4-5, fallback=claude-opus-4-8 at gen 6; ids are
   per-repo remappable); tier-default efforts (primary=high, routine=medium,
-  mechanical=low; xhigh reserved for final verification and
-  security-critical passes); the escalation rule (freely upward with a
+  mechanical=low, fallback=high; xhigh reserved for final verification and
+  security-critical passes) (amended 2026-07-10, final review); the
+  escalation rule (freely upward with a
   recorded reason; silent descent is a gate failure); reviewer floor + the
   four named risk triggers; fallback semantics (proactive for
   security-framed work, reactive orchestrator-mediated on refusal with
@@ -99,9 +100,11 @@ makes actual-vs-declared visible every build.
   existing ADR): a new audit package whose boundary is a pure function from
   (repo, transcript records) to a routing report — per task: declared tier,
   actual model(s), verdict ∈ {match, escalated-with-reason,
-  silent-descent, unmapped-dispatch, no-transcript}. CLI layer is a thin
+  escalated-no-reason, silent-descent, unmapped-dispatch,
+  unexplained-fallback, no-transcript, unannotated}. CLI layer is a thin
   printer. Exit non-zero only on silent-descent; missing/unparseable
   transcripts produce warnings (parser rot must not fail builds).
+  (amended 2026-07-10, final review)
 - **Transcript source**: the harness's per-project session records (JSONL)
   are the ground truth for actual models; this is an undocumented internal
   format, hence the graceful-degradation requirement.
@@ -174,8 +177,8 @@ makes actual-vs-declared visible every build.
   (same-tier task reviews + primary final review caught gate escapes four
   builds running), and the confirmed finding that the primary model's
   security classifier trips on framing rather than file contents.
-- The push-notification mechanism for fallback events should reuse the
-  owner's existing notification channel configuration rather than invent a
-  new one; exact mechanism is a plan-time detail.
+- The reactive-fallback notification uses the harness push-notification
+  channel (the owner's configured notification channel) (amended
+  2026-07-10, final review).
 - When this ships, supersede the persistent-memory entries that conflate
   ultracode with subagent-driven (per user story 30).

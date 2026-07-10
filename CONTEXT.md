@@ -56,7 +56,9 @@ declares exactly one.
 - **escalation** (decided 2026-07-09) — a dispatch-time tier or effort
   increase above the ticket's annotation, always with a recorded reason.
   Permitted freely. The inverse — **silent descent**, dispatching below the
-  annotation without a recorded reason — is a gate failure.
+  annotation without a recorded reason — is a gate failure. The ESCALATION
+  record grammar covers reasoned deviation in either direction — a downward
+  record keeps descent advisory (refined 2026-07-10, final review).
 - **fallback routing** (decided 2026-07-09) — two paths: proactive
   (security-FRAMED work is pre-flagged at intake/plan time and routed to
   fallback from the first dispatch — the classifier keys on framing, not
@@ -65,9 +67,10 @@ declares exactly one.
   push-notified). Never described as "auto" — the orchestrator is the
   mechanism.
 - **effort routing** (decided 2026-07-09) — effort follows the tier's
-  default (primary=high, routine=medium, mechanical=low; xhigh reserved for
-  final verification and security-critical passes); per-ticket overrides
-  follow the escalation rule.
+  default (primary=high, routine=medium, mechanical=low, fallback=high;
+  xhigh reserved for final verification and security-critical passes)
+  (amended 2026-07-10, final review); per-ticket overrides follow the
+  escalation rule.
 - **routing audit** (decided 2026-07-09) — deterministic post-build diff of
   declared tier annotations vs actual models in the transcript, per task
   (`spine audit routing`). Required at the verify stage: reasoned
