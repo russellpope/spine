@@ -221,13 +221,13 @@ func planWorkflow(opts Options) (FileReport, tmpl.Values, string, error) {
 	for k, v := range keys {
 		expectedOld = setKey(expectedOld, k, v)
 	}
-	report.Unrecognized = unrecognizedLines(old, expectedOld)
-
-	choices, err := Choices(keys, gen, project)
+	newContent, err := tmpl.Render("current", "WORKFLOW.md.tmpl", vals)
 	if err != nil {
 		return report, tmpl.Values{}, "", err
 	}
-	newContent, err := tmpl.Render("current", "WORKFLOW.md.tmpl", vals)
+	report.Unrecognized = unrecognizedLines(old, expectedOld, newContent)
+
+	choices, err := Choices(keys, gen, project)
 	if err != nil {
 		return report, tmpl.Values{}, "", err
 	}
@@ -331,7 +331,7 @@ func planSimple(dir, gen, tmplName, relPath string, inGen0 bool, vals tmpl.Value
 	if err != nil {
 		return report, err
 	}
-	report.Unrecognized = unrecognizedLines(old, expectedOld)
+	report.Unrecognized = unrecognizedLines(old, expectedOld, newContent)
 	if d := Diff(relPath, old, newContent); d != "" {
 		report.State = Pending
 		report.Diff = d
@@ -368,11 +368,25 @@ var supersededLines = map[string]bool{
 // want or supersededLines line is recognized regardless of its value or
 // comment padding — the value is exactly what a remap changes, and a
 // hand-typed comment column width was never meaningful.
-func unrecognizedLines(got, expected string) []string {
+//
+// Signature recognition is limited to keys the CURRENT generation still
+// renders (current): only those values are carry-forwardable via
+// Choices/setKey. A customized value of a key the current generation
+// REMOVED (e.g. a gen-5 security_routing local value under gen 6) has
+// nowhere to go — accepting it as a remap would let a plain --write
+// silently destroy it — so such lines stay literal-match-only and read as
+// unrecognized local edits.
+func unrecognizedLines(got, expected, current string) []string {
+	currentKeys := map[string]bool{}
+	for _, l := range splitLines(current) {
+		if k, _, ok := keyLineSignature(l); ok {
+			currentKeys[k] = true
+		}
+	}
 	want := map[string]bool{}
 	sigs := map[string]bool{}
 	addSig := func(l string) {
-		if sig, ok := keyLineSignature(l); ok {
+		if k, sig, ok := keyLineSignature(l); ok && currentKeys[k] {
 			sigs[sig] = true
 		}
 	}
@@ -390,7 +404,7 @@ func unrecognizedLines(got, expected string) []string {
 		if t == "" || want[t] || supersededLines[t] {
 			continue
 		}
-		if sig, ok := keyLineSignature(t); ok && sigs[sig] {
+		if _, sig, ok := keyLineSignature(t); ok && sigs[sig] {
 			continue // sanctioned remap: same key/comment; value and padding may differ
 		}
 		extra = append(extra, t)
@@ -400,22 +414,24 @@ func unrecognizedLines(got, expected string) []string {
 
 // keyLineSignature is the identifying signature of a "key: value  #
 // comment" line — a top-level key or a two-space-indented model_routing
-// sub-key — with the value dropped and the comment kept verbatim. ok is
-// false for anything that isn't a recognized key: value line (prose,
-// headers, unknown keys), which keeps exact-text comparison for those.
-func keyLineSignature(line string) (sig string, ok bool) {
+// sub-key — with the value dropped and the comment kept verbatim, plus the
+// bare key so callers can gate on which keys the current generation still
+// renders. ok is false for anything that isn't a recognized key: value
+// line (prose, headers, unknown keys), which keeps exact-text comparison
+// for those.
+func keyLineSignature(line string) (key, sig string, ok bool) {
 	trimmed := strings.TrimSpace(line)
 	for _, k := range topKeys {
 		if _, has := cutKey(trimmed, k); has {
-			return k + "\x00" + commentOf(trimmed, k), true
+			return k, k + "\x00" + commentOf(trimmed, k), true
 		}
 	}
 	for _, k := range routingKeys {
 		if _, has := cutKey(trimmed, k); has {
-			return k + "\x00" + commentOf(trimmed, k), true
+			return k, k + "\x00" + commentOf(trimmed, k), true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 // commentOf returns the trailing "# comment" of a "key: value # comment"

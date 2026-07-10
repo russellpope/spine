@@ -224,3 +224,66 @@ func TestGen5To6RemapWithNonstandardPaddingRecognized(t *testing.T) {
 		t.Error("remapped routine value did not survive migration")
 	}
 }
+
+// A CUSTOMIZED value of a key that gen 6 REMOVES (security_routing) is NOT
+// a sanctioned remap: the key exists nowhere in the current template, so
+// the value cannot be carried forward by Choices/setKey — accepting it as
+// recognized would let a plain --write silently destroy it. It must stay a
+// named unrecognized local edit (SkippedUnrecognized), and a plain update
+// must leave the file untouched. Lock for the NEW-1 data-loss regression.
+func TestGen5To6CustomizedRemovedKeyStaysSkipped(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "ccq-gen5", "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if !strings.Contains(content, "security_routing: quality-framing-opus-4-8\n") {
+		t.Fatal("fixture security_routing default line not found")
+	}
+	content = strings.Replace(content,
+		"security_routing: quality-framing-opus-4-8\n",
+		"security_routing: my-custom-value\n", 1)
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	claudeRaw, err := os.ReadFile(filepath.Join("testdata", "ccq-gen5", "CLAUDE.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), claudeRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := report(t, reports, "WORKFLOW.md")
+	if wf.State != SkippedUnrecognized {
+		t.Fatalf("customized removed key must skip the file, got state=%v unrec=%v", wf.State, wf.Unrecognized)
+	}
+	named := false
+	for _, u := range wf.Unrecognized {
+		if strings.Contains(u, "security_routing: my-custom-value") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("skip must name the customized line, got %v", wf.Unrecognized)
+	}
+
+	// A plain --write (no --force) must not migrate the file: the custom
+	// value has nowhere to go in gen 6 and would be silently destroyed.
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "my-custom-value") {
+		t.Error("plain update silently destroyed the customized removed-key value")
+	}
+}
