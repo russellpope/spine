@@ -2,7 +2,7 @@
 id: I004
 title: /to-tickets skill — assignment step + tier vocabulary
 severity: med
-status: open
+status: fixed
 affects: []
 blocked-by: []
 parent: [I001]

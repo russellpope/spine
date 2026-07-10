@@ -2,7 +2,7 @@
 id: I002
 title: spine audit routing — audit core + CLI
 severity: med
-status: open
+status: fixed
 affects: []
 blocked-by: []
 parent: [I001]

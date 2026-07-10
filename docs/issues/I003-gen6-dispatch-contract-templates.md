@@ -2,7 +2,7 @@
 id: I003
 title: Gen-6 templates — dispatch contract, ticket annotation fields, gen5→6 migration, ADR
 severity: med
-status: open
+status: fixed
 affects: []
 blocked-by: [I002]
 parent: [I001]
