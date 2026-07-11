@@ -140,7 +140,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"template_version: 6",
+		"template_version: 7",
 		"primary: claude-fable-5",
 		"routine: claude-sonnet-5",
 		"mechanical: claude-haiku-4-5",
@@ -160,8 +160,8 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(cl), "<!-- spine:begin v6 -->") {
-		t.Error("migrated CLAUDE.md missing v6 marker")
+	if !strings.HasPrefix(string(cl), "<!-- spine:begin v7 -->") {
+		t.Error("migrated CLAUDE.md missing v7 marker")
 	}
 	if !strings.Contains(string(cl), "primary / routine / mechanical / fallback") {
 		t.Error("migrated CLAUDE.md Model pointer missing the four-tier parenthetical")

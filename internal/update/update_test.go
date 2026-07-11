@@ -103,7 +103,7 @@ func TestGen0CleanClaim(t *testing.T) {
 	if wf.State != Pending {
 		t.Fatalf("WORKFLOW state=%v unrec=%v", wf.State, wf.Unrecognized)
 	}
-	for _, want := range []string{"template_version: 6", "primary: claude-fable-5",
+	for _, want := range []string{"template_version: 7", "primary: claude-fable-5",
 		"model_default: claude-fable-5", "profile: rust", "functional_harness: cli"} {
 		if !strings.Contains(wf.newContent, want) {
 			t.Errorf("regenerated WORKFLOW missing %q", want)
@@ -116,7 +116,7 @@ func TestGen0CleanClaim(t *testing.T) {
 	if cl.State != Pending {
 		t.Fatalf("CLAUDE state=%v", cl.State)
 	}
-	if !strings.HasPrefix(cl.newContent, "<!-- spine:begin v6 -->") {
+	if !strings.HasPrefix(cl.newContent, "<!-- spine:begin v7 -->") {
 		t.Error("claimed CLAUDE.md lacks markers")
 	}
 	if got := strings.Count(cl.newContent, "# hbmview"); got != 1 {
@@ -160,7 +160,7 @@ func TestUnrecognizedEditsSkipUnlessForce(t *testing.T) {
 	if strings.Contains(string(got), "custom_rule") {
 		t.Error("force did not drop unrecognized line")
 	}
-	if !strings.Contains(string(got), "template_version: 6") {
+	if !strings.Contains(string(got), "template_version: 7") {
 		t.Error("force did not regenerate")
 	}
 }
@@ -319,7 +319,7 @@ func TestAdoptModeSynthesizesWorkflow(t *testing.T) {
 	if wf.State != Pending || !wf.Created {
 		t.Fatalf("WORKFLOW.md state=%v created=%v", wf.State, wf.Created)
 	}
-	if !strings.Contains(wf.Diff, "profile: go-service") || !strings.Contains(wf.Diff, "template_version: 6") || !strings.Contains(wf.Diff, "# Workflow — praxis") {
+	if !strings.Contains(wf.Diff, "profile: go-service") || !strings.Contains(wf.Diff, "template_version: 7") || !strings.Contains(wf.Diff, "# Workflow — praxis") {
 		t.Errorf("diff=%q", wf.Diff)
 	}
 	cl := byPath["CLAUDE.md"]
@@ -406,9 +406,9 @@ func TestVersionDowngradeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bumped := strings.Replace(string(raw), "template_version: 6", "template_version: 7", 1)
+	bumped := strings.Replace(string(raw), "template_version: 7", "template_version: 8", 1)
 	if bumped == string(raw) {
-		t.Fatal("template_version: 6 not found in scaffolded WORKFLOW.md to bump")
+		t.Fatal("template_version: 7 not found in scaffolded WORKFLOW.md to bump")
 	}
 	if err := os.WriteFile(path, []byte(bumped), 0o644); err != nil {
 		t.Fatal(err)
