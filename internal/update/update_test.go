@@ -530,3 +530,46 @@ func TestRunSurfacesEvalsDirStatError(t *testing.T) {
 		t.Fatal("want Stat error surfaced, got nil (silently skipped evals-README before v3)")
 	}
 }
+
+// A repo scaffolded at the *previous* generation must, on a plain update,
+// gain AGENTS.md and advance its stamp — with no hand-written migration code.
+func TestGen6RepoGainsAgentsMdOnUpdate(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "go-service", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a repo stamped at the prior generation.
+	wfPath := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(wfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downgraded := strings.Replace(string(raw), "template_version: 7", "template_version: 6", 1)
+	if downgraded == string(raw) {
+		t.Fatal("could not stage a gen-6 fixture")
+	}
+	if err := os.WriteFile(wfPath, []byte(downgraded), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Remove AGENTS.md so we're truly in the pre-A state.
+	if err := os.Remove(filepath.Join(dir, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("update did not create AGENTS.md: %v", err)
+	}
+	if !strings.Contains(string(agents), "<!-- spine:begin v7 -->") {
+		t.Error("AGENTS.md not stamped at v7")
+	}
+	wfAfter, err := os.ReadFile(wfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wfAfter), "template_version: 7") {
+		t.Error("WORKFLOW.md did not advance to gen 7")
+	}
+}
