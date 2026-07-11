@@ -84,6 +84,11 @@ func Run(opts Options) ([]FileReport, error) {
 		return nil, err
 	}
 	reports = append(reports, cl)
+	ag, err := planAgents(opts.Dir, vals)
+	if err != nil {
+		return nil, err
+	}
+	reports = append(reports, ag)
 	legacyPreserve := map[string]bool{}
 	for _, f := range simpleFiles {
 		if f.legacyPreserve {
@@ -283,6 +288,47 @@ func planClaude(dir, gen string, vals tmpl.Values) (FileReport, error) {
 		} else {
 			newContent = block + "\n" + old // claim on top, preserve everything
 		}
+	}
+	if d := Diff(report.Path, old, newContent); d != "" {
+		report.State = Pending
+		report.Diff = d
+		report.newContent = newContent
+	}
+	return report, nil
+}
+
+func planAgents(dir string, vals tmpl.Values) (FileReport, error) {
+	report := FileReport{Path: "AGENTS.md"}
+	block, err := tmpl.Render("current", "AGENTS.md.tmpl", vals)
+	if err != nil {
+		return report, err
+	}
+	path := filepath.Join(dir, "AGENTS.md")
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		report.State = Pending
+		report.Created = true
+		report.Diff = Diff(report.Path, "", block)
+		report.newContent = block
+		return report, nil
+	}
+	if err != nil {
+		return report, err
+	}
+	old := string(raw)
+	var newContent string
+	if strings.Contains(old, markerBegin) {
+		replaced, err := replaceMarkerBlock(old, block)
+		if err != nil {
+			report.Unrecognized = []string{err.Error()}
+			return report, nil
+		}
+		newContent = replaced
+	} else {
+		// No spine-owned block yet: claim on top, preserve everything below.
+		// (AGENTS.md has no gen0 template, so there is no pristine-legacy
+		// clean-claim case as CLAUDE.md has.)
+		newContent = block + "\n" + old
 	}
 	if d := Diff(report.Path, old, newContent); d != "" {
 		report.State = Pending

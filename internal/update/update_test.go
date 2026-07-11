@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/russellpope/spine/internal/scaffold"
+	"github.com/russellpope/spine/internal/tmpl"
 )
 
 const gen0HbmviewClaude = `# hbmview
@@ -415,6 +416,92 @@ func TestVersionDowngradeGuard(t *testing.T) {
 	_, err = Run(Options{Dir: dir})
 	if err == nil || !strings.Contains(err.Error(), "generation") {
 		t.Fatalf("want error mentioning generation, got %v", err)
+	}
+}
+
+func TestAgentsMdCreatedWhenMissing(t *testing.T) {
+	// A repo with WORKFLOW.md + CLAUDE.md but no AGENTS.md (the state every
+	// existing gen-6 repo is in) gains AGENTS.md on update.
+	dir := writeRepo(t, gen0Hbmview, gen0HbmviewClaude)
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := report(t, reports, "AGENTS.md")
+	if a.State != Pending || !a.Created {
+		t.Fatalf("AGENTS.md state=%v created=%v", a.State, a.Created)
+	}
+	if !strings.Contains(a.Diff, "read by **Codex**") {
+		t.Errorf("AGENTS.md diff missing Codex-tuned body:\n%s", a.Diff)
+	}
+}
+
+func TestAgentsMdMarkerReplacePreservesHandContent(t *testing.T) {
+	dir := writeRepo(t, gen0Hbmview, gen0HbmviewClaude)
+	// pre-place an AGENTS.md with a stale block + hand-authored tail.
+	stale := "<!-- spine:begin v5 -->\nold codex brief\n<!-- spine:end -->\n\n## Local notes\nkeep me\n"
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = reports
+	got, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(got)
+	if strings.Contains(s, "old codex brief") {
+		t.Error("stale block survived marker replacement")
+	}
+	if !strings.Contains(s, "## Local notes") || !strings.Contains(s, "keep me") {
+		t.Error("hand-authored content outside markers was lost")
+	}
+	if strings.Count(s, "<!-- spine:begin") != 1 {
+		t.Error("marker replacement duplicated the block")
+	}
+}
+
+func TestAgentsMdUnbalancedMarkersFlagged(t *testing.T) {
+	dir := writeRepo(t, gen0Hbmview, gen0HbmviewClaude)
+	bad := "<!-- spine:begin v6 -->\nbody\n<!-- spine:begin v6 -->\n<!-- spine:end -->\n"
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := report(t, reports, "AGENTS.md")
+	if len(a.Unrecognized) == 0 {
+		t.Fatal("unbalanced markers should be flagged, not clobbered")
+	}
+}
+
+func TestClaudeAndAgentsBlocksShareVocabulary(t *testing.T) {
+	vals := tmpl.Values{Project: "demo", Profile: "go-service", Version: tmpl.Version()}
+	claude, err := tmpl.Render("current", "CLAUDE.md.tmpl", vals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := tmpl.Render("current", "AGENTS.md.tmpl", vals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The two harness briefs must not drift on the load-bearing vocabulary.
+	for _, term := range []string{
+		"WORKFLOW.md", "docs/specs/", "docs/adr/", "docs/issues/", "docs/handoffs",
+		"primary", "routine", "mechanical", "fallback",
+		"verification before completion",
+	} {
+		if !strings.Contains(claude, term) {
+			t.Errorf("CLAUDE.md.tmpl missing shared term %q", term)
+		}
+		if !strings.Contains(agents, term) {
+			t.Errorf("AGENTS.md.tmpl missing shared term %q", term)
+		}
 	}
 }
 
