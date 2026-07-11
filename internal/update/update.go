@@ -271,7 +271,7 @@ func planClaude(dir, gen string, vals tmpl.Values) (FileReport, error) {
 	old := string(raw)
 	var newContent string
 	if strings.Contains(old, markerBegin) {
-		replaced, err := replaceMarkerBlock(old, block)
+		replaced, err := replaceMarkerBlock(report.Path, old, block)
 		if err != nil {
 			// unbalanced markers: never force-droppable, no newContent.
 			report.Unrecognized = []string{err.Error()}
@@ -318,8 +318,9 @@ func planAgents(dir string, vals tmpl.Values) (FileReport, error) {
 	old := string(raw)
 	var newContent string
 	if strings.Contains(old, markerBegin) {
-		replaced, err := replaceMarkerBlock(old, block)
+		replaced, err := replaceMarkerBlock(report.Path, old, block)
 		if err != nil {
+			// unbalanced markers: never force-droppable, no newContent.
 			report.Unrecognized = []string{err.Error()}
 			return report, nil
 		}
@@ -338,14 +339,14 @@ func planAgents(dir string, vals tmpl.Values) (FileReport, error) {
 	return report, nil
 }
 
-func replaceMarkerBlock(old, block string) (string, error) {
+func replaceMarkerBlock(path, old, block string) (string, error) {
 	if strings.Count(old, markerBegin) != 1 || strings.Count(old, markerEnd) != 1 {
-		return "", fmt.Errorf("CLAUDE.md spine markers unbalanced; fix by hand")
+		return "", fmt.Errorf("%s spine markers unbalanced; fix by hand", path)
 	}
 	begin := strings.Index(old, markerBegin)
 	end := strings.Index(old, markerEnd)
 	if end < begin {
-		return "", fmt.Errorf("CLAUDE.md spine markers out of order; fix by hand")
+		return "", fmt.Errorf("%s spine markers out of order; fix by hand", path)
 	}
 	return old[:begin] + strings.TrimSuffix(block, "\n") + old[end+len(markerEnd):], nil
 }

@@ -478,6 +478,9 @@ func TestAgentsMdUnbalancedMarkersFlagged(t *testing.T) {
 	if len(a.Unrecognized) == 0 {
 		t.Fatal("unbalanced markers should be flagged, not clobbered")
 	}
+	if !strings.Contains(a.Unrecognized[0], "AGENTS.md") {
+		t.Errorf("unbalanced-marker message should name AGENTS.md, got %q", a.Unrecognized[0])
+	}
 }
 
 func TestClaudeAndAgentsBlocksShareVocabulary(t *testing.T) {
