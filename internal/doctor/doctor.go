@@ -53,7 +53,9 @@ func Run(dir string) ([]Finding, error) {
 	if !missingCore {
 		findings = append(findings, updateChecks(dir)...)
 	}
-	findings = append(findings, markerCheck(dir)...)
+	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+		findings = append(findings, markerCheck(dir, name)...)
+	}
 	findings = append(findings, superpowersCheck(dir)...)
 	findings = append(findings, adrCheck(dir)...)
 	findings = append(findings, evalCheck(dir)...)
@@ -83,7 +85,7 @@ func updateChecks(dir string) []Finding {
 			findings = append(findings, Finding{"D2", "warn", r.Path, msg})
 		case update.SkippedUnrecognized:
 			msg := fmt.Sprintf("%d unrecognized local edit(s) in a machine-owned file — reconcile or spine update --force", len(r.Unrecognized))
-			if r.Path == "CLAUDE.md" && len(r.Unrecognized) > 0 && strings.Contains(r.Unrecognized[0], "marker") {
+			if (r.Path == "CLAUDE.md" || r.Path == "AGENTS.md") && len(r.Unrecognized) > 0 && strings.Contains(r.Unrecognized[0], "marker") {
 				// --force deliberately cannot repair marker damage (unrecognized
 				// with no newContent); the generic --force hint is actively wrong here.
 				msg = "spine markers damaged — fix by hand (--force cannot repair)"
@@ -94,8 +96,8 @@ func updateChecks(dir string) []Finding {
 	return findings
 }
 
-func markerCheck(dir string) []Finding {
-	raw, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+func markerCheck(dir, name string) []Finding {
+	raw, err := os.ReadFile(filepath.Join(dir, name))
 	if err != nil {
 		return nil // D1 already reported it
 	}
@@ -105,15 +107,15 @@ func markerCheck(dir string) []Finding {
 	ends := strings.Count(content, endMarker)
 	switch {
 	case begins == 0 && ends == 0:
-		return []Finding{{"D3", "info", "CLAUDE.md", "no spine markers (legacy file) — spine update will claim it"}}
+		return []Finding{{"D3", "info", name, "no spine markers (legacy file) — spine update will claim it"}}
 	case begins == 1 && ends == 1:
 		// counts alone don't catch a swapped pair — compare positions too.
 		if strings.Index(content, endMarker) < strings.Index(content, beginMarker) {
-			return []Finding{{"D3", "error", "CLAUDE.md", "spine markers out of order — fix by hand"}}
+			return []Finding{{"D3", "error", name, "spine markers out of order — fix by hand"}}
 		}
 		return nil
 	default:
-		return []Finding{{"D3", "error", "CLAUDE.md",
+		return []Finding{{"D3", "error", name,
 			fmt.Sprintf("unbalanced spine markers (%d begin / %d end) — fix by hand", begins, ends)}}
 	}
 }

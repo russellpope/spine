@@ -168,6 +168,96 @@ func TestMarkerDamageD4Message(t *testing.T) {
 	}
 }
 
+// Analog of TestOutOfOrderMarkersD3Error for AGENTS.md — the marker check
+// must run over AGENTS.md too, not just CLAUDE.md.
+func TestOutOfOrderMarkersD3ErrorAgents(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "AGENTS.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	var beginIdx, endIdx = -1, -1
+	for i, l := range lines {
+		if strings.HasPrefix(l, "<!-- spine:begin") {
+			beginIdx = i
+		}
+		if strings.HasPrefix(l, "<!-- spine:end -->") {
+			endIdx = i
+		}
+	}
+	if beginIdx == -1 || endIdx == -1 {
+		t.Fatalf("scaffolded AGENTS.md missing markers: %q", string(raw))
+	}
+	lines[beginIdx], lines[endIdx] = lines[endIdx], lines[beginIdx]
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range fs {
+		if f.ID != "D3" || f.Path != "AGENTS.md" {
+			continue
+		}
+		found = true
+		if f.Severity != "error" || f.Message != "spine markers out of order — fix by hand" {
+			t.Errorf("D3 finding = %#v", f)
+		}
+	}
+	if !found {
+		t.Fatalf("want D3 finding for AGENTS.md, got %#v", fs)
+	}
+}
+
+// Analog of TestMarkerDamageD4Message for AGENTS.md — --force cannot repair
+// AGENTS.md's marker block either, so the hint must not be the generic one.
+func TestMarkerDamageD4MessageAgents(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "AGENTS.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := strings.Replace(string(raw), "<!-- spine:end -->\n", "", 1)
+	if broken == string(raw) {
+		t.Fatal("end marker line not found to delete")
+	}
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range fs {
+		if f.ID != "D4" || f.Path != "AGENTS.md" {
+			continue
+		}
+		found = true
+		want := "spine markers damaged — fix by hand (--force cannot repair)"
+		if f.Message != want {
+			t.Errorf("D4 message = %q, want %q", f.Message, want)
+		}
+		if strings.Contains(f.Message, "--force") && !strings.Contains(f.Message, "cannot repair") {
+			t.Errorf("D4 message must not offer --force as a repair: %q", f.Message)
+		}
+	}
+	if !found {
+		t.Fatalf("want D4 finding for AGENTS.md, got %#v", fs)
+	}
+}
+
 func TestSuperpowersDriftD5(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {

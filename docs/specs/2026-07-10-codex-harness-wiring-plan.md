@@ -22,7 +22,7 @@
   Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_01To5QfgzXk3oZ2gNRM8QidH
   ```
-- Commits go to `main` directly in this repo; push only when the owner asks.
+- Commits go to a short-lived feature branch reviewed before merge (or `main` directly for trivial changes); merge/push only when the owner asks.
 - Build/test: `go test ./...` from repo root. Install for manual verify: `make install` (builds to `~/bin/spine`).
 
 ---
@@ -162,8 +162,8 @@ Mirrors `planClaude` (update.go:248-293): create when missing, replace the marke
 - Test: `internal/update/update_test.go` (new tests)
 
 **Interfaces:**
-- Consumes: `tmpl.Render("current", "AGENTS.md.tmpl", vals)`, `replaceMarkerBlock` (update.go:295), `Diff` (update.go), the `gen`/`vals` produced by `planWorkflow`.
-- Produces: `planAgents(dir string, gen string, vals tmpl.Values) (FileReport, error)` returning a `FileReport{Path: "AGENTS.md"}`. `Run` appends its report to `reports`.
+- Consumes: `tmpl.Render("current", "AGENTS.md.tmpl", vals)`, `replaceMarkerBlock` (update.go:295), `Diff` (update.go), the `vals` produced by `planWorkflow` (no `gen` — AGENTS.md has no generation-specific predecessor).
+- Produces: `planAgents(dir string, vals tmpl.Values) (FileReport, error)` returning a `FileReport{Path: "AGENTS.md"}`. `Run` appends its report to `reports`.
 
 - [ ] **Step 1: Write the failing tests** — created when missing; block replaced when present; hand-authored content outside markers preserved; unbalanced markers flagged.
 

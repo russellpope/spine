@@ -90,9 +90,12 @@ Codex-tuned:
   model ids).
 - Drops Claude-only slash-command trigger syntax (`/grill-with-docs`,
   `/to-spec`, `/spec-review`, `/wayfinder`) as *literal invocations*; instead
-  references the stages/gates by name and points at the skills once workstream
-  C registers them. Rationale: an unresolvable `/command` in Codex is noise
-  until C lands.
+  references the stages/gates by name. The initial block does **not** point at
+  the skills — that pointer is deferred to workstream C, which is the one that
+  registers them (see §C's added obligation to add it to
+  `AGENTS.md.tmpl` once the marketplace registration lands). Rationale: an
+  unresolvable `/command` in Codex is noise until C lands, and a pointer to
+  skills Codex can't yet invoke would be equally misleading.
 - Notes Codex specifics: subagent tools (`spawn_agent`/`wait_agent`/
   `close_agent`) are available (multi_agent on); worktree/branch detection per
   the superpowers `codex-tools.md` environment-detection guidance.
@@ -128,9 +131,15 @@ Mirror the CLAUDE.md coverage:
 - update: created when missing; marker block replaced when present;
   hand-authored content outside markers preserved; unbalanced markers →
   `Unrecognized`, not clobbered.
-- version: `doctor`/`audit` gen7 fixtures updated
-  (`internal/audit/gen6_scaffold_test.go`, doctor tests) so the generation bump
-  doesn't break existing assertions.
+- version: `spine doctor` is extended to treat `AGENTS.md` as machine-owned on
+  the same terms as `CLAUDE.md` — marker check (D3) and the non-misleading
+  "--force cannot repair" preserve-hint (D4) both run over `AGENTS.md` too,
+  with tests (final-review fix wave, `internal/doctor/doctor.go` +
+  `doctor_test.go`). `internal/audit/testdata` fixtures carrying
+  `template_version: 5`/`6` are deliberate historical fixtures representing
+  older repos, not assertions about the compiled generation — they are
+  correctly left unchanged, and `gen6_scaffold_test.go` stays green at v7
+  without edits.
 
 ### B. Codex config hygiene (global, deepthought-side)
 
@@ -153,6 +162,16 @@ schema, then produces a manifest over deepthought's `skills/`. Registration via
 `codex plugin marketplace add` + `codex plugin add`. If Codex cannot consume a
 project-local skills dir without publishing, fall back to documenting the skills
 in the repo `AGENTS.md` and revisit. **C does not block A or B.**
+
+**C's obligation on `AGENTS.md.tmpl`:** once the skills are registered,
+workstream C must add the skills pointer to
+`templates/current/AGENTS.md.tmpl` (the block A.1 ships without it — see A.1).
+This is a content-bearing template change, not a mechanical one: it changes
+what the marker block renders for every profile, which interacts with
+`supersededLines` semantics (existing repos' prior rendered text becomes a
+carry-forward/local-edit candidate on their next `spine update`) and may
+warrant its own generation bump. Scope that interaction when C starts rather
+than assuming a same-generation edit is safe.
 
 ## Sequencing
 
