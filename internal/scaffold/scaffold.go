@@ -22,6 +22,7 @@ type Result struct {
 // Files is the scaffolded set, in emission order. Shared with update.
 var Files = []struct{ TmplName, RelPath string }{
 	{"CLAUDE.md.tmpl", "CLAUDE.md"},
+	{"AGENTS.md.tmpl", "AGENTS.md"},
 	{"WORKFLOW.md.tmpl", "WORKFLOW.md"},
 	{"harness-interface.md", "docs/harness-interface.md"},
 	{"issues-README.md", "docs/issues/README.md"},

@@ -58,7 +58,7 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Created) != 6 || len(res.Skipped) != 0 {
+	if len(res.Created) != 7 || len(res.Skipped) != 0 {
 		t.Fatalf("created=%v skipped=%v", res.Created, res.Skipped)
 	}
 	wf, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
@@ -183,6 +183,38 @@ func TestIssueTemplateHasAnnotationFields(t *testing.T) {
 	}
 }
 
+func TestInitEmitsCodexAgentsMd(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "go-service", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("AGENTS.md not emitted: %v", err)
+	}
+	content := string(raw)
+	for _, want := range []string{
+		"<!-- spine:begin v", "<!-- spine:end -->",
+		"read by **Codex**", // Codex-tuned framing
+		"WORKFLOW.md",
+		"docs/specs/", "docs/adr/", "docs/issues/", "docs/handoffs",
+		"Mandatory gates", "verification before completion",
+		"model_routing", "primary / routine / mechanical / fallback",
+		"spine audit routing",
+		"multi_agent", "spawn_agent",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("AGENTS.md missing %q", want)
+		}
+	}
+	// Codex-tuned: no Claude-only slash-command invocations in the block.
+	for _, banned := range []string{"/grill-with-docs", "/to-spec", "/spec-review", "/wayfinder"} {
+		if strings.Contains(content, banned) {
+			t.Errorf("AGENTS.md must not carry Claude-only invocation %q", banned)
+		}
+	}
+}
+
 func TestInitIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
@@ -192,7 +224,7 @@ func TestInitIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Created) != 0 || len(res.Skipped) != 6 {
+	if len(res.Created) != 0 || len(res.Skipped) != 7 {
 		t.Fatalf("second run created=%v skipped=%v", res.Created, res.Skipped)
 	}
 }
@@ -284,7 +316,7 @@ func TestInitKnowledgeManifest(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "docs", "specs")); !os.IsNotExist(err) {
 		t.Error("knowledge must not create docs/specs")
 	}
-	for _, rel := range []string{"WORKFLOW.md", "CLAUDE.md", "docs/adr/README.md", "docs/adr", "docs/handoffs"} {
+	for _, rel := range []string{"WORKFLOW.md", "CLAUDE.md", "AGENTS.md", "docs/adr/README.md", "docs/adr", "docs/handoffs"} {
 		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
 			t.Errorf("missing %s: %v", rel, err)
 		}
