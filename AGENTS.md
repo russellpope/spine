@@ -1,0 +1,20 @@
+<!-- spine:begin v7 -->
+# spine — Codex working brief
+
+This file is read by **Codex**; the `CLAUDE.md` twin carries the same facts for Claude. Both are machine-owned by `spine` between the markers — edit only outside them.
+
+Uses the **unified workflow** — see `WORKFLOW.md` for the active profile (`library-cli`) and stages.
+
+- Specs / PRDs / plans -> `docs/specs/` (pairs: `<date>-<topic>-design.md` + `-plan.md`)
+- Decisions (ADRs) -> `docs/adr/` (convention in `docs/adr/README.md`)
+- Issue / bug ledger -> `docs/issues/` (dependency convention in `docs/issues/README.md`)
+- Handoffs -> `docs/handoffs/`
+
+**Mandatory gates:** a PRD up front, a spec-review of the finished diff against the PRD, and verification before completion — these are workflow stages (grill -> prd -> ... -> verify), not optional.
+
+**Model routing:** `WORKFLOW.md` `model_routing` maps tiers (primary / routine / mechanical / fallback) to model ids — reference tiers, never ids. Every subagent dispatch carries an explicit model and the ticket-id token; `spine audit routing` checks this at the verify gate.
+
+**Subagents:** the Codex `multi_agent` feature is enabled, so `spawn_agent` / `wait_agent` / `close_agent` are available for parallel and subagent-driven work; close agents once their work is done. Detect worktree/branch state with read-only git before creating branches (see superpowers `codex-tools` environment detection).
+
+Workflow operations run through `spine`: `spine adr`, `spine handoff`, `spine doctor`, `spine audit routing`, `spine update`.
+<!-- spine:end -->
