@@ -2,7 +2,7 @@
 id: I024
 title: spine cursor prints "derivation: clean" on a malformed cursor
 severity: low
-status: open
+status: fixed
 affects: [cli, cursor]
 blocked-by: []
 execution-mode: subagent-driven
@@ -17,3 +17,7 @@ On a cursor with grammar findings (zero parsed stage rows), `spine cursor` print
 ## Fix
 
 When HasCursor && len(CursorFindings) > 0, `spine cursor` prints something like `derivation: n/a (cursor malformed)` instead of clean (still exit 0), and doctor D9 gains a warn finding for grammar problems. Keep audit stages behavior as shipped.
+
+## Resolution
+
+Fixed 2026-07-16 (derivation-polish batch, main @ fdad11c): `spine cursor` prints `derivation: n/a (cursor malformed)` on grammar findings (still exit 0) and doctor D9 warns with the findings (1008ed9); the final-review fix wave additionally kept the handoff detail visible under the malformed header and taught the printer to surface `Report.Notes` warnings (1441a78).

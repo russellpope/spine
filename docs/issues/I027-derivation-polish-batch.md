@@ -2,7 +2,7 @@
 id: I027
 title: Derivation polish batch — M4, M9, M11
 severity: low
-status: open
+status: fixed
 affects: [audit, update, template, skills]
 blocked-by: []
 execution-mode: subagent-driven
@@ -17,3 +17,7 @@ Accumulated Minors from the gen-8 build triaged to follow-up: (M4) deriveHandoff
 ## Fix
 
 Three small edits: split the deriveHandoff detail message on error vs absent; comment near gen8ContentLines; one clause in the template section + /handoff skill (template text change rides the next generation bump — do not bump for this alone; pair with I026's).
+
+## Resolution
+
+Fixed 2026-07-16 (derivation-polish batch, main @ fdad11c, 89d4a07): M4 deriveHandoff detail splits I/O-error from no-handoffs; M9 maintainer note on the gen8ContentLines asymmetry; M11 doctor-advises clause added to the gen-9 template handoff-rule line (riding I026's bump, no extra generation) and the user-level /handoff skill (also synced to "missing/stale" + gen 9 in the fix wave).
