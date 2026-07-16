@@ -19,6 +19,13 @@ var gen9ContentLines = map[string]bool{
 	// resolved structurally and needed no code change, only documentation.
 	"tickets: I0NN-I0MM | prefix I0":        true,
 	"tickets: I0NN | I0NN-I0MM | prefix I0": true,
+
+	// gen-8's **Handoff rule:** line, extended in place (M11, I027) to add
+	// the doctor-advises half of the I014 backstop alongside the
+	// already-stated audit-stages-blocks half. Rides I026's gen-9 bump —
+	// both the dropped ("-") original wording and its ("+") replacement.
+	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone.":                                                                                                                                     true,
+	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone. Alongside `spine audit stages` blocking on a missing/stale cursor block in the newest handoff, `spine doctor` advises (warns) on the same condition.": true,
 }
 
 // isGen9ContentDiffLine reports whether a unified-diff line carries the

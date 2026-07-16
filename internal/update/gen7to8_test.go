@@ -12,6 +12,12 @@ import (
 // doctrine paragraph and "## Model routing". Gen 8 is a pure addition (no
 // gen-7 line is reworded or dropped), so every changed line is a "+" row —
 // there is no gen-8 "-" side to declare.
+//
+// M9 (I027) maintainer note: this one-sided shape is deliberate, not an
+// oversight — contrast gen9ContentLines in gen8to9_test.go, which lists
+// both a "-" (dropped gen-8 line) and a "+" (its gen-9 replacement) because
+// gen 9 reworded a line instead of purely adding one. Each generation's set
+// has exactly as many sides as that generation's diff actually has.
 var gen8ContentLines = map[string]bool{
 	"## Stage cursor (consistency rule)": true,
 	"Stages run **in order**; none may be silently skipped (the miss mode is a handoff that names an":                                         true,

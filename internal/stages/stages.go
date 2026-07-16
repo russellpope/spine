@@ -328,9 +328,19 @@ func judgeSet(state cursor.State, present []bool, label string) (Verdict, string
 // much as a missing one does; only the Detail differs, naming both efforts
 // so the finding is actionable. Only called when a cursor exists
 // (Applicable is therefore always true on the way in).
+//
+// M4 (I027): a genuine I/O error reading docs/handoffs (handoff.Latest's
+// err) and docs/handoffs legitimately having zero entries (ok false, err
+// nil) both block the same way, but the Detail wording is kept distinct —
+// "unreadable" vs "no ... entries found" — so a transient read failure
+// doesn't masquerade as "you never wrote a handoff."
 func deriveHandoff(dir string, liveEffort string) HandoffCheck {
 	entry, ok, err := handoff.Latest(dir)
-	if err != nil || !ok {
+	if err != nil {
+		return HandoffCheck{Applicable: true,
+			Detail: "docs/handoffs unreadable: " + err.Error()}
+	}
+	if !ok {
 		return HandoffCheck{Applicable: true,
 			Detail: "no docs/handoffs entries found — the newest handoff must carry the spine:cursor block once a cursor exists"}
 	}

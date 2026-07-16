@@ -197,6 +197,43 @@ func TestNoHandoffAtAllBlocksWhenCursorExists(t *testing.T) {
 	}
 }
 
+// M4 (I027): an I/O error reading docs/handoffs (as opposed to the
+// directory legitimately having zero entries) must produce a distinct
+// Detail — "no handoffs exist" and "handoffs unreadable" are different
+// causes and must not share wording. Forced by making dir/docs a regular
+// file, so os.ReadDir(dir/docs/handoffs) fails with ENOTDIR rather than
+// ErrNotExist.
+func TestHandoffReadErrorDetailDiffersFromAbsent(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I001\nstages: grill[<] prd[ ] issues[ ] implement[ ]\n"+
+		"<!-- /spine:cursor -->\n")
+	// dir/docs is a file, not a directory — os.ReadDir(dir/docs/handoffs)
+	// fails with "not a directory", a genuine I/O error distinct from a
+	// missing docs/handoffs dir (which handoff.List treats as zero entries,
+	// not an error).
+	if err := os.WriteFile(filepath.Join(dir, "docs"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Handoff.Applicable || rep.Handoff.HasBlock {
+		t.Errorf("Handoff = %#v, want applicable with no block found", rep.Handoff)
+	}
+	if !rep.Blocking() {
+		t.Error("want Blocking() true — the handoff check cannot be satisfied when docs/handoffs is unreadable")
+	}
+	if strings.Contains(rep.Handoff.Detail, "no docs/handoffs entries found") {
+		t.Errorf("Detail = %q, want it to distinguish a read error from zero entries, not reuse the absent-handoffs wording", rep.Handoff.Detail)
+	}
+	if !strings.Contains(strings.ToLower(rep.Handoff.Detail), "unreadable") && !strings.Contains(strings.ToLower(rep.Handoff.Detail), "error") {
+		t.Errorf("Detail = %q, want it to mention the read error", rep.Handoff.Detail)
+	}
+}
+
 // The "here" (current) stage is exempt from both directions of the
 // bidirectional check: partial evidence while actively working a stage is
 // expected, not a contradiction.

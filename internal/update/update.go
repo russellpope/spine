@@ -432,6 +432,12 @@ var supersededLines = map[string]bool{
 	// above, which are unindented prose — unrecognizedLines only
 	// right-trims, so the key must carry the on-disk indentation verbatim.
 	"    tickets: I0NN-I0MM | prefix I0": true,
+
+	// gen 8/early-gen-9's **Handoff rule:** line, extended in place (M11,
+	// I027, rides I026's gen-9 bump — no further generation bump) to state
+	// the doctor-advises half of the I014 backstop alongside the
+	// already-stated audit-stages-blocks half.
+	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone.": true,
 }
 
 // unrecognizedLines returns non-blank lines of got that expected does not
