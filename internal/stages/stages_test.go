@@ -141,6 +141,39 @@ func TestHandoffMissingBlockBlocks(t *testing.T) {
 	}
 }
 
+// I025: the newest-handoff backstop is not satisfied by mere presence of a
+// spine:cursor block — the block's effort: must match the live cursor's
+// effort. Here the newest handoff carries a well-formed block, but for a
+// different (previous) effort; this must block exactly like an absent
+// block, and the detail must name both efforts.
+func TestHandoffStaleEffortBlocks(t *testing.T) {
+	rep, err := stages.Derive(fixture("handoff-stale-effort"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"prd", "issues"} {
+		row := rowByName(t, rep.Stages, name)
+		if row.Verdict != stages.VerdictMatch {
+			t.Errorf("%s verdict = %s (%s), want match (this fixture isolates the handoff problem)", name, row.Verdict, row.Detail)
+		}
+	}
+	if !rep.Handoff.Applicable {
+		t.Fatal("want Handoff.Applicable true — a cursor exists")
+	}
+	if rep.Handoff.HasBlock {
+		t.Error("want HasBlock false — a stale-effort block must be treated the same as an absent one")
+	}
+	if !rep.Handoff.Blocking() {
+		t.Error("want Handoff.Blocking() true")
+	}
+	if !strings.Contains(rep.Handoff.Detail, "fixture-effort") || !strings.Contains(rep.Handoff.Detail, "previous-effort") {
+		t.Errorf("want Detail naming both the live effort and the stale effort, got %q", rep.Handoff.Detail)
+	}
+	if !rep.Blocking() {
+		t.Error("want Blocking() true overall")
+	}
+}
+
 // Bonus (beyond the required fixture matrix): zero docs/handoffs entries at
 // all, with a cursor present, must also block — there is nothing to embed
 // the cursor in yet. Built inline rather than as a new testdata fixture
@@ -176,7 +209,7 @@ func TestHereStageNeverBlocks(t *testing.T) {
 	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
 		"effort: x\nprd: docs/specs/x.md\ntickets: I001\nstages: grill[x] prd[<] issues[ ] implement[ ]\n"+
 		"<!-- /spine:cursor -->\n")
-	writeFile(t, dir, "docs/handoffs/2026-01-02-x.md", "<!-- spine:cursor -->\n<!-- /spine:cursor -->\n")
+	writeFile(t, dir, "docs/handoffs/2026-01-02-x.md", "<!-- spine:cursor -->\neffort: x\n<!-- /spine:cursor -->\n")
 	rep, err := stages.Derive(dir)
 	if err != nil {
 		t.Fatal(err)

@@ -69,6 +69,17 @@
 //     "handoff-missing-block"), independent of the general philosophy
 //     above, because an effort with no handoff carrying its cursor is
 //     exactly the failure I014 exists to catch.
+//   - I025 tightens the same check from presence-only to effort-matched: a
+//     newest handoff whose cursor block parses but names a different
+//     effort (fixture "handoff-stale-effort") is treated identically to a
+//     missing block — HasBlock false, blocking — because a stale block from
+//     a previous effort satisfies the letter of I014 while defeating its
+//     intent. One accepted consequence, not re-litigated here (see the
+//     design doc's handoff-absent-blocks exception, already shipped): a
+//     freshly opened effort has no handoff of its own yet, so the newest
+//     handoff on disk necessarily belongs to the previous effort and this
+//     check blocks until the new effort's first handoff exists — the same
+//     shape as the missing-block case it already accepted.
 //   - HasCursor==false (cursor.Load's three quiet cases: no WORKFLOW.md, no
 //     progress.md, or a progress.md with no cursor block) never blocks and
 //     never even runs the stage/handoff checks — there is nothing anchored
@@ -196,7 +207,7 @@ func FromResult(dir string, res cursor.Result) Report {
 		return rep
 	}
 	rep.Stages = deriveStages(dir, res.Cursor)
-	rep.Handoff = deriveHandoff(dir)
+	rep.Handoff = deriveHandoff(dir, res.Cursor.Effort)
 	return rep
 }
 
@@ -290,9 +301,17 @@ func judgeSet(state cursor.State, present []bool, label string) (Verdict, string
 	}
 }
 
-// deriveHandoff applies the I014 newest-handoff backstop. Only called when
-// a cursor exists (Applicable is therefore always true on the way in).
-func deriveHandoff(dir string) HandoffCheck {
+// deriveHandoff applies the I014 newest-handoff backstop, plus I025's
+// effort-match requirement: presence of a `<!-- spine:cursor -->` block is
+// not enough — the block's effort: must match the live cursor's effort
+// (liveEffort, i.e. the effort anchoring the report this check is part of).
+// A stale-effort block (well-formed, but carried over from a previous
+// effort) is treated identically to an absent block — HasBlock false,
+// Blocking() true — because a stale block defeats I014's intent exactly as
+// much as a missing one does; only the Detail differs, naming both efforts
+// so the finding is actionable. Only called when a cursor exists
+// (Applicable is therefore always true on the way in).
+func deriveHandoff(dir string, liveEffort string) HandoffCheck {
 	entry, ok, err := handoff.Latest(dir)
 	if err != nil || !ok {
 		return HandoffCheck{Applicable: true,
@@ -303,12 +322,18 @@ func deriveHandoff(dir string) HandoffCheck {
 		return HandoffCheck{Applicable: true, Path: entry.Path,
 			Detail: "newest handoff unreadable: " + err.Error()}
 	}
-	has := cursor.HasBlock(string(raw))
-	detail := "newest handoff " + entry.Path + " carries the spine:cursor block"
-	if !has {
-		detail = "newest handoff " + entry.Path + " is missing the spine:cursor block"
+	content := string(raw)
+	if !cursor.HasBlock(content) {
+		return HandoffCheck{Applicable: true, Path: entry.Path, HasBlock: false,
+			Detail: "newest handoff " + entry.Path + " is missing the spine:cursor block"}
 	}
-	return HandoffCheck{Applicable: true, Path: entry.Path, HasBlock: has, Detail: detail}
+	blockCursor, _ := cursor.ParseBlock(content)
+	if blockCursor.Effort != liveEffort {
+		return HandoffCheck{Applicable: true, Path: entry.Path, HasBlock: false,
+			Detail: fmt.Sprintf("newest handoff %s carries a stale effort cursor block: block effort %q, live effort %q", entry.Path, blockCursor.Effort, liveEffort)}
+	}
+	return HandoffCheck{Applicable: true, Path: entry.Path, HasBlock: true,
+		Detail: "newest handoff " + entry.Path + " carries the spine:cursor block"}
 }
 
 // readLedgerRaw returns progress.md's content, or "" if it can't be read
