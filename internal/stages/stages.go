@@ -171,8 +171,11 @@ type Report struct {
 	// CursorFindings passes through cursor.Result.Findings verbatim —
 	// grammar problems, never blocking here (Task 1's concern).
 	CursorFindings []string
-	// Notes explains a HasCursor==false report (which of the three quiet
-	// cases applies). Empty when HasCursor is true.
+	// Notes carries advisory explanations, never gating (Blocking() does
+	// not consult it). When HasCursor is false: which of the three quiet
+	// cases applies. When HasCursor is true: non-blocking warnings such as
+	// an unresolvable tickets: value (I026) — empty when there is nothing
+	// to warn about.
 	Notes  []string
 	Stages []StageRow
 	// Handoff is the zero value (Applicable=false) when HasCursor is
