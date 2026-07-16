@@ -103,7 +103,7 @@ func TestGen0CleanClaim(t *testing.T) {
 	if wf.State != Pending {
 		t.Fatalf("WORKFLOW state=%v unrec=%v", wf.State, wf.Unrecognized)
 	}
-	for _, want := range []string{"template_version: 7", "primary: claude-fable-5",
+	for _, want := range []string{"template_version: 8", "primary: claude-fable-5",
 		"model_default: claude-fable-5", "profile: rust", "functional_harness: cli"} {
 		if !strings.Contains(wf.newContent, want) {
 			t.Errorf("regenerated WORKFLOW missing %q", want)
@@ -116,7 +116,7 @@ func TestGen0CleanClaim(t *testing.T) {
 	if cl.State != Pending {
 		t.Fatalf("CLAUDE state=%v", cl.State)
 	}
-	if !strings.HasPrefix(cl.newContent, "<!-- spine:begin v7 -->") {
+	if !strings.HasPrefix(cl.newContent, "<!-- spine:begin v8 -->") {
 		t.Error("claimed CLAUDE.md lacks markers")
 	}
 	if got := strings.Count(cl.newContent, "# hbmview"); got != 1 {
@@ -160,7 +160,7 @@ func TestUnrecognizedEditsSkipUnlessForce(t *testing.T) {
 	if strings.Contains(string(got), "custom_rule") {
 		t.Error("force did not drop unrecognized line")
 	}
-	if !strings.Contains(string(got), "template_version: 7") {
+	if !strings.Contains(string(got), "template_version: 8") {
 		t.Error("force did not regenerate")
 	}
 }
@@ -319,7 +319,7 @@ func TestAdoptModeSynthesizesWorkflow(t *testing.T) {
 	if wf.State != Pending || !wf.Created {
 		t.Fatalf("WORKFLOW.md state=%v created=%v", wf.State, wf.Created)
 	}
-	if !strings.Contains(wf.Diff, "profile: go-service") || !strings.Contains(wf.Diff, "template_version: 7") || !strings.Contains(wf.Diff, "# Workflow — praxis") {
+	if !strings.Contains(wf.Diff, "profile: go-service") || !strings.Contains(wf.Diff, "template_version: 8") || !strings.Contains(wf.Diff, "# Workflow — praxis") {
 		t.Errorf("diff=%q", wf.Diff)
 	}
 	cl := byPath["CLAUDE.md"]
@@ -406,9 +406,9 @@ func TestVersionDowngradeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bumped := strings.Replace(string(raw), "template_version: 7", "template_version: 8", 1)
+	bumped := strings.Replace(string(raw), "template_version: 8", "template_version: 9", 1)
 	if bumped == string(raw) {
-		t.Fatal("template_version: 7 not found in scaffolded WORKFLOW.md to bump")
+		t.Fatal("template_version: 8 not found in scaffolded WORKFLOW.md to bump")
 	}
 	if err := os.WriteFile(path, []byte(bumped), 0o644); err != nil {
 		t.Fatal(err)
@@ -544,7 +544,7 @@ func TestGen6RepoGainsAgentsMdOnUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	downgraded := strings.Replace(string(raw), "template_version: 7", "template_version: 6", 1)
+	downgraded := strings.Replace(string(raw), "template_version: 8", "template_version: 7", 1)
 	if downgraded == string(raw) {
 		t.Fatal("could not stage a gen-6 fixture")
 	}
@@ -562,14 +562,14 @@ func TestGen6RepoGainsAgentsMdOnUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update did not create AGENTS.md: %v", err)
 	}
-	if !strings.Contains(string(agents), "<!-- spine:begin v7 -->") {
-		t.Error("AGENTS.md not stamped at v7")
+	if !strings.Contains(string(agents), "<!-- spine:begin v8 -->") {
+		t.Error("AGENTS.md not stamped at v8")
 	}
 	wfAfter, err := os.ReadFile(wfPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(wfAfter), "template_version: 7") {
-		t.Error("WORKFLOW.md did not advance to gen 7")
+	if !strings.Contains(string(wfAfter), "template_version: 8") {
+		t.Error("WORKFLOW.md did not advance to gen 8")
 	}
 }

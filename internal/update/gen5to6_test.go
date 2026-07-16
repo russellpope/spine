@@ -106,6 +106,9 @@ func TestGen5To6IsStampPlusDeclaredContent(t *testing.T) {
 				if isGen6ContentDiffLine(line) {
 					continue
 				}
+				if isGen8ContentDiffLine(line) { // gen 8's conscious content edit; see gen7to8_test.go
+					continue
+				}
 				t.Errorf("%s: unexpected changed line %q — 5→6 must be stamp plus declared gen-6 content only", r.Path, line)
 			}
 		}
@@ -140,7 +143,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"template_version: 7",
+		"template_version: 8",
 		"primary: claude-fable-5",
 		"routine: claude-sonnet-5",
 		"mechanical: claude-haiku-4-5",
@@ -160,7 +163,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(cl), "<!-- spine:begin v7 -->") {
+	if !strings.HasPrefix(string(cl), "<!-- spine:begin v8 -->") {
 		t.Error("migrated CLAUDE.md missing v7 marker")
 	}
 	if !strings.Contains(string(cl), "primary / routine / mechanical / fallback") {

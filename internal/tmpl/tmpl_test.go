@@ -8,8 +8,8 @@ import (
 )
 
 func TestVersionMatchesCurrentGeneration(t *testing.T) {
-	if got := tmpl.Version(); got != 7 {
-		t.Fatalf("Version() = %d, want 7", got)
+	if got := tmpl.Version(); got != 8 {
+		t.Fatalf("Version() = %d, want 8", got)
 	}
 }
 

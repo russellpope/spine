@@ -406,6 +406,24 @@ var supersededLines = map[string]bool{
 	"effort: high                       # default; xhigh for security-critical analysis + final verification; medium/low for routine subagents": true,
 	"security_routing: quality-framing-opus-4-8": true,
 	"Execution mode per plan: live-system mutation, secrets, or interactive steps -> inline with the human; otherwise subagent-driven.": true,
+
+	// ultima-dci-edition's hand-written "## Stage cursor (consistency rule)"
+	// section (gen 7, real repo, captured verbatim 2026-07-15 — see
+	// internal/update/testdata/ultima/WORKFLOW.md), superseded wholesale by
+	// gen 8's spine-owned section of the same name (I020). This section
+	// predates the I018 cursor grammar: it describes a prose checklist +
+	// "← YOU ARE HERE" marker, not the `<!-- spine:cursor -->` block.
+	"## Stage cursor (consistency rule)": true,
+	"Stages run **in order**; none may be silently skipped (the miss mode is a handoff that names an":           true,
+	"abbreviated path — e.g. \"grill -> to-spec -> build\" quietly dropping `issues`/`to-tickets`). To prevent": true,
+	"it, every SDD effort's `.superpowers/sdd/progress.md` **opens with a WORKFLOW stage checklist** — one":     true,
+	"line per stage above, ticked as each completes, with a `← YOU ARE HERE` marker on the active stage. The":   true,
+	"cursor is the single source of truth for \"where are we\"; check it at session start before acting.":       true,
+	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST carry the stage cursor **verbatim** (not":  true,
+	"a prose paraphrase of \"what's next\"). A handoff that names the next action without the full cursor is":   true,
+	"incomplete — the reader can't see which upstream stage was skipped. When in doubt, re-derive the cursor":   true,
+	"from the artifacts on disk: PRD in `docs/specs/` ⇒ `prd` done; build tickets in":                           true,
+	"`docs/issues/` ⇒ `issues` done; per-task commits ⇒ `implement` in progress.":                               true,
 }
 
 // unrecognizedLines returns non-blank lines of got that expected does not

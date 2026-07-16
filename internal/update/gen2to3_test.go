@@ -57,6 +57,9 @@ func TestGen2To3IsStampOnly(t *testing.T) {
 				if isGen6ContentDiffLine(line) { // gen 6's conscious content edit; see gen5to6_test.go
 					continue
 				}
+				if isGen8ContentDiffLine(line) { // gen 8's conscious content edit; see gen7to8_test.go
+					continue
+				}
 				t.Errorf("%s: unexpected changed line %q — updates from the gen-2 fixture must be stamp-only", r.Path, line)
 			}
 		}
