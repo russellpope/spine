@@ -28,6 +28,13 @@ Map [I010](../issues/I010-wayfinder-map-stage-skipping-controls.md) indexes deci
 - deepthought side (uncommitted, owner's call): docs/issues/I001 spec-path drift ticket, docs/reference/claude-session-hooks.md.
 - Bookkeeping notes: commit 87fdc86 swept in the pre-existing I009 ticket file (content-appropriate, kept); old I006 closure question inside I028.
 
+## Spec review (2026-07-16, fable, fresh-eyes) — PASSED, two owner sign-offs pending
+
+0 missing, 2 creep, 2 warped, 1 new contradiction. Owner-attention items:
+
+1. **Ratify or revert:** malformed-cursor grammar findings blocking `audit stages` (28c0608) — deliberate final-review hardening beyond the PRD's letter (spec had parse findings advisory). Controller chose fix-now overnight; formally the owner's call.
+2. **PRD amendment (one line):** the PRD's I012 parenthetical sketches "one line per stage + `← YOU ARE HERE`" while the same bullet delegates the exact grammar to the gen-8 section — shipped grammar (single `stages:` line, `[x]/[<]/[ ]`) won. Amend the parenthetical to match; optionally add a Testing Decisions carve-out blessing the one white-box `implementEvidence` regression test (else ticket it).
+
 ## Gotchas & hard-won lessons
 
 - Reviewer-above-tier dispatches need their ESCALATION record AT DISPATCH TIME — the routing audit flagged all five post-hoc, second build running this lesson.
