@@ -2,7 +2,7 @@
 id: I022
 title: /handoff skill hardening — verbatim cursor rule
 severity: med
-status: open
+status: fixed
 affects: [skills]
 blocked-by: [I018]
 execution-mode: subagent-driven

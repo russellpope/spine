@@ -2,7 +2,7 @@
 id: I021
 title: Global SessionStart cursor hook
 severity: med
-status: open
+status: fixed
 affects: [harness]
 blocked-by: [I018]
 execution-mode: subagent-driven

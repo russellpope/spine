@@ -2,7 +2,7 @@
 id: I019
 title: Derivation engine + spine audit stages + doctor advisory check
 severity: med
-status: open
+status: fixed
 affects: [audit, doctor, cursor]
 blocked-by: [I018]
 execution-mode: subagent-driven

@@ -2,7 +2,7 @@
 id: I018
 title: Cursor format + parser + spine cursor subcommand
 severity: med
-status: open
+status: fixed
 affects: [cli, cursor]
 blocked-by: []
 execution-mode: subagent-driven

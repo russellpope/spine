@@ -2,7 +2,7 @@
 id: I020
 title: Template gen 8 — stage-cursor section + ultima supersededLines
 severity: med
-status: open
+status: fixed
 affects: [template, update]
 blocked-by: [I018]
 execution-mode: subagent-driven
