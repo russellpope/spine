@@ -12,6 +12,7 @@ import (
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/handoff"
+	"github.com/russellpope/spine/internal/stages"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
 )
@@ -60,7 +61,36 @@ func Run(dir string) ([]Finding, error) {
 	findings = append(findings, adrCheck(dir)...)
 	findings = append(findings, evalCheck(dir)...)
 	findings = append(findings, handoffCheck(dir)...)
+	findings = append(findings, stagesCheck(dir)...)
 	return findings, nil
+}
+
+// stagesCheck is the I019 advisory: it reuses the internal/stages
+// derivation engine (the same one spine audit stages blocks on) but only
+// ever reports warn — a stage/artifact contradiction or a stale
+// newest-handoff is drift worth surfacing, never a doctor failure on its
+// own beyond the existing warn-affects-exit rule every other check
+// already follows. A dormant repo (no cursor at all) reports nothing:
+// absence of an active effort is not unhealthy.
+func stagesCheck(dir string) []Finding {
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		return []Finding{{"D9", "warn", ".superpowers/sdd/progress.md", "stage derivation failed: " + err.Error()}}
+	}
+	if !rep.HasCursor {
+		return nil
+	}
+	var findings []Finding
+	for _, s := range rep.Stages {
+		if s.Verdict == stages.VerdictTickedMissing || s.Verdict == stages.VerdictPresentUnticked {
+			findings = append(findings, Finding{"D9", "warn", ".superpowers/sdd/progress.md",
+				fmt.Sprintf("stage %q (%s): %s", s.Name, s.Verdict, s.Detail)})
+		}
+	}
+	if rep.Handoff.Blocking() {
+		findings = append(findings, Finding{"D9", "warn", "docs/handoffs", rep.Handoff.Detail})
+	}
+	return findings
 }
 
 // updateChecks maps a dry-run of update onto D2 (stale) and D4 (unrecognized).

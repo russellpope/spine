@@ -20,6 +20,7 @@ import (
 	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/handoff"
 	"github.com/russellpope/spine/internal/scaffold"
+	"github.com/russellpope/spine/internal/stages"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
 )
@@ -34,7 +35,7 @@ commands:
   handoff  manage docs/handoffs (new, list, latest [--fleet DIR])
   eval     manage docs/evals (new, add-run, list)
   doctor   read-only workflow health checks
-  audit    verify declared model routing against harness transcripts (routing)
+  audit    verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
   cursor   print the parsed stage cursor (read-only; --quiet for hooks)
   version  print the compiled template generation
 `
@@ -540,12 +541,14 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 
 func cmdAudit(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, `usage: spine audit <routing> [flags]  (audit routing [--dir D] [--transcripts DIR])`)
+		fmt.Fprintln(stderr, `usage: spine audit <routing|stages> [flags]  (audit routing [--dir D] [--transcripts DIR]; audit stages [--dir D])`)
 		return 2
 	}
 	switch args[0] {
 	case "routing":
 		return cmdAuditRouting(args[1:], stdout, stderr)
+	case "stages":
+		return cmdAuditStages(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown audit subcommand %q\n", args[0])
 		return 2
@@ -609,11 +612,56 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// cmdAuditStages is a thin printer over stages.Derive: a table of every
+// cursor stage's derivation verdict (like audit routing's ticket table),
+// plus the newest-handoff backstop line. Exit 1 only when Report.Blocking()
+// — a ticked-but-missing or present-but-unticked stage, or a missing/stale
+// newest-handoff cursor block. No cursor at all is a warning, never a
+// failure (exit 0) — see internal/stages' package doc for the three quiet
+// cases this collapses.
+func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("audit stages", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rep, err := stages.Derive(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "audit stages:", err)
+		return 2
+	}
+	for _, f := range rep.CursorFindings {
+		fmt.Fprintln(stderr, "warning: cursor finding:", f)
+	}
+	for _, n := range rep.Notes {
+		fmt.Fprintln(stderr, "warning:", n)
+	}
+	if !rep.HasCursor {
+		fmt.Fprintln(stdout, "no spine cursor — nothing to audit")
+		return 0
+	}
+	wName, wState, wVerdict := len("stage"), len("state"), len("verdict")
+	for _, s := range rep.Stages {
+		wName = max(wName, len(s.Name))
+		wState = max(wState, len(s.StateLabel()))
+		wVerdict = max(wVerdict, len(string(s.Verdict)))
+	}
+	fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, "stage", wState, "state", wVerdict, "verdict", "detail")
+	for _, s := range rep.Stages {
+		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, s.Name, wState, s.StateLabel(), wVerdict, string(s.Verdict), s.Detail)
+	}
+	fmt.Fprintf(stdout, "handoff: applicable=%v blocking=%v — %s\n", rep.Handoff.Applicable, rep.Handoff.Blocking(), rep.Handoff.Detail)
+	if rep.Blocking() {
+		return 1
+	}
+	return 0
+}
+
 // cmdCursor is a thin, read-only printer over cursor.Load: it prints the
-// parsed stage cursor plus an advisory derivation verdict (real verdict
-// wiring lands with I019 — until then "derivation: n/a" is the whole
-// story). It always exits 0: a cursor mismatch or parse finding is surfaced,
-// never gated, here — spine audit stages (I019) is where that becomes a
+// parsed stage cursor plus the live derivation verdict (internal/stages,
+// I019). It always exits 0: a cursor mismatch or parse finding is
+// surfaced, never gated, here — spine audit stages is where that becomes a
 // blocking check. --quiet is for hook use: it silences the "nothing to
 // report" case (no spine repo, no ledger, no cursor block) but never
 // silences a cursor that was actually found, malformed or not — the
@@ -655,7 +703,20 @@ func cmdCursor(args []string, stdout, stderr io.Writer) int {
 	if len(res.Cursor.Stages) > 0 {
 		fmt.Fprintf(stdout, "stages: %s\n", res.Cursor.StagesLine())
 	}
-	fmt.Fprintln(stdout, "derivation: n/a")
+	rep := stages.FromResult(*dir, res)
+	if !rep.Blocking() {
+		fmt.Fprintln(stdout, "derivation: clean")
+	} else {
+		fmt.Fprintln(stdout, "derivation: blocking")
+		for _, s := range rep.Stages {
+			if s.Verdict == stages.VerdictTickedMissing || s.Verdict == stages.VerdictPresentUnticked {
+				fmt.Fprintf(stdout, "  %s (%s): %s\n", s.Name, s.Verdict, s.Detail)
+			}
+		}
+		if rep.Handoff.Blocking() {
+			fmt.Fprintf(stdout, "  handoff: %s\n", rep.Handoff.Detail)
+		}
+	}
 	return 0
 }
 

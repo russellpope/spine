@@ -277,6 +277,14 @@ func parseStages(raw string, validStages []string) ([]Stage, []string) {
 	return stages, findings
 }
 
+// HasBlock reports whether content contains the opening `<!-- spine:cursor
+// -->` marker. Exported so callers outside this package (the derivation
+// engine's newest-handoff check, I019) can test for an embedded cursor block
+// without duplicating the tag literal.
+func HasBlock(content string) bool {
+	return strings.Contains(content, openTag)
+}
+
 // parseStagesList parses WORKFLOW.md's "stages" value (from
 // update.ExtractKeys, e.g. "[grill, prd, issues]") into a name list. Returns
 // nil when raw is empty or unparseable, which disables unknown-stage-name

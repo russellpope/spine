@@ -458,6 +458,71 @@ func TestAuditUsageErrors(t *testing.T) {
 	}
 }
 
+func stagesFixture(scenario string) string {
+	return filepath.Join("..", "..", "internal", "stages", "testdata", scenario, "repo")
+}
+
+func TestAuditStagesCleanExitsZero(t *testing.T) {
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", stagesFixture("clean"))
+	if code != 0 {
+		t.Fatalf("code=%d out=%q errs=%q", code, out, errs)
+	}
+	first := strings.SplitN(out, "\n", 2)[0]
+	if !strings.HasPrefix(first, "stage") || !strings.Contains(first, "state") ||
+		!strings.Contains(first, "verdict") || !strings.Contains(first, "detail") {
+		t.Errorf("header missing/wrong: %q", first)
+	}
+	if !strings.Contains(out, "match") {
+		t.Errorf("out=%q", out)
+	}
+	if !strings.Contains(out, "handoff: applicable=true blocking=false") {
+		t.Errorf("want a non-blocking handoff line, out=%q", out)
+	}
+}
+
+func TestAuditStagesTickedMissingBlocks(t *testing.T) {
+	code, out, _ := runCmd(t, "audit", "stages", "--dir", stagesFixture("ticked-missing"))
+	if code != 1 {
+		t.Fatalf("want exit 1 on a blocking mismatch, got %d, out=%q", code, out)
+	}
+	if !strings.Contains(out, "ticked-missing") {
+		t.Errorf("out=%q", out)
+	}
+}
+
+func TestAuditStagesPresentUntickedBlocks(t *testing.T) {
+	code, out, _ := runCmd(t, "audit", "stages", "--dir", stagesFixture("present-unticked"))
+	if code != 1 {
+		t.Fatalf("want exit 1 on a blocking mismatch, got %d, out=%q", code, out)
+	}
+	if !strings.Contains(out, "present-unticked") {
+		t.Errorf("out=%q", out)
+	}
+}
+
+func TestAuditStagesNoLedgerWarnsExitZero(t *testing.T) {
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", stagesFixture("no-ledger-warn"))
+	if code != 0 {
+		t.Fatalf("want exit 0 (warn only, no progress.md), got %d out=%q errs=%q", code, out, errs)
+	}
+	if !strings.Contains(errs, "warning:") || !strings.Contains(errs, "progress.md") {
+		t.Errorf("want a warning mentioning progress.md, errs=%q", errs)
+	}
+	if !strings.Contains(out, "nothing to audit") {
+		t.Errorf("out=%q", out)
+	}
+}
+
+func TestAuditStagesHandoffMissingBlockBlocks(t *testing.T) {
+	code, out, _ := runCmd(t, "audit", "stages", "--dir", stagesFixture("handoff-missing-block"))
+	if code != 1 {
+		t.Fatalf("want exit 1 (newest handoff lacks the cursor block), got %d, out=%q", code, out)
+	}
+	if !strings.Contains(out, "handoff: applicable=true blocking=true") {
+		t.Errorf("out=%q", out)
+	}
+}
+
 func TestHandoffListTextHasHeaderAndPath(t *testing.T) {
 	dir := t.TempDir()
 	if code, _, errs := runCmd(t, "handoff", "new", "-dir", dir, "v3 cosmetics"); code != 0 {
@@ -583,11 +648,20 @@ func TestCursorCommandPrintsValidCursor(t *testing.T) {
 		"prd: docs/specs/2026-01-01-fixture-design.md",
 		"tickets: I001-I005",
 		"implement[<]",
-		"derivation: n/a",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("out missing %q; out=%q", want, out)
 		}
+	}
+	// This grammar-only fixture (internal/cursor/testdata) has no
+	// docs/specs, docs/issues, or docs/handoffs on disk — prd and issues
+	// are ticked done with nothing to back them, so the live verdict must
+	// be blocking, and it must be exit 0 regardless (advisory here).
+	if !strings.Contains(out, "derivation: blocking") {
+		t.Errorf("want a live blocking verdict (this fixture's ticked stages have no artifacts), out=%q", out)
+	}
+	if !strings.Contains(out, "prd (ticked-missing)") || !strings.Contains(out, "issues (ticked-missing)") {
+		t.Errorf("want prd/issues ticked-missing detail lines, out=%q", out)
 	}
 }
 
@@ -647,7 +721,11 @@ func TestCursorCommandOnRealRepoLedger(t *testing.T) {
 	if strings.Contains(out, "finding:") {
 		t.Errorf("want the real ledger to parse cleanly with zero findings, out=%q", out)
 	}
-	if !strings.Contains(out, "derivation: n/a") {
-		t.Errorf("out=%q", out)
+	// The live verdict depends on this build's real, evolving on-disk state
+	// (its own dogfood cursor, ticket files, and handoffs) rather than a
+	// fixed fixture — assert the format landed, not a specific outcome that
+	// would go stale as the build progresses toward its own handoff.
+	if !strings.Contains(out, "derivation: clean") && !strings.Contains(out, "derivation: blocking") {
+		t.Errorf("want a live derivation verdict (clean or blocking), out=%q", out)
 	}
 }

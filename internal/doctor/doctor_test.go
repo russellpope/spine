@@ -430,6 +430,110 @@ func TestD7EvalStructure(t *testing.T) {
 	}
 }
 
+// D9 (the stage-derivation advisory, I019) must stay silent on a freshly
+// scaffolded repo: no progress.md at all is a dormant/non-SDD-effort repo,
+// not unhealthy.
+func TestD9SilentWithNoCursor(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids(findings)["D9"] != 0 {
+		t.Fatalf("want no D9 on a dormant repo, got %#v", findings)
+	}
+}
+
+// A cursor whose ticked stages all have matching artifacts, and whose
+// newest handoff carries the cursor block, must not produce a D9 finding.
+func TestD9SilentOnCleanCursor(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	seedCleanCursor(t, dir)
+	findings, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids(findings)["D9"] != 0 {
+		t.Fatalf("want no D9 on a clean cursor, got %#v", findings)
+	}
+}
+
+// A stage-cursor mismatch (ticked done with no matching artifact) must
+// produce a D9 finding, severity warn — never error — and must not change
+// doctor's existing warn/error-drives-exit-code rule.
+func TestD9WarnOnTickedMissingStage(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	seedCleanCursor(t, dir)
+	// Remove the PRD file the cursor claims is done — a ticked-but-missing
+	// contradiction.
+	if err := os.Remove(filepath.Join(dir, "docs", "specs", "2026-01-01-fixture-design.md")); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range findings {
+		if f.ID != "D9" {
+			continue
+		}
+		found = true
+		if f.Severity != "warn" {
+			t.Errorf("D9 severity = %q, want warn (never error)", f.Severity)
+		}
+	}
+	if !found {
+		t.Fatalf("want a D9 finding for the ticked-but-missing PRD, got %#v", findings)
+	}
+	code := 0
+	for _, f := range findings {
+		if f.Severity == "warn" || f.Severity == "error" {
+			code = 1
+		}
+	}
+	if code != 1 {
+		t.Error("existing doctor exit rule (warn/error -> 1) must still apply with D9 present")
+	}
+}
+
+// seedCleanCursor writes a matching cursor + PRD + ticket files + a handoff
+// carrying the cursor block into a scaffolded dir, so a stage-derivation
+// check over it comes back clean.
+func seedCleanCursor(t *testing.T, dir string) {
+	t.Helper()
+	cursorBlock := "<!-- spine:cursor -->\n" +
+		"effort: fixture-effort\n" +
+		"prd: docs/specs/2026-01-01-fixture-design.md\n" +
+		"tickets: I001-I001\n" +
+		"stages: grill[x] prd[x] issues[x] implement[<]\n" +
+		"<!-- /spine:cursor -->\n"
+	writeUnder(t, dir, ".superpowers/sdd/progress.md", "# ledger\n\n"+cursorBlock)
+	writeUnder(t, dir, "docs/specs/2026-01-01-fixture-design.md", "# fixture design\n")
+	writeUnder(t, dir, "docs/issues/I001-a.md", "---\nid: I001\ntitle: fixture\nseverity: low\nstatus: fixed\n---\nx\n")
+	writeUnder(t, dir, "docs/handoffs/2026-01-02-fixture.md", "---\ntitle: \"fixture\"\n---\n\n"+cursorBlock)
+}
+
+func writeUnder(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	path := filepath.Join(dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestD8HandoffNaming(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
