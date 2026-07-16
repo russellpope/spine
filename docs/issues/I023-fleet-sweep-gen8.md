@@ -2,7 +2,7 @@
 id: I023
 title: Fleet sweep — all 17 repos to gen 8, ultima last
 severity: med
-status: open
+status: fixed
 affects: [fleet]
 blocked-by: [I019, I020]
 execution-mode: subagent-driven

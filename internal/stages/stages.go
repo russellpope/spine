@@ -22,14 +22,20 @@
 //     docs/issues/*.md file with a matching id: frontmatter field.
 //   - "implement": a heuristic scan of .superpowers/sdd/progress.md's
 //     dispatch/escalation lines for a "<ticket-id>: ... done|complete"
-//     record (case-insensitive) — the same ledger convention audit routing
-//     already reads (ESCALATION/FALLBACK lines live in the same file).
-//     Documented here as a heuristic because, unlike prd/issues, there is
-//     no authoritative on-disk artifact for "implemented" — commit/branch
-//     inspection was ruled out (design's Testing Decisions: fixture-repo
-//     trees, not real git state) in favor of the ledger's own dispatch
-//     record, which every effort already maintains under the audit-routing
-//     contract.
+//     record (case-insensitive), matched via the word-boundary regexp
+//     \b(done|completed?)\b so substrings like "abandoned" or "incomplete"
+//     do not manufacture false evidence — the same ledger convention audit
+//     routing already reads (ESCALATION/FALLBACK lines live in the same
+//     file). Documented here as a heuristic because, unlike prd/issues,
+//     there is no authoritative on-disk artifact for "implemented" —
+//     commit/branch inspection was ruled out (design's Testing Decisions:
+//     fixture-repo trees, not real git state) in favor of the ledger's own
+//     dispatch record, which every effort already maintains under the
+//     audit-routing contract. One accepted residual: the word-boundary
+//     match still fires on a phrase like "not complete" (it contains the
+//     whole word "complete"), so a negated-but-word-boundary-matching
+//     record can still manufacture false evidence — narrower than the
+//     substring bug it replaces, but not eliminated.
 //
 // Every other stage name (grill, functional-test, review, verify, ship,
 // deploy, docs, handoff, and anything not in this list) has no rule: it

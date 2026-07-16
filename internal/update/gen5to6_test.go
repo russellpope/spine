@@ -164,7 +164,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(string(cl), "<!-- spine:begin v8 -->") {
-		t.Error("migrated CLAUDE.md missing v7 marker")
+		t.Error("migrated CLAUDE.md missing v8 marker")
 	}
 	if !strings.Contains(string(cl), "primary / routine / mechanical / fallback") {
 		t.Error("migrated CLAUDE.md Model pointer missing the four-tier parenthetical")

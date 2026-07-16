@@ -614,11 +614,17 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 
 // cmdAuditStages is a thin printer over stages.Derive: a table of every
 // cursor stage's derivation verdict (like audit routing's ticket table),
-// plus the newest-handoff backstop line. Exit 1 only when Report.Blocking()
-// — a ticked-but-missing or present-but-unticked stage, or a missing/stale
-// newest-handoff cursor block. No cursor at all is a warning, never a
-// failure (exit 0) — see internal/stages' package doc for the three quiet
-// cases this collapses.
+// plus the newest-handoff backstop line. Exit 1 when Report.Blocking() — a
+// ticked-but-missing or present-but-unticked stage, or a missing/stale
+// newest-handoff cursor block — OR when the cursor block itself failed to
+// parse (HasCursor && len(CursorFindings) > 0): a malformed stages: line
+// parses to zero stage rows, which would otherwise sail through this gate
+// at exit 0 with the grammar problems demoted to stderr-only warnings.
+// audit stages is the ONLY caller where cursor grammar findings block —
+// `spine cursor` stays exit-0-always (read-only printer) and doctor's D9
+// stays warn-only; neither is changed by this. No cursor at all is a
+// warning, never a failure (exit 0) — see internal/stages' package doc for
+// the three quiet cases this collapses.
 func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("audit stages", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -641,18 +647,29 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "no spine cursor — nothing to audit")
 		return 0
 	}
+	cursorMalformed := len(rep.CursorFindings) > 0
+	const malformedName, malformedState, malformedVerdict = "cursor", "n/a", "blocking"
 	wName, wState, wVerdict := len("stage"), len("state"), len("verdict")
 	for _, s := range rep.Stages {
 		wName = max(wName, len(s.Name))
 		wState = max(wState, len(s.StateLabel()))
 		wVerdict = max(wVerdict, len(string(s.Verdict)))
 	}
+	if cursorMalformed {
+		wName = max(wName, len(malformedName))
+		wState = max(wState, len(malformedState))
+		wVerdict = max(wVerdict, len(malformedVerdict))
+	}
 	fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, "stage", wState, "state", wVerdict, "verdict", "detail")
+	if cursorMalformed {
+		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, malformedName, wState, malformedState, wVerdict, malformedVerdict,
+			"malformed cursor block — grammar findings: "+strings.Join(rep.CursorFindings, "; "))
+	}
 	for _, s := range rep.Stages {
 		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, s.Name, wState, s.StateLabel(), wVerdict, string(s.Verdict), s.Detail)
 	}
 	fmt.Fprintf(stdout, "handoff: applicable=%v blocking=%v — %s\n", rep.Handoff.Applicable, rep.Handoff.Blocking(), rep.Handoff.Detail)
-	if rep.Blocking() {
+	if rep.Blocking() || cursorMalformed {
 		return 1
 	}
 	return 0

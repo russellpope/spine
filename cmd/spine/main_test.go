@@ -523,6 +523,30 @@ func TestAuditStagesHandoffMissingBlockBlocks(t *testing.T) {
 	}
 }
 
+// A cursor block whose stages: line is garbage (grammar findings, zero
+// stage rows) must not sail through audit stages at exit 0 — that is a
+// silent gate bypass (the whole point of a stage cursor is to gate).
+// audit stages is the ONLY caller that must turn CursorFindings blocking;
+// spine cursor (below) and doctor D9 stay advisory.
+func TestAuditStagesMalformedCursorBlocks(t *testing.T) {
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", stagesFixture("malformed-cursor"))
+	if code != 1 {
+		t.Fatalf("want exit 1 (malformed cursor grammar findings must block audit stages), got %d, out=%q errs=%q", code, out, errs)
+	}
+	if !strings.Contains(out, "malformed") {
+		t.Errorf("want the blocking cursor-malformed finding surfaced in the report table, out=%q", out)
+	}
+}
+
+// spine cursor stays exit-0-always even on the same malformed fixture — it
+// is a read-only printer, never a gate. Only audit stages gates.
+func TestCursorCommandStaysExitZeroOnMalformedCursor(t *testing.T) {
+	code, out, errs := runCmd(t, "cursor", "--dir", stagesFixture("malformed-cursor"))
+	if code != 0 {
+		t.Fatalf("spine cursor must stay exit-0-always even on a malformed cursor, got %d out=%q errs=%q", code, out, errs)
+	}
+}
+
 func TestHandoffListTextHasHeaderAndPath(t *testing.T) {
 	dir := t.TempDir()
 	if code, _, errs := runCmd(t, "handoff", "new", "-dir", dir, "v3 cosmetics"); code != 0 {

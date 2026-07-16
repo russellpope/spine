@@ -269,7 +269,7 @@ func parseStages(raw string, validStages []string) ([]Stage, []string) {
 		stages = append(stages, Stage{Name: name, State: state})
 	}
 	if hereCount > 1 {
-		findings = append(findings, fmt.Sprintf("multiple YOU-ARE-HERE ([<]) markers: found %d, want at most 1", hereCount))
+		findings = append(findings, fmt.Sprintf("multiple YOU-ARE-HERE ([<]) markers: found %d, want exactly 1 among non-done stages", hereCount))
 	}
 	if hereCount == 0 && pendingCount > 0 {
 		findings = append(findings, "missing YOU-ARE-HERE ([<]) marker: a non-done stage is pending but no stage is marked [<]")
