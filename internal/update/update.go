@@ -424,6 +424,14 @@ var supersededLines = map[string]bool{
 	"incomplete — the reader can't see which upstream stage was skipped. When in doubt, re-derive the cursor":   true,
 	"from the artifacts on disk: PRD in `docs/specs/` ⇒ `prd` done; build tickets in":                           true,
 	"`docs/issues/` ⇒ `issues` done; per-task commits ⇒ `implement` in progress.":                               true,
+
+	// gen 8's indented "tickets: I0NN-I0MM | prefix I0" Grammar-reference
+	// line, reworded in gen 9 to admit a bare single-ticket id (I026). Note
+	// the leading 4-space indent: this line lives inside the Stage-cursor
+	// section's indented code block, unlike the other superseded lines
+	// above, which are unindented prose — unrecognizedLines only
+	// right-trims, so the key must carry the on-disk indentation verbatim.
+	"    tickets: I0NN-I0MM | prefix I0": true,
 }
 
 // unrecognizedLines returns non-blank lines of got that expected does not

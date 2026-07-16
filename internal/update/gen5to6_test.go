@@ -109,6 +109,9 @@ func TestGen5To6IsStampPlusDeclaredContent(t *testing.T) {
 				if isGen8ContentDiffLine(line) { // gen 8's conscious content edit; see gen7to8_test.go
 					continue
 				}
+				if isGen9ContentDiffLine(line) { // gen 9's conscious content edit; see gen8to9_test.go
+					continue
+				}
 				t.Errorf("%s: unexpected changed line %q — 5→6 must be stamp plus declared gen-6 content only", r.Path, line)
 			}
 		}
@@ -143,7 +146,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"template_version: 8",
+		"template_version: 9",
 		"primary: claude-fable-5",
 		"routine: claude-sonnet-5",
 		"mechanical: claude-haiku-4-5",
@@ -163,8 +166,8 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(cl), "<!-- spine:begin v8 -->") {
-		t.Error("migrated CLAUDE.md missing v8 marker")
+	if !strings.HasPrefix(string(cl), "<!-- spine:begin v9 -->") {
+		t.Error("migrated CLAUDE.md missing v9 marker")
 	}
 	if !strings.Contains(string(cl), "primary / routine / mechanical / fallback") {
 		t.Error("migrated CLAUDE.md Model pointer missing the four-tier parenthetical")

@@ -43,7 +43,7 @@ func TestHbmviewUnstranding(t *testing.T) {
 		t.Fatal(err)
 	}
 	wf, _ := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
-	for _, want := range []string{"# Workflow — hbmview", "profile: rust", "template_version: 8",
+	for _, want := range []string{"# Workflow — hbmview", "profile: rust", "template_version: 9",
 		"primary: claude-fable-5", "model_default: claude-fable-5",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli",
 		"## Execution modes"} {
@@ -55,7 +55,7 @@ func TestHbmviewUnstranding(t *testing.T) {
 		t.Error("stale model_default survived")
 	}
 	cl, _ := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-	if !strings.HasPrefix(string(cl), "<!-- spine:begin v8 -->") ||
+	if !strings.HasPrefix(string(cl), "<!-- spine:begin v9 -->") ||
 		strings.Count(string(cl), "# hbmview") != 1 {
 		t.Errorf("CLAUDE.md claim wrong:\n%s", cl)
 	}

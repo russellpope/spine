@@ -4,12 +4,54 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/russellpope/spine/internal/cursor"
 	"github.com/russellpope/spine/internal/tmpl"
 )
 
 func TestVersionMatchesCurrentGeneration(t *testing.T) {
-	if got := tmpl.Version(); got != 8 {
-		t.Fatalf("Version() = %d, want 8", got)
+	if got := tmpl.Version(); got != 9 {
+		t.Fatalf("Version() = %d, want 9", got)
+	}
+}
+
+// I026: the tickets: grammar reference is documented in exactly two places
+// — cursor.Grammar (internal/cursor) and the WORKFLOW.md.tmpl Stage-cursor
+// section's indented Grammar-reference code block — and the ticket requires
+// them to stay verbatim-identical. This proves it directly: extract the
+// rendered template's indented `<!-- spine:cursor -->` ... `<!--
+// /spine:cursor -->` block, dedent it by the code block's 4-space markdown
+// indent, and byte-compare against cursor.Grammar. A future edit to either
+// side without the other fails this test.
+func TestCursorGrammarVerbatimInTemplate(t *testing.T) {
+	rendered, err := tmpl.Render("current", "WORKFLOW.md.tmpl", tmpl.Values{
+		Project: "demo", Profile: "rust",
+		Reviewers: "rust-reviewer, security-review", Harness: "cli", Version: tmpl.Version(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The indented (4-space) form specifically: "spine:cursor" also appears
+	// earlier in unindented prose describing the block, which is not the
+	// Grammar reference itself.
+	const openTag = "    <!-- spine:cursor -->"
+	const closeTag = "    <!-- /spine:cursor -->"
+	start := strings.Index(rendered, openTag)
+	if start == -1 {
+		t.Fatal("rendered WORKFLOW.md.tmpl has no indented spine:cursor Grammar reference block")
+	}
+	end := strings.Index(rendered[start:], closeTag)
+	if end == -1 {
+		t.Fatal("rendered WORKFLOW.md.tmpl Grammar reference block has no closing tag")
+	}
+	block := rendered[start : start+end+len(closeTag)]
+	var dedented []string
+	for _, line := range strings.Split(block, "\n") {
+		dedented = append(dedented, strings.TrimPrefix(line, "    "))
+	}
+	got := strings.Join(dedented, "\n") + "\n"
+	want := cursor.Grammar
+	if got != want {
+		t.Errorf("template Grammar reference block is not verbatim-identical to cursor.Grammar:\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
 

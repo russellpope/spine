@@ -65,7 +65,7 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 8",
+	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 9",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli",
 		"## Stage cursor (consistency rule)", "<!-- spine:cursor -->"} {
 		if !strings.Contains(string(wf), want) {

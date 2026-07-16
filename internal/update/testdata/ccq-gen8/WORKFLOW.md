@@ -1,9 +1,9 @@
-# Workflow — {{PROJECT}}
+# Workflow — ccq
 
-profile: {{PROFILE}}
-template_version: {{VERSION}}
-reviewers: [{{REVIEWERS}}]
-functional_harness: {{HARNESS}}    # cli | rest | framebuffer | none
+profile: library-cli
+template_version: 8
+reviewers: [go-reviewer, python-reviewer]
+functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
 model_routing:
   primary: claude-fable-5          # default thinker: design, judgment, orchestration, final review
@@ -32,7 +32,7 @@ Grammar reference (documentation only — the real block lives at the head of
     <!-- spine:cursor -->
     effort: <kebab-name>
     prd: docs/specs/<file>.md
-    tickets: I0NN | I0NN-I0MM | prefix I0
+    tickets: I0NN-I0MM | prefix I0
     stages: grill[x] prd[x] issues[x] implement[<] functional-test[ ] review[ ] verify[ ] ship[ ] ...
     <!-- /spine:cursor -->
 

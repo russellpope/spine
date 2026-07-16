@@ -89,6 +89,9 @@ func TestGen7To8PristineUpdatesCleanly(t *testing.T) {
 				if isGen8ContentDiffLine(line) {
 					continue
 				}
+				if isGen9ContentDiffLine(line) { // gen 9's conscious content edit; see gen8to9_test.go
+					continue
+				}
 				t.Errorf("%s: unexpected changed line %q — 7→8 must be stamp plus declared gen-8 content only", r.Path, line)
 			}
 		}
@@ -145,7 +148,7 @@ func TestUltimaHandWrittenCursorSectionSuperseded(t *testing.T) {
 		"exactly one, among the non-done stages", // canonical marker-semantics wording (I018 post-fix)
 		"spine cursor",                           // handoff rule: verbatim `spine cursor` output
 		"<!-- spine:cursor -->",                  // grammar reference embedded as documentation
-		"template_version: 8",
+		"template_version: 9",
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("migrated WORKFLOW.md missing %q", want)
