@@ -317,18 +317,31 @@ func readLedgerRaw(dir string) string {
 	return string(raw)
 }
 
+// implementDoneWordRe matches "done" or "complete"/"completed" as whole
+// words (not substrings), so it does not fire on "abandoned" (contains
+// "done") or "incomplete" (contains "complete"). Compiled once at package
+// init rather than per call.
+var implementDoneWordRe = regexp.MustCompile(`\b(done|completed?)\b`)
+
 // implementEvidence scans ledgerRaw's dispatch/escalation lines (the same
 // file audit routing reads ESCALATION/FALLBACK records from) for a
-// "<ticket-id>: ... done|complete" record per id, case-insensitive. This is
-// the documented heuristic for "implement" evidence: there is no
+// "<ticket-id>: ... done|complete" record per id, case-insensitive, matching
+// done/complete as whole words via implementDoneWordRe so that negations
+// like "abandoned" or "incomplete" do not manufacture false evidence. This
+// is the documented heuristic for "implement" evidence: there is no
 // authoritative on-disk artifact for "implemented", so the ledger's own
-// dispatch record — which every effort already maintains — stands in.
+// dispatch record — which every effort already maintains — stands in. One
+// residual the word-boundary match cannot cure: a done-word about a
+// different stage on a ticket-prefixed line (e.g. "I019: grill done")
+// still counts as implement evidence — under-detection's mirror image,
+// accepted because the line format is ledger-convention-bound rather than
+// stage-structured.
 func implementEvidence(ledgerRaw string, ids []string) map[string]bool {
 	evidenced := map[string]bool{}
 	for _, line := range strings.Split(ledgerRaw, "\n") {
 		trimmed := strings.TrimLeft(strings.TrimSpace(line), "-* ")
 		lower := strings.ToLower(trimmed)
-		if !strings.Contains(lower, "done") && !strings.Contains(lower, "complete") {
+		if !implementDoneWordRe.MatchString(lower) {
 			continue
 		}
 		for _, id := range ids {
