@@ -2,7 +2,7 @@
 id: I010
 title: Stage-skipping controls — wayfinder map (gen 8)
 severity: med
-status: open
+status: fixed
 affects: [template, doctor, audit, cli, fleet]
 blocked-by: []
 labels: [wayfinder:map]
@@ -27,6 +27,10 @@ Every spine repo mechanically resists stage-skipping: the stage-cursor + handoff
 - [Fleet sweep scope](I015-fleet-sweep-scope.md) — all 17 repos to gen 8; ultima last, via the sanctioned reconciliation.
 - [Overnight execution gates](I016-overnight-execution-gates.md) — full gates tonight: to-spec + to-tickets this session, SDD overnight, spec-review + verify in the morning.
 - [Ultima WORKFLOW.md gen7→8 reconciliation](I017-ultima-gen8-reconciliation.md) — gen 8 lists ultima's hand-written section lines in `supersededLines` so plain `spine update --write` upgrades it cleanly; `--force` with reviewed diff is the fallback.
+
+## Resolution
+
+Destination reached and SHIPPED 2026-07-16 (main @ d1aed62, pushed): stage cursor spine-owned in gen 8, `spine audit stages` blocking + doctor advisory live, SessionStart hook + `spine cursor` live, /handoff hardened, fleet swept 17/17 (ultima clean). Residual tracked outside the map: [I028](I028-story11-closure-fleet-residue.md) (objectstudio/maipipe WORKFLOW reconciliation + 4 uncommitted repos) keeps the "whole fleet" clause honest; polish follow-ups I024-I027.
 
 ## Not yet specified
 
