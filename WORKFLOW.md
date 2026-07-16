@@ -1,7 +1,7 @@
 # Workflow — spine
 
 profile: library-cli
-template_version: 7
+template_version: 8
 reviewers: [go-reviewer, python-reviewer]
 functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
@@ -16,6 +16,27 @@ stages: [grill, prd, issues, implement, functional-test, review, verify, ship, d
 
 See `docs/harness-interface.md` for the functional-test harness contract.
 Mandatory gates: a PRD up front (grill-with-docs -> to-spec), spec-review of the finished diff against the PRD, and verification before completion.
+
+## Stage cursor (consistency rule)
+
+Stages run **in order**; none may be silently skipped (the miss mode is a handoff that names an
+abbreviated path — e.g. "grill -> to-spec -> build" quietly dropping `issues`/`to-tickets`). To
+prevent it, every SDD effort's `.superpowers/sdd/progress.md` opens with a machine-readable
+stage cursor block — one `<!-- spine:cursor -->` block naming the effort, PRD, ticket range, and
+every stage's marker. `[x]` marks a done stage, `[<]` marks YOU ARE HERE (exactly one, among the non-done stages), `[ ]` marks pending.
+The cursor is the single source of truth for "where are we"; check it at session start before acting.
+
+Grammar reference (documentation only — the real block lives at the head of
+`.superpowers/sdd/progress.md`, never here):
+
+    <!-- spine:cursor -->
+    effort: <kebab-name>
+    prd: docs/specs/<file>.md
+    tickets: I0NN-I0MM | prefix I0
+    stages: grill[x] prd[x] issues[x] implement[<] functional-test[ ] review[ ] verify[ ] ship[ ] ...
+    <!-- /spine:cursor -->
+
+**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone.
 
 ## Model routing
 
