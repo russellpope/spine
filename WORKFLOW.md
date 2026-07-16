@@ -1,7 +1,7 @@
 # Workflow — spine
 
 profile: library-cli
-template_version: 8
+template_version: 9
 reviewers: [go-reviewer, python-reviewer]
 functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
@@ -32,11 +32,11 @@ Grammar reference (documentation only — the real block lives at the head of
     <!-- spine:cursor -->
     effort: <kebab-name>
     prd: docs/specs/<file>.md
-    tickets: I0NN-I0MM | prefix I0
+    tickets: I0NN | I0NN-I0MM | prefix I0
     stages: grill[x] prd[x] issues[x] implement[<] functional-test[ ] review[ ] verify[ ] ship[ ] ...
     <!-- /spine:cursor -->
 
-**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone.
+**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone. Alongside `spine audit stages` blocking on a missing/stale cursor block in the newest handoff, `spine doctor` advises (warns) on the same condition.
 
 ## Model routing
 

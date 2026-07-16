@@ -1,4 +1,4 @@
-<!-- spine:begin v8 -->
+<!-- spine:begin v9 -->
 # spine — Codex working brief
 
 This file is read by **Codex**; the `CLAUDE.md` twin carries the same facts for Claude. Both are machine-owned by `spine` between the markers — edit only outside them.
