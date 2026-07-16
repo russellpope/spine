@@ -2,19 +2,30 @@
 // the head of a repo's .superpowers/sdd/progress.md recording which
 // WORKFLOW.md stage an effort is at.
 //
-// Grammar (defined once here; the gen 8 WORKFLOW.md template section reuses
+// Grammar (defined once here; the gen 9 WORKFLOW.md template section reuses
 // this text verbatim — see Grammar):
 //
 //	<!-- spine:cursor -->
 //	effort: <kebab-name>
 //	prd: docs/specs/<file>.md
-//	tickets: I0NN-I0MM | prefix I0
+//	tickets: I0NN | I0NN-I0MM | prefix I0
 //	stages: grill[x] prd[x] issues[x] implement[<] functional-test[ ] review[ ] verify[ ] ship[ ] ...
 //	<!-- /spine:cursor -->
 //
 // `[x]` marks a done stage, `[<]` marks YOU ARE HERE (exactly one, among the
 // non-done stages), `[ ]` marks pending. Stage names must match the repo's
 // WORKFLOW.md `stages:` list.
+//
+// tickets: resolves three forms (I026; resolution itself lives in
+// internal/stages' resolveTicketIDs, which anchors evidence against this
+// grammar): a bare single-ticket id ("I0NN"), an inclusive numeric range of
+// equal digit width ("I0NN-I0MM", where a same-endpoint range like
+// "I001-I001" is a valid — if redundant — alias for the bare-id form), or
+// every docs/issues ticket id sharing a literal prefix ("prefix <str>").
+// Anything else is unresolvable: internal/stages degrades the issues and
+// implement evidence rules to not-judged (absence of evidence never blocks)
+// but surfaces a Notes entry naming the bad value, so the degradation is
+// visible rather than silent.
 //
 // Load never panics on bad input: a missing repo, a missing ledger, or a
 // missing cursor block is reported as HasCursor==false (nothing to derive
@@ -55,11 +66,14 @@ import (
 )
 
 // Grammar is the canonical cursor block text, documented once here and
-// reused verbatim by the gen 8 WORKFLOW.md template section (I020).
+// reused verbatim by the gen 9 WORKFLOW.md template section (I020, I026).
+// It is illustrative documentation, never a live cursor: the trailing "..."
+// on the stages: line is a "more stages may follow" marker, not a real
+// stage token, and would not itself parse.
 const Grammar = `<!-- spine:cursor -->
 effort: <kebab-name>
 prd: docs/specs/<file>.md
-tickets: I0NN-I0MM | prefix I0
+tickets: I0NN | I0NN-I0MM | prefix I0
 stages: grill[x] prd[x] issues[x] implement[<] functional-test[ ] review[ ] verify[ ] ship[ ] ...
 <!-- /spine:cursor -->
 `

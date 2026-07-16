@@ -259,9 +259,12 @@ func TestPrefixTicketGrammarResolves(t *testing.T) {
 	}
 }
 
-// An unresolvable tickets: value (neither range nor prefix grammar) must
-// degrade to no evidence, never a block — absence of evidence never blocks,
-// even when the absence is "we couldn't even parse the ticket set."
+// An unresolvable tickets: value (neither bare id, range, nor prefix
+// grammar) must degrade to no evidence, never a block — absence of evidence
+// never blocks, even when the absence is "we couldn't even parse the ticket
+// set." I026: the degradation must not be silent — a Notes entry names the
+// exact bad value, distinguishing this from a legitimately empty "prefix"
+// match (which resolves fine and produces no note).
 func TestUnresolvableTicketsNeverBlocks(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
@@ -275,6 +278,81 @@ func TestUnresolvableTicketsNeverBlocks(t *testing.T) {
 	issues := rowByName(t, rep.Stages, "issues")
 	if issues.Verdict != stages.VerdictNotJudged {
 		t.Errorf("issues verdict = %s (%s), want not-judged", issues.Verdict, issues.Detail)
+	}
+	// Note: this fixture's overall rep.Blocking() is true regardless of the
+	// tickets: value, because it has no docs/handoffs at all (the I014
+	// newest-handoff backstop) — an orthogonal blocking condition already
+	// covered by TestNoHandoffAtAllBlocksWhenCursorExists. Report.Notes is
+	// never consulted by Blocking() (see the package doc), so an
+	// unresolvable-tickets Note is non-blocking by construction; this test
+	// only asserts the Note itself, not the report's overall Blocking().
+	if len(rep.Notes) != 1 {
+		t.Fatalf("want exactly one Notes entry for the unresolvable tickets: value, got %#v", rep.Notes)
+	}
+	if !strings.Contains(rep.Notes[0], "not-a-grammar") {
+		t.Errorf("Notes[0] = %q, want it to name the bad tickets: value", rep.Notes[0])
+	}
+}
+
+// A resolvable-but-empty tickets: value (a "prefix" that matches nothing on
+// disk) must NOT produce an unresolvable-tickets Note — it resolved fine,
+// vacuously, to an empty set. Only genuinely unparseable values get a note.
+func TestResolvableEmptyPrefixProducesNoNote(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: prefix I9\nstages: grill[x] prd[ ] issues[x] implement[<]\n"+
+		"<!-- /spine:cursor -->\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Notes) != 0 {
+		t.Errorf("resolvable (if empty) prefix must not produce a Notes entry, got %#v", rep.Notes)
+	}
+}
+
+// I026: a bare single-ticket id ("tickets: I001", previously undocumented
+// and unresolvable) now resolves to that one ticket, anchoring evidence for
+// both the issues and implement stages exactly like a one-element range
+// would.
+func TestBareTicketIDResolves(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I001\nstages: grill[x] prd[ ] issues[x] implement[<]\n"+
+		"<!-- /spine:cursor -->\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues := rowByName(t, rep.Stages, "issues")
+	if issues.Verdict != stages.VerdictMatch {
+		t.Errorf("issues verdict = %s (%s), want match — I001 exists on disk", issues.Verdict, issues.Detail)
+	}
+	if len(rep.Notes) != 0 {
+		t.Errorf("a resolvable bare id must not produce an unresolvable-tickets note, got %#v", rep.Notes)
+	}
+}
+
+// I026: a same-endpoint range ("I001-I001") already resolved structurally
+// before this ticket (the range regex never required start < end) — this
+// locks that behavior now that it's a documented, not just accidental, form.
+func TestSameEndpointRangeResolves(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I001-I001\nstages: grill[x] prd[ ] issues[x] implement[<]\n"+
+		"<!-- /spine:cursor -->\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues := rowByName(t, rep.Stages, "issues")
+	if issues.Verdict != stages.VerdictMatch {
+		t.Errorf("issues verdict = %s (%s), want match — I001 exists on disk", issues.Verdict, issues.Detail)
 	}
 }
 

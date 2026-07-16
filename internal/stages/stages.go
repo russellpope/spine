@@ -43,14 +43,18 @@
 // marker — it can never block.
 //
 // Design-latitude choices (pinned here):
-//   - tickets: grammar has two forms (docs/issues/README.md, the cursor
-//     grammar comment): "I0NN-I0MM" (an inclusive numeric range, both ends
-//     the same digit width) or "prefix <str>" (every docs/issues ticket id
-//     sharing that literal prefix). Anything else — including a bare single
-//     id, which the grammar does not define — fails to resolve. An
-//     unresolved ticket set degrades to zero evidence for both the issues
-//     and implement stages (never a block), exactly like any other absent
-//     evidence.
+//   - tickets: grammar has three forms (docs/issues/README.md, the cursor
+//     grammar comment; I026 added the bare-id form): "I0NN" (a bare
+//     single-ticket id), "I0NN-I0MM" (an inclusive numeric range, both ends
+//     the same digit width — a same-endpoint range like "I001-I001" is a
+//     valid, if redundant, alias for the bare-id form), or "prefix <str>"
+//     (every docs/issues ticket id sharing that literal prefix). Anything
+//     else fails to resolve. An unresolved-but-non-empty ticket set degrades
+//     to zero evidence for both the issues and implement stages (never a
+//     block, same as any other absent evidence) but is surfaced as a
+//     Report.Notes entry naming the bad value (I026) — conservative and
+//     non-blocking, but visible, rather than a silent degradation
+//     indistinguishable from a legitimately empty "prefix" match.
 //   - Evidence over an anchored *set* (issues' ticket ids; implement's same
 //     set) uses an asymmetric bar to keep both directions conservative:
 //     the done-direction check requires ALL items present to count as
@@ -206,7 +210,9 @@ func FromResult(dir string, res cursor.Result) Report {
 		rep.Notes = []string{noCursorNote(dir)}
 		return rep
 	}
-	rep.Stages = deriveStages(dir, res.Cursor)
+	var notes []string
+	rep.Stages, notes = deriveStages(dir, res.Cursor)
+	rep.Notes = notes
 	rep.Handoff = deriveHandoff(dir, res.Cursor.Effort)
 	return rep
 }
@@ -224,8 +230,11 @@ func noCursorNote(dir string) string {
 	return "progress.md has no spine:cursor block — nothing to derive"
 }
 
-// deriveStages judges every stage in c.Stages in cursor order.
-func deriveStages(dir string, c cursor.Cursor) []StageRow {
+// deriveStages judges every stage in c.Stages in cursor order. The second
+// return is Notes: currently just a single entry (if any) when c.Tickets is
+// non-empty but unresolvable against the grammar — see
+// unresolvableTicketsNote.
+func deriveStages(dir string, c cursor.Cursor) ([]StageRow, []string) {
 	var prdPresent []bool
 	if c.PRD != "" {
 		_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(c.PRD)))
@@ -233,13 +242,18 @@ func deriveStages(dir string, c cursor.Cursor) []StageRow {
 	}
 
 	var issuesPresent, implPresent []bool
-	if ids, ok := resolveTicketIDs(dir, c.Tickets); ok && len(ids) > 0 {
-		have := issueIDs(filepath.Join(dir, "docs", "issues"))
-		evidenced := implementEvidence(readLedgerRaw(dir), ids)
-		for _, id := range ids {
-			issuesPresent = append(issuesPresent, have[id])
-			implPresent = append(implPresent, evidenced[id])
+	var notes []string
+	if ids, ok := resolveTicketIDs(dir, c.Tickets); ok {
+		if len(ids) > 0 {
+			have := issueIDs(filepath.Join(dir, "docs", "issues"))
+			evidenced := implementEvidence(readLedgerRaw(dir), ids)
+			for _, id := range ids {
+				issuesPresent = append(issuesPresent, have[id])
+				implPresent = append(implPresent, evidenced[id])
+			}
 		}
+	} else if strings.TrimSpace(c.Tickets) != "" {
+		notes = append(notes, unresolvableTicketsNote(c.Tickets))
 	}
 
 	rows := make([]StageRow, 0, len(c.Stages))
@@ -258,7 +272,7 @@ func deriveStages(dir string, c cursor.Cursor) []StageRow {
 		}
 		rows = append(rows, StageRow{Name: s.Name, State: s.State, Verdict: verdict, Detail: detail})
 	}
-	return rows
+	return rows, notes
 }
 
 func dash(s string) string {
@@ -434,14 +448,23 @@ func frontmatterID(content string) string {
 	return ""
 }
 
+var ticketIDRe = regexp.MustCompile(`^I\d+$`)
 var ticketRangeRe = regexp.MustCompile(`^I(\d+)-I(\d+)$`)
 
 // resolveTicketIDs parses the cursor's tickets: value into the concrete set
-// of ticket ids it anchors. Two grammar forms resolve (see package doc):
-// "I0NN-I0MM" (an inclusive numeric range, equal digit width) and
-// "prefix <str>" (every docs/issues ticket id sharing that prefix,
-// resolved against the repo — so it can legitimately resolve to an empty
-// set). Anything else returns ok=false: unresolvable, never a block.
+// of ticket ids it anchors. Three grammar forms resolve (see package doc
+// and cursor.Grammar, I026): a bare single-ticket id "I0NN" (resolves to
+// that one id, unconditionally — unlike "prefix", a bare id names a
+// specific ticket rather than a repo-resolved set, so it never needs a
+// docs/issues lookup to resolve); "I0NN-I0MM" (an inclusive numeric range,
+// equal digit width — a same-endpoint range like "I001-I001" resolves to
+// the same single-element set as the bare-id form, structurally, though the
+// bare form is the documented idiom); and "prefix <str>" (every docs/issues
+// ticket id sharing that prefix, resolved against the repo — so it can
+// legitimately resolve to an empty set). Anything else returns ok=false:
+// unresolvable, never a block — the caller surfaces this as a Notes entry
+// naming the bad value (see unresolvableTicketsNote) rather than silently
+// treating it like a resolved-but-empty set.
 func resolveTicketIDs(dir, raw string) ([]string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -462,6 +485,9 @@ func resolveTicketIDs(dir, raw string) ([]string, bool) {
 		sort.Strings(out)
 		return out, true
 	}
+	if ticketIDRe.MatchString(raw) {
+		return []string{raw}, true
+	}
 	m := ticketRangeRe.FindStringSubmatch(raw)
 	if m == nil || len(m[1]) != len(m[2]) {
 		return nil, false
@@ -477,4 +503,16 @@ func resolveTicketIDs(dir, raw string) ([]string, bool) {
 		out = append(out, fmt.Sprintf("I%0*d", width, n))
 	}
 	return out, true
+}
+
+// unresolvableTicketsNote explains a non-empty tickets: value that failed
+// to resolve against the grammar (I026): conservative and non-blocking —
+// Report.Blocking() never consults Notes, so this can never gate anything —
+// but visible, naming the exact bad value, following the same explanatory
+// pattern as noCursorNote. Without this, an unresolvable tickets: value
+// degrades the issues and implement evidence rules to VerdictNotJudged
+// exactly like a well-formed-but-empty "prefix" match, with no
+// operator-visible signal that the degradation happened at all.
+func unresolvableTicketsNote(raw string) string {
+	return fmt.Sprintf("tickets: %q does not resolve (grammar: I0NN | I0NN-I0MM | prefix <str>) — issues/implement evidence not judged", raw)
 }
