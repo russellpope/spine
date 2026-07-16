@@ -548,6 +548,47 @@ func TestD9WarnOnMalformedCursorGrammar(t *testing.T) {
 	}
 }
 
+// F1 (final whole-branch review, I024-I027 batch): an unresolvable
+// tickets: value (I026's Report.Notes entry) previously never reached
+// doctor at all — this fixture's stages: grammar and handoff both resolve
+// cleanly, so before this fix doctor reported zero D9 findings on a repo
+// whose tickets: value silently degraded issues/implement evidence to
+// not-judged. D9 stays warn-only, matching every other check.
+func TestD9WarnOnUnresolvableTicketsNote(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	cursorBlock := "<!-- spine:cursor -->\n" +
+		"effort: fixture-effort\n" +
+		"prd: docs/specs/2026-01-01-fixture-design.md\n" +
+		"tickets: not-a-grammar\n" +
+		"stages: grill[x] prd[x] issues[x] implement[<]\n" +
+		"<!-- /spine:cursor -->\n"
+	writeUnder(t, dir, ".superpowers/sdd/progress.md", "# ledger\n\n"+cursorBlock)
+	writeUnder(t, dir, "docs/specs/2026-01-01-fixture-design.md", "# fixture design\n")
+	writeUnder(t, dir, "docs/handoffs/2026-01-02-fixture.md", "---\ntitle: \"fixture\"\n---\n\n"+cursorBlock)
+	findings, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range findings {
+		if f.ID != "D9" {
+			continue
+		}
+		if f.Severity != "warn" {
+			t.Errorf("D9 finding severity = %q, want warn (never error): %#v", f.Severity, f)
+		}
+		if strings.Contains(f.Message, "not-a-grammar") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want a D9 warn naming the unresolvable tickets: value, got %#v", findings)
+	}
+}
+
 // seedCleanCursor writes a matching cursor + PRD + ticket files + a handoff
 // carrying the cursor block into a scaffolded dir, so a stage-derivation
 // check over it comes back clean.

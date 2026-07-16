@@ -567,6 +567,43 @@ func TestCursorCommandMalformedGrammarPrintsNAWording(t *testing.T) {
 	}
 }
 
+// F1(a) (final whole-branch review, I024-I027 batch): before this fix, an
+// unresolvable tickets: value (I026's Report.Notes entry) was computed but
+// never printed by `spine cursor` — this fixture's stages otherwise resolve
+// cleanly, so the command surfaced an ambient "derivation: clean" with the
+// unresolvable-tickets warning nowhere on the hook surface (the
+// SessionStart hook wires this command's stdout into session context).
+// spine audit stages already prints the equivalent Notes entries (as
+// "warning: <note>") — spine cursor must match that.
+func TestCursorCommandSurfacesUnresolvableTicketsNote(t *testing.T) {
+	code, out, errs := runCmd(t, "cursor", "--dir", stagesFixture("unresolvable-tickets"))
+	if code != 0 {
+		t.Fatalf("spine cursor stays exit-0-always (advisory), got %d out=%q errs=%q", code, out, errs)
+	}
+	if !strings.Contains(out, "warning:") || !strings.Contains(out, "not-a-grammar") {
+		t.Errorf("want a warning naming the unresolvable tickets: value on stdout, out=%q", out)
+	}
+}
+
+// F1(b) (final whole-branch review, I024-I027 batch): the "n/a (cursor
+// malformed)" branch (I024) returned early without ever checking
+// rep.Handoff — the info-loss corner the I024 review found. A malformed
+// stages: grammar AND a blocking (missing-block) newest handoff both need
+// attention from the human/agent reading the hook surface, but only the
+// malformed-cursor header made it through. Both must be visible together.
+func TestCursorCommandMalformedBranchStillPrintsBlockingHandoff(t *testing.T) {
+	code, out, errs := runCmd(t, "cursor", "--dir", stagesFixture("malformed-cursor-handoff-missing"))
+	if code != 0 {
+		t.Fatalf("spine cursor stays exit-0-always (advisory), got %d out=%q errs=%q", code, out, errs)
+	}
+	if !strings.Contains(out, "derivation: n/a (cursor malformed)") {
+		t.Errorf("want the n/a (cursor malformed) header, out=%q", out)
+	}
+	if !strings.Contains(out, "handoff:") || !strings.Contains(out, "missing the spine:cursor block") {
+		t.Errorf("want the blocking handoff detail printed alongside the malformed header, out=%q", out)
+	}
+}
+
 func TestHandoffListTextHasHeaderAndPath(t *testing.T) {
 	dir := t.TempDir()
 	if code, _, errs := runCmd(t, "handoff", "new", "-dir", dir, "v3 cosmetics"); code != 0 {

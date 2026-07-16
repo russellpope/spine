@@ -730,6 +730,15 @@ func cmdCursor(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "stages: %s\n", res.Cursor.StagesLine())
 	}
 	rep := stages.FromResult(*dir, res)
+	// F1 (final whole-branch review, I024-I027 batch): rep.Notes (e.g. an
+	// unresolvable tickets: value, I026) was computed but never printed
+	// here — a hook consuming this command's stdout never saw it, leaving
+	// an ambient "derivation: clean" with no visible reason to distrust
+	// the tickets: line. Match how audit stages already surfaces the same
+	// Notes entries (as "warning: <note>").
+	for _, n := range rep.Notes {
+		fmt.Fprintln(stdout, "warning:", n)
+	}
 	switch {
 	case len(rep.CursorFindings) > 0:
 		// I024: a cursor block with grammar findings (e.g. a stages: line
@@ -739,6 +748,15 @@ func cmdCursor(args []string, stdout, stderr io.Writer) int {
 		// printed above as "finding:" lines; this just names the verdict
 		// honestly. Still exit 0 — spine cursor stays a read-only printer.
 		fmt.Fprintln(stdout, "derivation: n/a (cursor malformed)")
+		// F1(b): a malformed stages: grammar says nothing about the
+		// handoff backstop (I014/I025) — the two checks are independent.
+		// Print the blocking handoff detail here too, or a stale/missing
+		// newest handoff silently drops off the hook surface the moment
+		// the cursor also happens to be malformed (the info-loss corner
+		// the I024 review found).
+		if rep.Handoff.Blocking() {
+			fmt.Fprintf(stdout, "  handoff: %s\n", rep.Handoff.Detail)
+		}
 	case !rep.Blocking():
 		fmt.Fprintln(stdout, "derivation: clean")
 	default:

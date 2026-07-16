@@ -91,6 +91,12 @@ func stagesCheck(dir string) []Finding {
 		findings = append(findings, Finding{"D9", "warn", ".superpowers/sdd/progress.md",
 			"cursor block malformed — grammar findings: " + strings.Join(rep.CursorFindings, "; ")})
 	}
+	for _, n := range rep.Notes {
+		// F1 (final whole-branch review, I024-I027 batch): rep.Notes (e.g.
+		// an unresolvable tickets: value, I026) previously never reached
+		// doctor — same warn-only D9 treatment as every other check here.
+		findings = append(findings, Finding{"D9", "warn", ".superpowers/sdd/progress.md", n})
+	}
 	for _, s := range rep.Stages {
 		if s.Verdict == stages.VerdictTickedMissing || s.Verdict == stages.VerdictPresentUnticked {
 			findings = append(findings, Finding{"D9", "warn", ".superpowers/sdd/progress.md",
