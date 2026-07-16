@@ -12,7 +12,7 @@
 //	stages: grill[x] prd[x] issues[x] implement[<] functional-test[ ] review[ ] verify[ ] ship[ ] ...
 //	<!-- /spine:cursor -->
 //
-// `[x]` marks a done stage, `[<]` marks YOU ARE HERE (at most one, among the
+// `[x]` marks a done stage, `[<]` marks YOU ARE HERE (exactly one, among the
 // non-done stages), `[ ]` marks pending. Stage names must match the repo's
 // WORKFLOW.md `stages:` list.
 //
@@ -33,10 +33,10 @@
 //     (absence of evidence never blocks — matches the derivation engine's
 //     stated philosophy in the design doc, even though derivation itself
 //     is Task 2/I019).
-//   - Zero YOU-ARE-HERE markers is not flagged: an effort with every stage
-//     done legitimately has none. Only *multiple* HERE markers is a
-//     contradiction the grammar itself rules out ("exactly one among
-//     non-done").
+//   - Zero YOU-ARE-HERE markers is only flagged when some stage is still
+//     pending: an effort with every stage done legitimately has none, but a
+//     cursor with a pending stage and no [<] violates the grammar's
+//     "exactly one among non-done" rule just as multiple markers do.
 //   - Required keys (effort, prd, tickets, stages) must each appear exactly
 //     once; unknown keys, duplicate keys, and lines that aren't `key:
 //     value` are each reported as their own finding rather than aborting
@@ -228,7 +228,8 @@ func isRequiredKey(key string) bool {
 
 // parseStages tokenizes a stages: value into Stage entries, flagging
 // malformed tokens, unknown stage names (when validStages is non-empty),
-// and more than one YOU-ARE-HERE marker.
+// more than one YOU-ARE-HERE marker, and zero HERE markers while a stage is
+// still pending.
 func parseStages(raw string, validStages []string) ([]Stage, []string) {
 	var findings []string
 	// "[ ]" (pending) contains a literal space between its brackets, which
@@ -243,6 +244,7 @@ func parseStages(raw string, validStages []string) ([]Stage, []string) {
 
 	var stages []Stage
 	hereCount := 0
+	pendingCount := 0
 	for _, tok := range tokens {
 		m := stageTokenRe.FindStringSubmatch(tok)
 		if m == nil {
@@ -259,6 +261,7 @@ func parseStages(raw string, validStages []string) ([]Stage, []string) {
 			hereCount++
 		default:
 			state = Pending
+			pendingCount++
 		}
 		if len(validSet) > 0 && !validSet[name] {
 			findings = append(findings, fmt.Sprintf("unknown stage name %q (not in WORKFLOW.md stages:)", name))
@@ -267,6 +270,9 @@ func parseStages(raw string, validStages []string) ([]Stage, []string) {
 	}
 	if hereCount > 1 {
 		findings = append(findings, fmt.Sprintf("multiple YOU-ARE-HERE ([<]) markers: found %d, want at most 1", hereCount))
+	}
+	if hereCount == 0 && pendingCount > 0 {
+		findings = append(findings, "missing YOU-ARE-HERE ([<]) marker: a non-done stage is pending but no stage is marked [<]")
 	}
 	return stages, findings
 }

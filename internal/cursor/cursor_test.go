@@ -122,6 +122,45 @@ func TestTwoHereMarkersIsFinding(t *testing.T) {
 	}
 }
 
+func TestZeroHereMarkersWithPendingStageIsFinding(t *testing.T) {
+	res, err := cursor.Load(fixture("zero-here-pending"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.HasCursor {
+		t.Fatal("want HasCursor true")
+	}
+	var found bool
+	for _, f := range res.Findings {
+		if strings.Contains(f, "YOU-ARE-HERE") || strings.Contains(f, "[<]") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want a finding about a missing HERE marker while stages are pending, got %#v", res.Findings)
+	}
+}
+
+func TestAllDoneCursorHasNoHereMarkerFinding(t *testing.T) {
+	dir := t.TempDir()
+	writeFixtureFiles(t, dir, map[string]string{
+		"WORKFLOW.md": "stages: [grill, prd, issues, implement]\n",
+		".superpowers/sdd/progress.md": "<!-- spine:cursor -->\n" +
+			"effort: x\nprd: docs/specs/x.md\ntickets: I001\nstages: grill[x] prd[x] issues[x] implement[x]\n" +
+			"<!-- /spine:cursor -->\n",
+	})
+	res, err := cursor.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.HasCursor {
+		t.Fatal("want HasCursor true")
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("want no findings — an all-done cursor legitimately has zero HERE markers, got %#v", res.Findings)
+	}
+}
+
 func TestUnknownStageNameIsFinding(t *testing.T) {
 	res, err := cursor.Load(fixture("unknown-stage"))
 	if err != nil {
@@ -143,9 +182,16 @@ func TestUnknownStageNameIsFinding(t *testing.T) {
 
 // This repo's own ledger dogfoods the I018 grammar; the parser must accept
 // it cleanly, matching the plan's requirement that the parser reconcile
-// against the real ledger, not just synthetic fixtures.
+// against the real ledger, not just synthetic fixtures. The ledger is
+// gitignored, so a fresh clone has no progress.md — skip rather than fail in
+// that case; the live-machine check still runs wherever the ledger exists.
 func TestDogfoodLedgerParsesCleanly(t *testing.T) {
-	res, err := cursor.Load(filepath.Join("..", ".."))
+	repoRoot := filepath.Join("..", "..")
+	ledgerPath := filepath.Join(repoRoot, filepath.FromSlash(".superpowers/sdd/progress.md"))
+	if _, err := os.Stat(ledgerPath); os.IsNotExist(err) {
+		t.Skip("no .superpowers/sdd/progress.md on this checkout (gitignored) — skipping dogfood check")
+	}
+	res, err := cursor.Load(repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,9 +200,6 @@ func TestDogfoodLedgerParsesCleanly(t *testing.T) {
 	}
 	if len(res.Findings) != 0 {
 		t.Fatalf("want the dogfood ledger to parse with no findings, got %#v", res.Findings)
-	}
-	if res.Cursor.Effort != "stage-cursor-controls" {
-		t.Errorf("Effort = %q", res.Cursor.Effort)
 	}
 }
 

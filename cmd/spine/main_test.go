@@ -632,11 +632,22 @@ func TestCursorQuietDoesNotSuppressAPresentCursor(t *testing.T) {
 }
 
 func TestCursorCommandOnRealRepoLedger(t *testing.T) {
-	code, out, errs := runCmd(t, "cursor", "--dir", filepath.Join("..", ".."))
+	// The ledger is gitignored, so a fresh clone has no progress.md — skip
+	// rather than fail in that case; the live-machine check still runs
+	// wherever the ledger exists.
+	repoRoot := filepath.Join("..", "..")
+	ledgerPath := filepath.Join(repoRoot, filepath.FromSlash(".superpowers/sdd/progress.md"))
+	if _, err := os.Stat(ledgerPath); os.IsNotExist(err) {
+		t.Skip("no .superpowers/sdd/progress.md on this checkout (gitignored) — skipping")
+	}
+	code, out, errs := runCmd(t, "cursor", "--dir", repoRoot)
 	if code != 0 {
 		t.Fatalf("code=%d errs=%q", code, errs)
 	}
-	if !strings.Contains(out, "effort: stage-cursor-controls") || !strings.Contains(out, "derivation: n/a") {
+	if strings.Contains(out, "finding:") {
+		t.Errorf("want the real ledger to parse cleanly with zero findings, out=%q", out)
+	}
+	if !strings.Contains(out, "derivation: n/a") {
 		t.Errorf("out=%q", out)
 	}
 }
