@@ -393,6 +393,99 @@ func TestSameEndpointRangeResolves(t *testing.T) {
 	}
 }
 
+// I029: a partial ticked-missing set (some but not all resolved ids exist)
+// must name the missing ticket ids in the detail, not just the raw
+// missing/total count — the count alone gives no starting point for
+// investigation. Existing ids must not be named as missing.
+func TestTickedMissingNamesPartialMissingIDs(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
+	writeFile(t, dir, "docs/issues/I003-c.md", "---\nid: I003\n---\nx\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I001-I004\nstages: grill[x] prd[x] issues[x] implement[<]\n"+
+		"<!-- /spine:cursor -->\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues := rowByName(t, rep.Stages, "issues")
+	// Existing behavior unchanged: still a blocking ticked-missing verdict.
+	if issues.Verdict != stages.VerdictTickedMissing {
+		t.Fatalf("issues verdict = %s (%s), want ticked-missing", issues.Verdict, issues.Detail)
+	}
+	if !rep.Blocking() {
+		t.Error("want Blocking() true — ticked-missing must still block")
+	}
+	if !strings.Contains(issues.Detail, "I002") || !strings.Contains(issues.Detail, "I004") {
+		t.Errorf("Detail = %q, want it to name the missing ids I002 and I004", issues.Detail)
+	}
+	if strings.Contains(issues.Detail, "I001") || strings.Contains(issues.Detail, "I003") {
+		t.Errorf("Detail = %q, must not name the present ids I001/I003 as missing", issues.Detail)
+	}
+}
+
+// I029: a long missing set must truncate the named ids with a "+N more"
+// count rather than dumping every missing id onto one line.
+func TestTickedMissingTruncatesLongMissingSet(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
+	// Only I004 exists; the range I001-I007 resolves to 7 ids, so 6 are
+	// missing — enough to exceed the naming cap and trigger "+N more".
+	writeFile(t, dir, "docs/issues/I004-d.md", "---\nid: I004\n---\nx\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I001-I007\nstages: grill[x] prd[x] issues[x] implement[<]\n"+
+		"<!-- /spine:cursor -->\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues := rowByName(t, rep.Stages, "issues")
+	if issues.Verdict != stages.VerdictTickedMissing {
+		t.Fatalf("issues verdict = %s (%s), want ticked-missing", issues.Verdict, issues.Detail)
+	}
+	if !rep.Blocking() {
+		t.Error("want Blocking() true — ticked-missing must still block")
+	}
+	if !strings.Contains(issues.Detail, "more") {
+		t.Errorf("Detail = %q, want a truncated \"+N more\" tail for a long missing set", issues.Detail)
+	}
+	if strings.Contains(issues.Detail, "I007") {
+		t.Errorf("Detail = %q, want the tail id folded into the +N more count, not named", issues.Detail)
+	}
+}
+
+// I029: when ALL resolved ids in the set are missing (0 present out of N),
+// the detail must also mention the live tickets: value — that all-missing
+// shape is exactly what a resolvable-but-wrong tickets: typo (e.g.
+// "I01-I04" for "I001-I004") produces, so the reader should be pointed at
+// the likely cause.
+func TestTickedMissingAllMissingMentionsTicketsValue(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
+	// A real ticket exists, but under the correct I0NN (3-digit) width — the
+	// typo'd 2-digit range I01-I04 resolves to a disjoint, entirely-missing
+	// set.
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I01-I04\nstages: grill[x] prd[x] issues[x] implement[<]\n"+
+		"<!-- /spine:cursor -->\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues := rowByName(t, rep.Stages, "issues")
+	if issues.Verdict != stages.VerdictTickedMissing {
+		t.Fatalf("issues verdict = %s (%s), want ticked-missing", issues.Verdict, issues.Detail)
+	}
+	if !rep.Blocking() {
+		t.Error("want Blocking() true — ticked-missing must still block")
+	}
+	if !strings.Contains(issues.Detail, "tickets:") || !strings.Contains(issues.Detail, "I01-I04") {
+		t.Errorf("Detail = %q, want it to mention the live tickets: value I01-I04 as the likely typo", issues.Detail)
+	}
+}
+
 // FromResult must accept an already-loaded cursor.Result (cmd/spine's
 // cursor command has one already; it must not need to re-read the repo).
 func TestFromResultMatchesDerive(t *testing.T) {
