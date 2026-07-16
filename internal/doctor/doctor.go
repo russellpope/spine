@@ -67,11 +67,12 @@ func Run(dir string) ([]Finding, error) {
 
 // stagesCheck is the I019 advisory: it reuses the internal/stages
 // derivation engine (the same one spine audit stages blocks on) but only
-// ever reports warn — a stage/artifact contradiction or a stale
-// newest-handoff is drift worth surfacing, never a doctor failure on its
-// own beyond the existing warn-affects-exit rule every other check
-// already follows. A dormant repo (no cursor at all) reports nothing:
-// absence of an active effort is not unhealthy.
+// ever reports warn — a stage/artifact contradiction, a stale
+// newest-handoff, or (I024) grammar findings on the cursor block itself is
+// drift worth surfacing, never a doctor failure on its own beyond the
+// existing warn-affects-exit rule every other check already follows. A
+// dormant repo (no cursor at all) reports nothing: absence of an active
+// effort is not unhealthy.
 func stagesCheck(dir string) []Finding {
 	rep, err := stages.Derive(dir)
 	if err != nil {
@@ -81,6 +82,15 @@ func stagesCheck(dir string) []Finding {
 		return nil
 	}
 	var findings []Finding
+	if len(rep.CursorFindings) > 0 {
+		// I024: grammar-level findings on the cursor block itself (e.g. a
+		// stages: line that parses to zero stage rows) previously never
+		// surfaced through doctor at all — only spine audit stages caught
+		// them, and only there as a block. D9 stays warn-only here, same as
+		// every other check this function reports.
+		findings = append(findings, Finding{"D9", "warn", ".superpowers/sdd/progress.md",
+			"cursor block malformed — grammar findings: " + strings.Join(rep.CursorFindings, "; ")})
+	}
 	for _, s := range rep.Stages {
 		if s.Verdict == stages.VerdictTickedMissing || s.Verdict == stages.VerdictPresentUnticked {
 			findings = append(findings, Finding{"D9", "warn", ".superpowers/sdd/progress.md",

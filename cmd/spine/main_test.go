@@ -547,6 +547,26 @@ func TestCursorCommandStaysExitZeroOnMalformedCursor(t *testing.T) {
 	}
 }
 
+// I024: this fixture's stages: line ("??? *** !!!") parses to zero stage
+// rows and its handoff carries the cursor block, so nothing else blocks —
+// before the fix this sailed through to "derivation: clean", which is
+// incoherent with `spine audit stages` blocking on the same fixture
+// (TestAuditStagesMalformedCursorBlocks). The derivation line must instead
+// name the cursor as malformed, still at exit 0 (read-only printer contract
+// unchanged).
+func TestCursorCommandMalformedGrammarPrintsNAWording(t *testing.T) {
+	code, out, errs := runCmd(t, "cursor", "--dir", stagesFixture("malformed-cursor"))
+	if code != 0 {
+		t.Fatalf("spine cursor must stay exit-0-always even on a malformed cursor, got %d out=%q errs=%q", code, out, errs)
+	}
+	if !strings.Contains(out, "derivation: n/a (cursor malformed)") {
+		t.Errorf("want the n/a (cursor malformed) wording, out=%q", out)
+	}
+	if strings.Contains(out, "derivation: clean") {
+		t.Errorf("must not claim clean on a grammar-malformed cursor, out=%q errs=%q", out, errs)
+	}
+}
+
 func TestHandoffListTextHasHeaderAndPath(t *testing.T) {
 	dir := t.TempDir()
 	if code, _, errs := runCmd(t, "handoff", "new", "-dir", dir, "v3 cosmetics"); code != 0 {

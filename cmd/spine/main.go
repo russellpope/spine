@@ -684,6 +684,15 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 // silences a cursor that was actually found, malformed or not — the
 // SessionStart hook (I021) needs real output precisely when a cursor
 // exists.
+//
+// The derivation line is one of three: "clean" (no contradictions), "n/a
+// (cursor malformed)" (I024 — grammar findings on the cursor block itself,
+// e.g. a stages: line that parses to zero stage rows, printed instead of a
+// misleading "clean"), or "blocking" (a stage/artifact contradiction or a
+// stale newest-handoff). Grammar findings win priority over "blocking":
+// with zero parsed stage rows there is nothing coherent to call clean or
+// blocking about the stages themselves — see internal/stages' package doc
+// (CursorFindings never affects Report.Blocking()).
 func cmdCursor(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("cursor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -721,9 +730,18 @@ func cmdCursor(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "stages: %s\n", res.Cursor.StagesLine())
 	}
 	rep := stages.FromResult(*dir, res)
-	if !rep.Blocking() {
+	switch {
+	case len(rep.CursorFindings) > 0:
+		// I024: a cursor block with grammar findings (e.g. a stages: line
+		// that parses to zero stage rows) must not be reported "clean" —
+		// that read was incoherent with `spine audit stages` blocking on
+		// the same fixture. The grammar problems themselves were already
+		// printed above as "finding:" lines; this just names the verdict
+		// honestly. Still exit 0 — spine cursor stays a read-only printer.
+		fmt.Fprintln(stdout, "derivation: n/a (cursor malformed)")
+	case !rep.Blocking():
 		fmt.Fprintln(stdout, "derivation: clean")
-	} else {
+	default:
 		fmt.Fprintln(stdout, "derivation: blocking")
 		for _, s := range rep.Stages {
 			if s.Verdict == stages.VerdictTickedMissing || s.Verdict == stages.VerdictPresentUnticked {

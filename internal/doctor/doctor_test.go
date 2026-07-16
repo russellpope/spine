@@ -506,6 +506,48 @@ func TestD9WarnOnTickedMissingStage(t *testing.T) {
 	}
 }
 
+// I024: a cursor block whose stages: line is grammar-garbage (zero parsed
+// stage rows, cursor.Result.Findings non-empty) must surface as a D9 warn —
+// previously doctor never surfaced grammar-level CursorFindings at all,
+// even though `spine audit stages` was already blocking on the equivalent
+// fixture (internal/stages/testdata/malformed-cursor). The handoff still
+// carries the cursor block here, so the newest-handoff backstop stays
+// non-blocking — the only D9 finding this repo should produce is the new
+// grammar one.
+func TestD9WarnOnMalformedCursorGrammar(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	cursorBlock := "<!-- spine:cursor -->\n" +
+		"effort: fixture-effort\n" +
+		"prd: docs/specs/2026-01-01-fixture-design.md\n" +
+		"tickets: I001-I001\n" +
+		"stages: ??? *** !!!\n" +
+		"<!-- /spine:cursor -->\n"
+	writeUnder(t, dir, ".superpowers/sdd/progress.md", "# ledger\n\n"+cursorBlock)
+	writeUnder(t, dir, "docs/handoffs/2026-01-02-fixture.md", "---\ntitle: \"fixture\"\n---\n\n"+cursorBlock)
+	findings, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range findings {
+		if f.ID != "D9" {
+			continue
+		}
+		if f.Severity != "warn" {
+			t.Errorf("D9 finding severity = %q, want warn (never error): %#v", f.Severity, f)
+		}
+		if strings.Contains(f.Message, "malformed stage token") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want a D9 warn naming the malformed cursor grammar, got %#v", findings)
+	}
+}
+
 // seedCleanCursor writes a matching cursor + PRD + ticket files + a handoff
 // carrying the cursor block into a scaffolded dir, so a stage-derivation
 // check over it comes back clean.
