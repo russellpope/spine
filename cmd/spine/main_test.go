@@ -568,3 +568,75 @@ func TestHandoffListAlignsPathColumnPastDefaultWidth(t *testing.T) {
 		}
 	}
 }
+
+func cursorFixture(scenario string) string {
+	return filepath.Join("..", "..", "internal", "cursor", "testdata", scenario, "repo")
+}
+
+func TestCursorCommandPrintsValidCursor(t *testing.T) {
+	code, out, errs := runCmd(t, "cursor", "--dir", cursorFixture("valid"))
+	if code != 0 {
+		t.Fatalf("code=%d err=%q", code, errs)
+	}
+	for _, want := range []string{
+		"effort: fixture-effort",
+		"prd: docs/specs/2026-01-01-fixture-design.md",
+		"tickets: I001-I005",
+		"implement[<]",
+		"derivation: n/a",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("out missing %q; out=%q", want, out)
+		}
+	}
+}
+
+func TestCursorCommandExitsZeroOnMalformedAndPrintsFindings(t *testing.T) {
+	code, out, _ := runCmd(t, "cursor", "--dir", cursorFixture("malformed"))
+	if code != 0 {
+		t.Fatalf("want exit 0 (advisory), got %d, out=%q", code, out)
+	}
+	if !strings.Contains(out, "tickets") {
+		t.Errorf("want finding naming the missing tickets key, out=%q", out)
+	}
+}
+
+func TestCursorQuietSilentWhenNoCursor(t *testing.T) {
+	code, out, errs := runCmd(t, "cursor", "--quiet", "--dir", t.TempDir())
+	if code != 0 || out != "" || errs != "" {
+		t.Fatalf("code=%d out=%q errs=%q, want silent exit 0", code, out, errs)
+	}
+}
+
+func TestCursorQuietSilentWhenSpineRepoHasNoLedgerYet(t *testing.T) {
+	// A spine repo (WORKFLOW.md present) that hasn't started an SDD effort
+	// yet has no progress.md at all — same "nothing to report" case as not
+	// being a spine repo.
+	code, out, errs := runCmd(t, "cursor", "--quiet", "--dir", cursorFixture("missing"))
+	if code != 0 || out != "" || errs != "" {
+		t.Fatalf("code=%d out=%q errs=%q, want silent exit 0", code, out, errs)
+	}
+}
+
+func TestCursorQuietDoesNotSuppressAPresentCursor(t *testing.T) {
+	// --quiet is for hook use: silent when there's nothing to report, but a
+	// SessionStart hook wiring "spine cursor --quiet" into session context
+	// (I021) still needs real output when a cursor exists.
+	code, out, errs := runCmd(t, "cursor", "--quiet", "--dir", cursorFixture("valid"))
+	if code != 0 {
+		t.Fatalf("code=%d errs=%q", code, errs)
+	}
+	if !strings.Contains(out, "effort: fixture-effort") {
+		t.Errorf("want cursor still printed under --quiet when one exists, out=%q", out)
+	}
+}
+
+func TestCursorCommandOnRealRepoLedger(t *testing.T) {
+	code, out, errs := runCmd(t, "cursor", "--dir", filepath.Join("..", ".."))
+	if code != 0 {
+		t.Fatalf("code=%d errs=%q", code, errs)
+	}
+	if !strings.Contains(out, "effort: stage-cursor-controls") || !strings.Contains(out, "derivation: n/a") {
+		t.Errorf("out=%q", out)
+	}
+}

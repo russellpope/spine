@@ -15,6 +15,7 @@ import (
 	"github.com/russellpope/spine/internal/adopt"
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/audit"
+	"github.com/russellpope/spine/internal/cursor"
 	"github.com/russellpope/spine/internal/doctor"
 	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/handoff"
@@ -34,6 +35,7 @@ commands:
   eval     manage docs/evals (new, add-run, list)
   doctor   read-only workflow health checks
   audit    verify declared model routing against harness transcripts (routing)
+  cursor   print the parsed stage cursor (read-only; --quiet for hooks)
   version  print the compiled template generation
 `
 
@@ -61,6 +63,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdAdopt(args[1:], stdout, stderr)
 	case "audit":
 		return cmdAudit(args[1:], stdout, stderr)
+	case "cursor":
+		return cmdCursor(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "spine template generation %d\n", tmpl.Version())
 		return 0
@@ -602,6 +606,56 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 	if rep.Blocking() {
 		return 1
 	}
+	return 0
+}
+
+// cmdCursor is a thin, read-only printer over cursor.Load: it prints the
+// parsed stage cursor plus an advisory derivation verdict (real verdict
+// wiring lands with I019 — until then "derivation: n/a" is the whole
+// story). It always exits 0: a cursor mismatch or parse finding is surfaced,
+// never gated, here — spine audit stages (I019) is where that becomes a
+// blocking check. --quiet is for hook use: it silences the "nothing to
+// report" case (no spine repo, no ledger, no cursor block) but never
+// silences a cursor that was actually found, malformed or not — the
+// SessionStart hook (I021) needs real output precisely when a cursor
+// exists.
+func cmdCursor(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cursor", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	quiet := fs.Bool("quiet", false, "print nothing and exit 0 when there is no spine cursor (hook-friendly)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	res, err := cursor.Load(*dir)
+	if err != nil {
+		// Genuine I/O failure (not "file doesn't exist") — still advisory,
+		// per the "exit 0 always" contract, but worth surfacing.
+		fmt.Fprintln(stderr, "cursor:", err)
+		return 0
+	}
+	if !res.HasCursor {
+		if !*quiet {
+			fmt.Fprintf(stdout, "no spine cursor found in %s\n", *dir)
+		}
+		return 0
+	}
+	for _, f := range res.Findings {
+		fmt.Fprintln(stdout, "finding:", f)
+	}
+	if res.Cursor.Effort != "" {
+		fmt.Fprintf(stdout, "effort: %s\n", res.Cursor.Effort)
+	}
+	if res.Cursor.PRD != "" {
+		fmt.Fprintf(stdout, "prd: %s\n", res.Cursor.PRD)
+	}
+	if res.Cursor.Tickets != "" {
+		fmt.Fprintf(stdout, "tickets: %s\n", res.Cursor.Tickets)
+	}
+	if len(res.Cursor.Stages) > 0 {
+		fmt.Fprintf(stdout, "stages: %s\n", res.Cursor.StagesLine())
+	}
+	fmt.Fprintln(stdout, "derivation: n/a")
 	return 0
 }
 
