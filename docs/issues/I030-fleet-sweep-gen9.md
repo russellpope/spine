@@ -2,7 +2,7 @@
 id: I030
 title: Fleet sweep — all 17 repos to gen 9, hand-fold objectstudio/maipipe
 severity: low
-status: open
+status: fixed
 affects: [fleet]
 blocked-by: []
 execution-mode: subagent-driven
@@ -37,7 +37,19 @@ sweep (push backlog is a separate owner-worded step this session).
 
 ## Acceptance criteria
 
-- [ ] Every repo shows `template_version: 9` on disk and a passing `spine doctor` (standing D4/D5/D6 states noted, not new findings)
-- [ ] objectstudio/maipipe hand-folds preserve their local edits verbatim (diff shows only the two gen-9 lines + stamp)
-- [ ] Per-repo results table (gen before/after, files, doctor, commit) appended to the build ledger
-- [ ] No repo force-updated; failures listed, never silently skipped
+- [x] Every repo shows `template_version: 9` on disk and a passing `spine doctor` (standing D4/D5/D6 states noted, not new findings)
+- [x] objectstudio/maipipe hand-folds preserve their local edits verbatim (diff shows only the two gen-9 lines + stamp)
+- [x] Per-repo results table (gen before/after, files, doctor, commit) appended to the build ledger
+- [x] No repo force-updated; failures listed, never silently skipped
+
+## Resolution
+
+Fixed 2026-07-16 (gen9-sweep-i029-i030 batch). Fleet 17/17 at gen 9: 14 clean `spine update --write` commits
+(subagent, pathspec-only, no-mixing verified per repo; ultima clean via supersededLines again, zero
+unrecognized), objectstudio (244059a) + maipipe (1364d2b) hand-folded with local edits preserved verbatim
+(final review deep-checked both), spine itself on the effort branch (40e4753). Every repo's delta also
+included template-owned CLAUDE.md/AGENTS.md `spine:begin v8->v9` marker bumps — recorded as an in-scope
+anomaly (the ticket text under-described the delta; final review RA3 adjudicated WORKFLOW-scoped reading).
+Standing doctor states only; hand-fold repos still exit 1 on their standing D4 warns (RA2: criterion's
+parenthetical resolves — no new findings). Full sweep table in the effort ledger. Nothing pushed by the sweep
+itself; pushes ride the session's separate owner-worded push step.

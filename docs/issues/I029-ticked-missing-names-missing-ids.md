@@ -2,7 +2,7 @@
 id: I029
 title: ticked-missing detail doesn't name missing ticket ids or hint at a tickets: typo
 severity: low
-status: open
+status: fixed
 affects: [I026]
 blocked-by: []
 execution-mode: subagent-driven
@@ -19,3 +19,12 @@ Scope note: the final whole-branch review (I024-I027 batch) that raised this als
 ## Fix
 
 In `internal/stages` `judgeSet` (or wherever the `ticked-missing` detail string for the issues/implement stages is built): when the verdict is `VerdictTickedMissing`, name the missing ticket ids in the detail — first few ids plus a "+N more" count for long sets, rather than just the raw missing/total count. When ALL resolved ids in the set are missing (0 present out of N), also mention the live `tickets:` value in the detail, since an all-missing set from a resolvable range/prefix is the shape a typo produces (e.g. `I01-I04` resolving to a numerically-valid-but-wrong range) and the reader should be pointed at the most likely cause. Add coverage alongside the existing `internal/stages` ticked-missing tests (see `TestUnresolvableTicketsNeverBlocks` and neighbors in `stages_test.go` for the established fixture/assertion style).
+
+## Resolution
+
+Fixed 26de369 (gen9-sweep-i029-i030 batch, shipped 2026-07-16). `judgeSet` gained `ids`/`ticketsRaw` params;
+ticked-missing details now name the missing ids (first 5 + "+N more"), and an all-missing set from a resolvable
+`tickets:` value appends the typo hint naming the live value. TDD (3 new tests), per-task review Approved with
+0 findings, final review READY TO MERGE. Follow-up [I032](I032-implement-row-typo-hint-scope.md): scope the
+typo hint to the issues row (it also fires on implement's all-missing evidence set, where the issues row can
+prove `tickets:` correct) + decouple the truncation test from the cap constant.
