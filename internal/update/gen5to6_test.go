@@ -112,6 +112,9 @@ func TestGen5To6IsStampPlusDeclaredContent(t *testing.T) {
 				if isGen9ContentDiffLine(line) { // gen 9's conscious content edit; see gen8to9_test.go
 					continue
 				}
+				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
+					continue
+				}
 				t.Errorf("%s: unexpected changed line %q — 5→6 must be stamp plus declared gen-6 content only", r.Path, line)
 			}
 		}
@@ -150,7 +153,9 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 		"primary: claude-fable-5",
 		"routine: claude-sonnet-5",
 		"mechanical: claude-haiku-4-5",
-		"fallback: claude-opus-4-8",
+		// I035: the fixture's inherited claude-opus-4-8 fallback is refreshed
+		// to the current table default during migration (design D6).
+		"fallback: claude-opus-5",
 		"spine audit routing",
 	} {
 		if !strings.Contains(string(wf), want) {

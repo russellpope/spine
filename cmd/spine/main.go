@@ -133,6 +133,18 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	outstanding := 0
+	// itemized model-table results (design D6): each inherited refresh names
+	// old and new value so a model change is never buried in template prose
+	// churn; preserved overrides are reported so a pinned model is visible.
+	// Skipped files print neither — nothing about them is applied.
+	modelNotes := func(r update.FileReport) {
+		for _, m := range r.ModelRefreshes {
+			fmt.Fprintf(stdout, "model refresh (inherited): %s: %s -> %s\n", m.Key, m.Old, m.New)
+		}
+		for _, o := range r.ModelOverrides {
+			fmt.Fprintf(stdout, "model override preserved: %s: %s\n", o.Key, o.Value)
+		}
+	}
 	for _, r := range reports {
 		switch r.State {
 		case update.UpToDate:
@@ -141,6 +153,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			} else {
 				fmt.Fprintf(stdout, "up-to-date: %s\n", r.Path)
 			}
+			modelNotes(r)
 		case update.Pending:
 			if *write {
 				if r.Created {
@@ -148,8 +161,10 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 				} else {
 					fmt.Fprintf(stdout, "updated: %s\n", r.Path)
 				}
+				modelNotes(r)
 			} else {
 				outstanding++
+				modelNotes(r)
 				fmt.Fprint(stdout, r.Diff)
 			}
 		case update.SkippedUnrecognized:

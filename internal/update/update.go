@@ -33,8 +33,17 @@ type FileReport struct {
 	// Preserved is true for a legacyPreserve file (docs/adr/README.md) whose
 	// unrecognized hand-authored content was left as-is rather than flagged.
 	// Only set when State == UpToDate. --force clears this and regenerates.
-	Preserved  bool
-	newContent string
+	Preserved bool
+	// ModelRefreshes itemizes each model_routing value whose on-disk value
+	// matched a shipped historical default and was moved to the current
+	// default (design D6). WORKFLOW.md only. The plan must surface these
+	// individually, distinct from template prose churn.
+	ModelRefreshes []ModelRefresh
+	// ModelOverrides lists model_routing values preserved untouched as
+	// deliberate per-repo choices (matched no shipped default). WORKFLOW.md
+	// only.
+	ModelOverrides []ModelOverride
+	newContent     string
 }
 
 // Options configures Run. Zero value = dry-run on ".". AdoptProfile switches
@@ -179,6 +188,13 @@ func planWorkflow(opts Options) (FileReport, tmpl.Values, string, error) {
 		if rerr != nil {
 			return report, tmpl.Values{}, "", rerr
 		}
+		// No WORKFLOW.md on disk, so every row resolves Default — this pins
+		// the created file's model rows to the table's current defaults even
+		// if the template text lags the table.
+		newContent, _, _, rerr = applyModelRouting(opts.Dir, newContent, nil)
+		if rerr != nil {
+			return report, tmpl.Values{}, "", rerr
+		}
 		report.State = Pending
 		report.Created = true
 		report.Diff = Diff(report.Path, "", newContent)
@@ -242,6 +258,15 @@ func planWorkflow(opts Options) (FileReport, tmpl.Values, string, error) {
 		}
 		newContent = setKey(newContent, k, v)
 	}
+	// Model-routing rows resolve through the shared table, not the choice
+	// rule above (D6/D7): inherited stale defaults refresh and are itemized,
+	// deliberate overrides are written back verbatim.
+	newContent, refreshes, modelOverrides, err := applyModelRouting(opts.Dir, newContent, keys)
+	if err != nil {
+		return report, tmpl.Values{}, "", err
+	}
+	report.ModelRefreshes = refreshes
+	report.ModelOverrides = modelOverrides
 	if d := Diff(report.Path, old, newContent); d != "" {
 		report.State = Pending
 		report.Diff = d

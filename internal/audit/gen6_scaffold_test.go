@@ -28,7 +28,9 @@ func TestGen6ScaffoldModelRoutingParses(t *testing.T) {
 		"primary":    "claude-fable-5",
 		"routine":    "claude-sonnet-5",
 		"mechanical": "claude-haiku-4-5",
-		"fallback":   "claude-opus-4-8",
+		// I035: the rendered mirror carries the model table's current
+		// fallback default.
+		"fallback": "claude-opus-5",
 	}
 	if len(mapping) != len(want) {
 		t.Fatalf("mapping = %v, want exactly the four tiers %v", mapping, want)

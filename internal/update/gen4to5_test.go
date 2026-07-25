@@ -87,6 +87,9 @@ func TestGen4To5IsStampPlusDeclaredContent(t *testing.T) {
 				if isGen9ContentDiffLine(line) { // gen 9's conscious content edit; see gen8to9_test.go
 					continue
 				}
+				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
+					continue
+				}
 				t.Errorf("%s: unexpected changed line %q — 4→5 must be stamp plus declared gen-5 content only", r.Path, line)
 			}
 		}

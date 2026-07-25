@@ -25,7 +25,7 @@
       "fallback": {
         "id": "claude-opus-5",
         "aliases": ["claude-opus-5", "opus"],
-        "history": ["claude-opus-4-8"]
+        "history": [{"id": "claude-opus-4-8"}]
       }
     },
     "codex": {

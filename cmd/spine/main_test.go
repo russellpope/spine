@@ -150,6 +150,57 @@ func TestUpdateDryRunThenWrite(t *testing.T) {
 	}
 }
 
+// I035: an inherited stale model default is itemized in the update plan —
+// named with old value, new value, and inherited provenance, distinct from
+// the content diff — and a preserved override is reported as such.
+func TestUpdateItemizesModelRefreshAndOverride(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	wfPath := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(wfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Regress fallback to the previous shipped default (inherited) and pin
+	// routine to a value no default ever shipped (override).
+	content := strings.Replace(string(raw), "fallback: claude-opus-5", "fallback: claude-opus-4-8", 1)
+	content = strings.Replace(content, "routine: claude-sonnet-5", "routine: local-llama-70b", 1)
+	if content == string(raw) {
+		t.Fatal("could not stage fallback/routine values in scaffolded WORKFLOW.md")
+	}
+	if err := os.WriteFile(wfPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, _ := runCmd(t, "update", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("dry-run code=%d out=%q", code, out)
+	}
+	if !strings.Contains(out, "model refresh (inherited): model_routing.fallback: claude-opus-4-8 -> claude-opus-5") {
+		t.Errorf("dry-run plan missing itemized refresh, out=%q", out)
+	}
+	if !strings.Contains(out, "model override preserved: model_routing.routine: local-llama-70b") {
+		t.Errorf("dry-run plan missing override report, out=%q", out)
+	}
+
+	code, out, _ = runCmd(t, "update", "--dir", dir, "--write")
+	if code != 0 || !strings.Contains(out, "model refresh (inherited): model_routing.fallback: claude-opus-4-8 -> claude-opus-5") {
+		t.Fatalf("write code=%d out=%q", code, out)
+	}
+	got, err := os.ReadFile(wfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "fallback: claude-opus-5") || strings.Contains(string(got), "claude-opus-4-8") {
+		t.Errorf("written WORKFLOW.md not refreshed:\n%s", got)
+	}
+	if !strings.Contains(string(got), "routine: local-llama-70b") {
+		t.Errorf("override lost on write:\n%s", got)
+	}
+}
+
 func TestUpdateMissingWorkflowExits2(t *testing.T) {
 	code, _, errs := runCmd(t, "update", "--dir", t.TempDir())
 	if code != 2 || !strings.Contains(errs, "spine init") {

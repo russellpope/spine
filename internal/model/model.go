@@ -10,14 +10,17 @@
 // an enum; a third flavor is addable as data with no code change here.
 //
 // Design-latitude choices (the ticket leaves these open; pinned here):
-//   - The override mirror this ticket reads is the dotted "<flavor>.<tier>"
+//   - The override mirror this reader prefers is the dotted "<flavor>.<tier>"
 //     syntax design D8 specifies for template generation 10, with an
-//     optional " @ <effort>" suffix (D9). No repo renders this mirror yet —
-//     nothing in this ticket writes it — so today an override is only ever
-//     present in a hand-authored or test-fixture WORKFLOW.md. The existing
-//     bare-tier `model_routing:` block that internal/audit and
-//     internal/update read is a distinct, untouched format; a dotted key
-//     never collides with a bare one, and this reader ignores bare keys.
+//     optional " @ <effort>" suffix (D9). No repo renders this mirror yet.
+//     TRANSITIONAL (I035, superseded by I036): a bare tier key
+//     (`fallback: claude-opus-4-8`) — the format every gen ≤9 mirror
+//     actually carries — is also read, as a claude-flavored override, since
+//     claude is the only flavor those generations ever rendered. Without
+//     this, the I035 refresh rule would see zero overrides in every real
+//     repo while passing dotted-key-only tests. A dotted key wins over a
+//     bare one for the same tier; bare keys are invisible to every other
+//     flavor. I036's gen-10 mirror retires the bare format.
 //   - An on-disk value is Inherited when its (id, effective effort) pair
 //     matches the entry's current default or any value it has ever shipped,
 //     and Override otherwise (design D5/D6, corrected per task review
@@ -86,10 +89,22 @@ type Entry struct {
 
 // tableEntry is one (flavor, tier) row as shipped in models/defaults.json.
 type tableEntry struct {
-	ID      string   `json:"id"`
-	Effort  string   `json:"effort,omitempty"`
-	Aliases []string `json:"aliases"`
-	History []string `json:"history"`
+	ID      string         `json:"id"`
+	Effort  string         `json:"effort,omitempty"`
+	Aliases []string       `json:"aliases"`
+	History []historyEntry `json:"history"`
+}
+
+// historyEntry is one previously shipped default as the (id, effort) pair it
+// actually shipped as (D11: inherited means matching "a shipped historical
+// pair", not a bare id). Effort "" means the pair shipped at the tier's
+// default effort, resolved at comparison time exactly like a current entry's
+// omitted effort (D3). Without the pair, a historical id would be compared
+// against the CURRENT default's effort — harmless until the first time a
+// default's effort changes across a history entry, then wrong.
+type historyEntry struct {
+	ID     string `json:"id"`
+	Effort string `json:"effort,omitempty"`
 }
 
 type table struct {
@@ -132,6 +147,11 @@ func validateTable(t table) {
 		for _, tier := range Tiers {
 			if tiers[tier].ID == "" {
 				panic(fmt.Sprintf("models/defaults.json: flavor %q has no id for tier %q", flavor, tier))
+			}
+			for _, h := range tiers[tier].History {
+				if h.ID == "" {
+					panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q has a history entry with no id", flavor, tier))
+				}
 			}
 		}
 	}
@@ -201,32 +221,30 @@ func resolveFrom(t table, repoDir, flavor, tier string) (Entry, error) {
 	return entry, nil
 }
 
-// everShipped reports whether (id, effort) was ever the shipped default for
-// def: id must be the current id or in its history, AND the effective
-// effort — the caller's effort if set, else the tier default — must match
-// def's own effective effort the same way (task review Important #1). This
-// keeps a deliberate effort override on an otherwise-default id from being
-// misreported as Inherited, and keeps an entry that resolves to a different
-// effort than what a matching id actually shipped with from being reported
-// as Inherited either.
+// everShipped reports whether (id, effort) was ever a shipped default pair
+// for def: the current (id, effort) or any pair in its history. Each side's
+// effective effort is its own effort if set, else the tier default (task
+// review Important #1), so a historical id only counts as shipped at the
+// effort it actually shipped with — never at whatever the current default's
+// effort happens to be. This keeps a deliberate effort override on an
+// otherwise-default id from being misreported as Inherited, in either
+// direction.
 func everShipped(def tableEntry, tierDefaultEffort, id, effort string) bool {
-	if id != def.ID && !containsStr(def.History, id) {
-		return false
-	}
-	shippedEffort := def.Effort
-	if shippedEffort == "" {
-		shippedEffort = tierDefaultEffort
-	}
 	effective := effort
 	if effective == "" {
 		effective = tierDefaultEffort
 	}
-	return effective == shippedEffort
-}
-
-func containsStr(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
+	matches := func(shippedID, shippedEffort string) bool {
+		if shippedEffort == "" {
+			shippedEffort = tierDefaultEffort
+		}
+		return id == shippedID && effective == shippedEffort
+	}
+	if matches(def.ID, def.Effort) {
+		return true
+	}
+	for _, h := range def.History {
+		if matches(h.ID, h.Effort) {
 			return true
 		}
 	}
@@ -249,10 +267,12 @@ type override struct {
 }
 
 // readOverride looks up repoDir's WORKFLOW.md model_routing block for the
-// dotted "<flavor>.<tier>" key design D8 defines for the gen-10 mirror.
-// Absence of repoDir, the file, the block, or the key all report not-found,
-// never an error — that is the "no override" and "outside a spine repo"
-// cases, not failures.
+// dotted "<flavor>.<tier>" key design D8 defines for the gen-10 mirror,
+// falling back to the bare "<tier>" key for the claude flavor (the
+// transitional gen ≤9 affordance described in the package comment; a dotted
+// key wins). Absence of repoDir, the file, the block, or the key all report
+// not-found, never an error — that is the "no override" and "outside a
+// spine repo" cases, not failures.
 func readOverride(repoDir, flavor, tier string) (override, bool) {
 	if repoDir == "" {
 		return override{}, false
@@ -262,6 +282,8 @@ func readOverride(repoDir, flavor, tier string) (override, bool) {
 		return override{}, false
 	}
 	want := flavor + "." + tier
+	var bare override
+	bareFound := false
 	inBlock := false
 	for _, line := range strings.Split(string(raw), "\n") {
 		if strings.HasPrefix(line, "model_routing:") {
@@ -275,12 +297,25 @@ func readOverride(repoDir, flavor, tier string) (override, bool) {
 			break
 		}
 		k, v, ok := strings.Cut(strings.TrimSpace(line), ":")
-		if !ok || strings.TrimSpace(k) != want {
+		if !ok {
 			continue
 		}
-		return parseValue(v), true
+		switch strings.TrimSpace(k) {
+		case want:
+			return parseValue(v), true
+		case tier:
+			// TRANSITIONAL (I035 → retired by I036): a bare tier key is a
+			// claude-flavored value — claude is the only flavor any gen ≤9
+			// mirror ever rendered. Recorded, not returned, so a dotted key
+			// later in the block still wins; last bare occurrence wins,
+			// matching internal/update's ExtractKeys.
+			if flavor == "claude" {
+				bare = parseValue(v)
+				bareFound = true
+			}
+		}
 	}
-	return override{}, false
+	return bare, bareFound
 }
 
 // parseValue splits one mirror value into id and optional effort per D9:

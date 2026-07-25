@@ -98,6 +98,9 @@ func TestGen7To8PristineUpdatesCleanly(t *testing.T) {
 				if isGen9ContentDiffLine(line) { // gen 9's conscious content edit; see gen8to9_test.go
 					continue
 				}
+				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
+					continue
+				}
 				t.Errorf("%s: unexpected changed line %q — 7→8 must be stamp plus declared gen-8 content only", r.Path, line)
 			}
 		}

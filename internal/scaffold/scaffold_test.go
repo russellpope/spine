@@ -102,7 +102,9 @@ func TestInitGen6DispatchContract(t *testing.T) {
 		"primary: claude-fable-5",
 		"routine: claude-sonnet-5",
 		"mechanical: claude-haiku-4-5",
-		"fallback: claude-opus-4-8",
+		// I035: the template's rendered mirror carries the model table's
+		// current fallback default.
+		"fallback: claude-opus-5",
 		// effort defaults
 		"primary=high, routine=medium, mechanical=low, fallback=high",
 		"xhigh reserved for final verification",

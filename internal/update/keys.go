@@ -114,6 +114,15 @@ func Choices(extracted map[string]string, gen, project string) (map[string]strin
 		if k == "profile" || k == "template_version" {
 			continue
 		}
+		if strings.HasPrefix(k, "model_routing.") {
+			// Model-routing values never enter the choice-vs-default rule
+			// (design D7): the shared model table resolves them via
+			// applyModelRouting. Left here, this rule would misread any
+			// stale inherited default as a deliberate choice — the
+			// propagation trap that made a template model-id change reach
+			// zero repos — and fight the resolver over the same keys.
+			continue
+		}
 		if defaults[k] != v {
 			choices[k] = v
 		}

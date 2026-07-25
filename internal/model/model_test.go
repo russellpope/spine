@@ -297,6 +297,110 @@ func TestResolveFrom_PartialTable_ReturnsError(t *testing.T) {
 	}
 }
 
+// TRANSITIONAL bare-tier affordance (I035): a gen ≤9 mirror's bare tier key
+// (`fallback: claude-opus-4-8`) is read as a claude-flavored value — this is
+// what every real repo carries today, so the refresh rule must see it. A
+// historical value reports Inherited, exactly as its dotted equivalent would.
+func TestResolve_BareTierKey_ReadAsClaudeFlavored(t *testing.T) {
+	dir := writeWorkflow(t, "model_routing:\n  fallback: claude-opus-4-8        # primary-refused or security-framed work\n")
+	entry, err := Resolve(dir, "claude", "fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.ID != "claude-opus-4-8" || entry.Provenance != Inherited {
+		t.Errorf("got %+v, want id=claude-opus-4-8 provenance=inherited", entry)
+	}
+}
+
+// Bare tier keys carrying a value no default ever shipped report Override —
+// the preserve side of D6, against the on-disk format real repos carry.
+func TestResolve_BareTierKey_UnknownValue_ReportsOverride(t *testing.T) {
+	dir := writeWorkflow(t, "model_routing:\n  fallback: claude-opus-3-pinned\n")
+	entry, err := Resolve(dir, "claude", "fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.ID != "claude-opus-3-pinned" || entry.Provenance != Override {
+		t.Errorf("got %+v, want id=claude-opus-3-pinned provenance=override", entry)
+	}
+}
+
+// Bare tier keys are claude-only: the flavor they imply is the one every
+// gen ≤9 mirror rendered. They must stay invisible to any other flavor.
+func TestResolve_BareTierKey_InvisibleToOtherFlavors(t *testing.T) {
+	dir := writeWorkflow(t, "model_routing:\n  fallback: claude-opus-4-8\n")
+	entry, err := Resolve(dir, "codex", "fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Provenance != Default || entry.ID != "gpt-5.6-terra" {
+		t.Errorf("bare claude key leaked into codex: %+v", entry)
+	}
+}
+
+// When both a dotted and a bare key name the same tier, the dotted (gen-10,
+// D8) spelling wins regardless of order — the newer format is authoritative.
+func TestResolve_DottedKeyWinsOverBare(t *testing.T) {
+	for _, content := range []string{
+		"model_routing:\n  claude.fallback: claude-dotted\n  fallback: claude-bare\n",
+		"model_routing:\n  fallback: claude-bare\n  claude.fallback: claude-dotted\n",
+	} {
+		dir := writeWorkflow(t, content)
+		entry, err := Resolve(dir, "claude", "fallback")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if entry.ID != "claude-dotted" {
+			t.Errorf("content %q: ID = %q, want claude-dotted", content, entry.ID)
+		}
+	}
+}
+
+// I035 carried item from I033 review: history entries are (id, effort)
+// pairs, not bare ids. A value matching a historical id is Inherited only at
+// the effort that pair actually shipped with; the same id at a different
+// effective effort is an Override. Exercised via resolveFrom with a
+// synthetic table because the real table's history entries all ship at tier
+// default effort today.
+func TestResolveFrom_HistoryPairMatchesOnEffortToo(t *testing.T) {
+	synth := table{
+		TierDefaultEffort: map[string]string{"primary": "high", "routine": "medium", "mechanical": "low", "fallback": "high"},
+		Flavors: map[string]map[string]tableEntry{
+			"claude": {
+				"primary":    {ID: "new-model"},
+				"routine":    {ID: "r"},
+				"mechanical": {ID: "m"},
+				"fallback": {
+					ID:      "new-fb",
+					History: []historyEntry{{ID: "old-fb", Effort: "xhigh"}},
+				},
+			},
+		},
+	}
+
+	// Same id, same effort as the shipped pair -> Inherited.
+	dir := writeWorkflow(t, "model_routing:\n  claude.fallback: old-fb @ xhigh\n")
+	entry, err := resolveFrom(synth, dir, "claude", "fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Provenance != Inherited {
+		t.Errorf("historical (id, effort) pair: Provenance = %s, want %s", entry.Provenance, Inherited)
+	}
+
+	// Same historical id but effort omitted -> effective effort is the tier
+	// default (high), which is NOT what the pair shipped with (xhigh) ->
+	// Override, never a silent refresh candidate.
+	dir = writeWorkflow(t, "model_routing:\n  claude.fallback: old-fb\n")
+	entry, err = resolveFrom(synth, dir, "claude", "fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Provenance != Override {
+		t.Errorf("historical id at non-shipped effort: Provenance = %s, want %s", entry.Provenance, Override)
+	}
+}
+
 // Load-time validation (the fix vehicle task review Minor #6 names for
 // Important #2) must reject an incomplete table before Resolve ever sees
 // it: a flavor missing a tier's id fails fast.

@@ -24,7 +24,7 @@ var gen9ContentLines = map[string]bool{
 	// the doctor-advises half of the I014 backstop alongside the
 	// already-stated audit-stages-blocks half. Rides I026's gen-9 bump —
 	// both the dropped ("-") original wording and its ("+") replacement.
-	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone.":                                                                                                                                     true,
+	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone.":                                                                                                                                                      true,
 	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone. Alongside `spine audit stages` blocking on a missing/stale cursor block in the newest handoff, `spine doctor` advises (warns) on the same condition.": true,
 }
 
@@ -83,6 +83,9 @@ func TestGen8To9PristineUpdatesCleanly(t *testing.T) {
 					continue
 				}
 				if isGen9ContentDiffLine(line) {
+					continue
+				}
+				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
 					continue
 				}
 				t.Errorf("%s: unexpected changed line %q — 8→9 must be stamp plus declared gen-9 content only", r.Path, line)
