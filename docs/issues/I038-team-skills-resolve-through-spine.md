@@ -27,7 +27,7 @@ A grep-style shell regression test beside the existing preflight test asserts no
 ## Acceptance criteria
 
 - [ ] No hardcoded model id remains in any team or handoff skill outside documented example blocks
-- [ ] Worker dispatch resolves per ticket tier; a primary-tier ticket spawns on the primary entry, not the routine one
+- [ ] Worker dispatch resolves per ticket tier at the finest granularity the frontend's worker lifecycle permits — per dispatch on herdr, per task cluster at spawn on cmux, where a cluster's tier is the **highest** tier among its tasks — so a primary-tier ticket never spawns below the primary entry. Scope: the flavors whose dispatch lines name a model; claude-team's workers select via SDD's upstream capability heuristics and are out of scope (amended 2026-07-25 per I038 review RA2/RA3 — the original wording was unsatisfiable at per-task granularity on cmux given the ticket's own "do not change pane topology" constraint)
 - [ ] Lead spawn resolves the primary tier for its flavor
 - [ ] claude-team's lead-model guidance paragraph is removed, not re-pinned
 - [ ] Spine presence is checked in the shared preflight and refuses early with an install hint
