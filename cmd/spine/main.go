@@ -19,6 +19,7 @@ import (
 	"github.com/russellpope/spine/internal/doctor"
 	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/handoff"
+	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/stages"
 	"github.com/russellpope/spine/internal/tmpl"
@@ -37,6 +38,7 @@ commands:
   doctor   read-only workflow health checks
   audit    verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
   cursor   print the parsed stage cursor (read-only; --quiet for hooks)
+  model    resolve the model table for a (flavor, tier) pair (read-only)
   version  print the compiled template generation
 `
 
@@ -66,6 +68,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdAudit(args[1:], stdout, stderr)
 	case "cursor":
 		return cmdCursor(args[1:], stdout, stderr)
+	case "model":
+		return cmdModel(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "spine template generation %d\n", tmpl.Version())
 		return 0
@@ -769,6 +773,59 @@ func cmdCursor(args []string, stdout, stderr io.Writer) int {
 		if rep.Handoff.Blocking() {
 			fmt.Fprintf(stdout, "  handoff: %s\n", rep.Handoff.Detail)
 		}
+	}
+	return 0
+}
+
+// cmdModel is a thin printer over model.Resolve (design D12): the CLI does
+// no resolution of its own, just flag parsing and formatting. Flavor and
+// tier are both required positional arguments — never inferred or
+// defaulted, per the ticket's invisible-resolution concern — so a missing
+// or unknown one is reported via model.Resolve's own error rather than a
+// second validation path here.
+func cmdModel(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("model", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	effort := fs.Bool("effort", false, "print the resolved effort instead of the bare id")
+	asJSON := fs.Bool("json", false, "print the whole resolved entry as JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fmt.Fprintln(stderr, `usage: spine model [--dir D] [--effort|--json] <flavor> <tier>`)
+		return 2
+	}
+	entry, err := model.Resolve(*dir, fs.Arg(0), fs.Arg(1))
+	if err != nil {
+		fmt.Fprintln(stderr, "model:", err)
+		return 2
+	}
+	switch {
+	case *asJSON:
+		type entryJSON struct {
+			Flavor     string   `json:"flavor"`
+			Tier       string   `json:"tier"`
+			ID         string   `json:"id"`
+			Effort     string   `json:"effort"`
+			Aliases    []string `json:"aliases"`
+			Provenance string   `json:"provenance"`
+		}
+		out := entryJSON{
+			Flavor: entry.Flavor, Tier: entry.Tier, ID: entry.ID, Effort: entry.Effort,
+			Aliases: entry.Aliases, Provenance: string(entry.Provenance),
+		}
+		if out.Aliases == nil {
+			out.Aliases = []string{}
+		}
+		if err := json.NewEncoder(stdout).Encode(out); err != nil {
+			fmt.Fprintln(stderr, "model:", err)
+			return 2
+		}
+	case *effort:
+		fmt.Fprintln(stdout, entry.Effort)
+	default:
+		fmt.Fprintln(stdout, entry.ID)
 	}
 	return 0
 }

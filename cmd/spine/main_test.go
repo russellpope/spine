@@ -810,3 +810,96 @@ func TestCursorCommandOnRealRepoLedger(t *testing.T) {
 		t.Errorf("want a live derivation verdict (clean or blocking), out=%q", out)
 	}
 }
+
+// writeModelWorkflow mirrors internal/model's writeWorkflow fixture helper:
+// a bare tempdir with only the dotted model_routing mirror the resolver
+// reads, no other WORKFLOW.md scaffolding.
+func writeModelWorkflow(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestModelBareIDIsDefaultOutsideAnyRepo(t *testing.T) {
+	// t.TempDir() has no WORKFLOW.md at all — the "outside a spine repo"
+	// case (design D11), which must resolve to the embedded default rather
+	// than erroring.
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "claude", "primary")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	if out != "claude-fable-5\n" {
+		t.Fatalf("out=%q, want bare id on its own line with no decoration", out)
+	}
+}
+
+func TestModelEffortFlagPrintsResolvedEffort(t *testing.T) {
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--effort", "claude", "primary")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	if out != "high\n" {
+		t.Fatalf("out=%q, want the tier's resolved effort", out)
+	}
+}
+
+func TestModelJSONFlagPrintsIDAndEffortTogether(t *testing.T) {
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--json", "claude", "primary")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	var got struct {
+		Flavor     string   `json:"flavor"`
+		Tier       string   `json:"tier"`
+		ID         string   `json:"id"`
+		Effort     string   `json:"effort"`
+		Aliases    []string `json:"aliases"`
+		Provenance string   `json:"provenance"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("out=%q not valid JSON: %v", out, err)
+	}
+	if got.ID != "claude-fable-5" || got.Effort != "high" || got.Flavor != "claude" || got.Tier != "primary" {
+		t.Errorf("got=%+v, out=%q", got, out)
+	}
+	if got.Provenance != "default" {
+		t.Errorf("provenance=%q, want default (no repo override present)", got.Provenance)
+	}
+}
+
+func TestModelOverrideInRepoWinsOverDefault(t *testing.T) {
+	dir := writeModelWorkflow(t, "model_routing:\n  claude.primary: claude-custom-model\n")
+	code, out, errs := runCmd(t, "model", "--dir", dir, "claude", "primary")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	if out != "claude-custom-model\n" {
+		t.Fatalf("out=%q, want the repo override id", out)
+	}
+}
+
+func TestModelUnknownFlavorExitsNonZeroWithMessage(t *testing.T) {
+	code, _, errs := runCmd(t, "model", "--dir", t.TempDir(), "bogus", "primary")
+	if code == 0 || !strings.Contains(errs, "unknown flavor") {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+}
+
+func TestModelUnknownTierExitsNonZeroWithMessage(t *testing.T) {
+	code, _, errs := runCmd(t, "model", "--dir", t.TempDir(), "claude", "bogus")
+	if code == 0 || !strings.Contains(errs, "unknown tier") {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+}
+
+func TestModelMissingArgsExitsNonZero(t *testing.T) {
+	for _, args := range [][]string{{"model"}, {"model", "claude"}, {"model", "claude", "primary", "extra"}} {
+		code, _, errs := runCmd(t, args...)
+		if code == 0 || !strings.Contains(errs, "usage: spine model") {
+			t.Errorf("run(%v): code=%d stderr=%q", args, code, errs)
+		}
+	}
+}
