@@ -14,7 +14,7 @@ review-tier: primary
 
 ## What to build
 
-Design D13–D15. The routing audit stops parsing WORKFLOW.md with its own independent parser and calls the shared resolver instead, collapsing two parsers into one so that what gets dispatched and what gets verified cannot disagree.
+Design D13–D15. The routing audit stops parsing WORKFLOW.md with its own independent parser and calls the shared resolver instead, collapsing **three** parsers into one so that what gets dispatched and what gets verified cannot disagree (corrected from "two" 2026-07-24 per I037 review RA2 — `internal/model.readOverride`, `internal/update.ExtractKeys` and `internal/audit.readMapping`, the third found during I035 review).
 
 Tier resolution becomes flavor-scoped, and alias matching moves from substring containment to explicit aliases declared per entry — substring matching will collide as model names multiply across flavors with unrelated naming schemes.
 
