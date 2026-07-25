@@ -298,6 +298,30 @@ func TestResolveFrom_PartialTable_ReturnsError(t *testing.T) {
 	}
 }
 
+// Provenance-scoped aliases (I037 fix round 1): a deliberate Override means
+// exactly its on-disk id — the shipped entry's aliases are withheld, so a
+// downstream consumer (the routing audit) cannot match a dispatch on the
+// displaced default id through the override's entry. Inherited entries keep
+// the current default's aliases: same tier lineage, and the fleet's real
+// pre-sweep repos (inherited claude-opus-4-8) depend on it.
+func TestResolve_OverrideCarriesNoAliases(t *testing.T) {
+	dir := writeWorkflow(t, "model_routing:\n  primary: bespoke-x\n  fallback: claude-opus-4-8\n")
+	ov, err := Resolve(dir, "claude", "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ov.Provenance != Override || len(ov.Aliases) != 0 {
+		t.Errorf("override entry = %+v, want provenance=override with no aliases", ov)
+	}
+	inh, err := Resolve(dir, "claude", "fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inh.Provenance != Inherited || len(inh.Aliases) == 0 {
+		t.Errorf("inherited entry = %+v, want provenance=inherited keeping the current default's aliases", inh)
+	}
+}
+
 // The consolidated block rule (I037): a whitespace-only line ends the
 // model_routing block, for every consumer of the shared parser. The mirror
 // is machine-rendered contiguous, so an override stranded after a stray

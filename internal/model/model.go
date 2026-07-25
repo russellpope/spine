@@ -12,7 +12,7 @@
 // Design-latitude choices (the ticket leaves these open; pinned here):
 //   - The override mirror this reader prefers is the dotted "<flavor>.<tier>"
 //     syntax design D8 specifies for template generation 10, with an
-//     optional " @ <effort>" suffix (D9). No repo renders this mirror yet.
+//     optional " @ <effort>" suffix (D9); gen-10 repos render it (I036).
 //     TRANSITIONAL (I035, superseded by I036): a bare tier key
 //     (`fallback: claude-opus-4-8`) — the format every gen ≤9 mirror
 //     actually carries — is also read, as a claude-flavored override, since
@@ -212,6 +212,17 @@ func resolveFrom(t table, repoDir, flavor, tier string) (Entry, error) {
 			entry.Provenance = Inherited
 		} else {
 			entry.Provenance = Override
+			// A deliberate override means exactly its on-disk id (I037 fix
+			// round 1): the table entry's aliases describe the shipped
+			// defaults, not the owner's pin. Carrying them over would let a
+			// dispatch on the displaced default id read as this entry
+			// downstream — the routing audit judges through these, and in a
+			// repo that pinned something else, a default-id dispatch is the
+			// drift the override exists to make visible, not a match.
+			// Default and Inherited entries keep their aliases: same tier
+			// lineage, and real pre-sweep repos (inherited claude-opus-4-8)
+			// must still match the current default's alias tokens.
+			entry.Aliases = nil
 		}
 	}
 

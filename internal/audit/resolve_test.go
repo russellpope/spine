@@ -200,6 +200,136 @@ model_routing:
 	}
 }
 
+// Fix round 1, I-1: a gen 6+ WORKFLOW.md that exists but has lost its
+// model_routing block must not audit indistinguishably from a healthy repo.
+// Verdicts stay faithful to dispatch-time resolution (embedded defaults, per
+// D13), but the report says the spine-managed mirror is gone. A pre-gen-6
+// stamp carries no such promise, so no warning fires there.
+func TestMissingRoutingBlockWarnsOnGen6Plus(t *testing.T) {
+	dir := t.TempDir()
+	writeAuditRepo(t, dir, "# Workflow — proof\n\nprofile: go-service\ntemplate_version: 10\n",
+		map[string]string{"I861": "primary"})
+	tdir := t.TempDir()
+	writeDispatchTranscript(t, tdir, map[string]string{"I861": "fable"})
+	rep, err := Run(dir, tdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := rowsByID(t, rep)["I861"]; r.Verdict != VerdictMatch {
+		t.Errorf("I861 verdict = %s (%s), want match — verdicts stay faithful to dispatch", r.Verdict, r.Detail)
+	}
+	found := false
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "no model_routing block") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("gen-10 stamp over a missing block must warn, got %q", rep.Warnings)
+	}
+
+	old := t.TempDir()
+	writeAuditRepo(t, old, "# Workflow — proof\n\nprofile: go-service\ntemplate_version: 5\n",
+		map[string]string{"I862": "primary"})
+	rep, err = Run(old, tdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "no model_routing block") {
+			t.Errorf("pre-gen-6 stamp must not warn about a missing block, got %q", rep.Warnings)
+		}
+	}
+}
+
+// Fix round 1, I-2: a deliberate Override matches by its exact on-disk id
+// only. In a repo that pinned bespoke ids, a dispatch that ran the displaced
+// default anyway — by full id, by alias, or by the displaced entry's
+// historical id — is the drift the override exists to make visible: it
+// reports unmapped, never a match through the shipped entry's lineage.
+func TestOverriddenTierMatchesExactIDOnly(t *testing.T) {
+	dir := t.TempDir()
+	wf := `# Workflow — proof
+
+profile: go-service
+template_version: 9
+model_routing:
+  primary: bespoke-x
+  fallback: bespoke-y
+`
+	writeAuditRepo(t, dir, wf, map[string]string{
+		"I871": "primary", "I872": "primary", "I873": "primary", "I874": "fallback",
+	})
+	tdir := t.TempDir()
+	writeDispatchTranscript(t, tdir, map[string]string{
+		"I871": "bespoke-x",       // the pinned id itself
+		"I872": "fable",           // displaced default's alias
+		"I873": "claude-fable-5",  // displaced default's full id
+		"I874": "claude-opus-4-8", // displaced fallback's historical id
+	})
+	rep, err := Run(dir, tdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I871"]; r.Verdict != VerdictMatch {
+		t.Errorf("I871 verdict = %s (%s), want match on the pinned id", r.Verdict, r.Detail)
+	}
+	for _, id := range []string{"I872", "I873", "I874"} {
+		if r := rows[id]; r.Verdict != VerdictUnmappedDispatch {
+			t.Errorf("%s verdict = %s (%s), want unmapped-dispatch — the displaced default must not match through the override's entry", id, r.Verdict, r.Detail)
+		}
+	}
+	if rep.Blocking() {
+		t.Error("unmapped drift is warn-level, never blocking")
+	}
+}
+
+// Fix round 1, I-3: the ordered-beats-fallback leg of pickTier, the exact
+// leg the shipped codex terra pair (routine + fallback sharing one id)
+// exercises. Declared-tier readings stay charitable in both directions;
+// on an above-tier ticket the ordered reading wins over the lateral one, so
+// real descent cannot launder itself as an unexplained fallback.
+func TestOrderedTierBeatsFallbackInSharedIDAmbiguity(t *testing.T) {
+	dir := t.TempDir()
+	wf := `# Workflow — proof
+
+profile: go-service
+template_version: 9
+model_routing:
+  primary: claude-fable-5
+  routine: shared-tier-model
+  mechanical: claude-haiku-4-5
+  fallback: shared-tier-model
+`
+	writeAuditRepo(t, dir, wf, map[string]string{
+		"I881": "routine", "I882": "fallback", "I883": "primary",
+	})
+	tdir := t.TempDir()
+	writeDispatchTranscript(t, tdir, map[string]string{
+		"I881": "shared-tier-model",
+		"I882": "shared-tier-model",
+		"I883": "shared-tier-model",
+	})
+	rep, err := Run(dir, tdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I881"]; r.Verdict != VerdictMatch {
+		t.Errorf("I881 verdict = %s (%s), want match — declared routine is among the candidates", r.Verdict, r.Detail)
+	}
+	if r := rows["I882"]; r.Verdict != VerdictMatch {
+		t.Errorf("I882 verdict = %s (%s), want match — declared fallback is among the candidates", r.Verdict, r.Detail)
+	}
+	if r := rows["I883"]; r.Verdict != VerdictSilentDescent {
+		t.Errorf("I883 verdict = %s (%s), want silent-descent — routine (ordered) beats fallback (lateral) and sits below primary", r.Verdict, r.Detail)
+	}
+	if !rep.Blocking() {
+		t.Error("I883's descent must block")
+	}
+}
+
 // A repo with no WORKFLOW.md still audits: resolution falls back to the
 // embedded defaults — the same answer dispatch-time resolution gives — and
 // the report says so instead of failing or reporting everything unmapped.

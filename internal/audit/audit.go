@@ -46,7 +46,11 @@
 //     declared aliases, or an id the entry shipped as a default before the
 //     current one (historical ids carry no aliases, so a pre-refresh
 //     transcript — e.g. a claude-opus-4-8 dispatch — matches by full id
-//     only). Substring containment is retired (design D13): it collides as
+//     only). An Override entry matches by its exact on-disk id alone:
+//     aliases and history describe the shipped defaults, and a dispatch on
+//     the displaced default in a repo that pinned something else must
+//     surface as unmapped, not read as a match (Default and Inherited
+//     entries keep both). Substring containment is retired (design D13): it collides as
 //     model names multiply across flavors with unrelated naming schemes.
 //     When a token maps to several ordered tiers — two tiers sharing an id
 //     is legal, e.g. the shipped codex.routine/codex.fallback pair — the
@@ -444,7 +448,20 @@ func resolveFlavorTiers(repoDir, flavor string) (map[string]resolvedTier, error)
 		if err != nil {
 			return nil, fmt.Errorf("model table resolution failed for %s.%s: %w", flavor, tier, err)
 		}
-		mapping[tier] = resolvedTier{id: e.ID, aliases: e.Aliases, history: model.HistoricalIDs(flavor, tier)}
+		rt := resolvedTier{id: e.ID, aliases: e.Aliases}
+		// Provenance-scoped matching (I037 fix round 1): a deliberate
+		// Override matches by its exact on-disk id only — the resolver
+		// already withholds the shipped aliases (e.Aliases is nil), and the
+		// shipped historical ids are withheld here for the same reason: in a
+		// repo that pinned bespoke-x, a dispatch on the displaced default is
+		// the drift the override makes visible, and matching it through the
+		// default's lineage would judge it a clean pass. Default and
+		// Inherited entries keep both — an inherited claude-opus-4-8 must
+		// keep matching its current default's aliases and history.
+		if e.Provenance != model.Override {
+			rt.history = model.HistoricalIDs(flavor, tier)
+		}
+		mapping[tier] = rt
 	}
 	return mapping, nil
 }
@@ -455,24 +472,41 @@ func resolveFlavorTiers(repoDir, flavor string) (map[string]resolvedTier, error)
 // a newer format must fail loudly, not emit confident verdicts from a
 // misparse. Non-integer stamps fall through, matching update. An unreadable
 // WORKFLOW.md is a warning, not an error: the resolver falls back to the
-// embedded defaults and the report says so.
+// embedded defaults and the report says so — as it also does when the file
+// is readable but a gen 6+ stamp sits over a missing model_routing block.
 func gateTemplateVersion(repoDir string, warnings *[]string) error {
 	raw, err := os.ReadFile(filepath.Join(repoDir, "WORKFLOW.md"))
 	if err != nil {
 		*warnings = append(*warnings, "WORKFLOW.md unreadable — routing resolved from embedded defaults: "+err.Error())
 		return nil
 	}
-	if tv := update.ExtractKeys(string(raw))["template_version"]; tv != "" {
-		if n, err := strconv.Atoi(tv); err == nil && n > tmpl.Version() {
-			return fmt.Errorf(
-				"WORKFLOW.md is template generation %d but this spine binary compiles generation %d — refusing to audit a newer format; upgrade spine (make install in ~/Projects/github.com/spine)",
-				n, tmpl.Version())
+	content := string(raw)
+	if tv := update.ExtractKeys(content)["template_version"]; tv != "" {
+		if n, err := strconv.Atoi(tv); err == nil {
+			if n > tmpl.Version() {
+				return fmt.Errorf(
+					"WORKFLOW.md is template generation %d but this spine binary compiles generation %d — refusing to audit a newer format; upgrade spine (make install in ~/Projects/github.com/spine)",
+					n, tmpl.Version())
+			}
+			// Every gen 6+ template renders the model_routing mirror, so a
+			// gen 6+ stamp over an empty block means the spine-managed
+			// mirror was lost (bad merge, hand edit). Verdicts stay faithful
+			// to dispatch-time resolution either way (D13) — this warning is
+			// the diagnostics residue of the retired loud-failure mode: the
+			// gate must not report a clean bill indistinguishable from a
+			// healthy repo's (I037 fix round 1, finding I-1).
+			if n >= 6 && len(model.RoutingKeys(content)) == 0 {
+				*warnings = append(*warnings, "WORKFLOW.md carries no model_routing block — routing resolved from embedded defaults")
+			}
 		}
 	}
 	return nil
 }
 
-// stripComment trims a value and drops any trailing "# comment".
+// stripComment trims a value and drops any trailing "# comment". It serves
+// ticket FRONTMATTER values only — deliberately not the WORKFLOW.md comment
+// rule (model.CommentIndex): frontmatter is a different surface with its own
+// historical naive rule, and no routing value ever passes through here.
 func stripComment(v string) string {
 	if i := strings.Index(v, "#"); i >= 0 {
 		v = v[:i]
