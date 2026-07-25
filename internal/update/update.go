@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/russellpope/spine/internal/fsutil"
+	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/tmpl"
 )
 
@@ -588,12 +589,12 @@ func keyLineSignature(line string) (key, sig string, ok bool) {
 			return k, k + "\x00" + commentOf(trimmed, k), true
 		}
 	}
-	for _, k := range routingKeys {
+	for _, k := range model.Tiers {
 		if _, has := cutKey(trimmed, k); has {
 			return k, k + "\x00" + commentOf(trimmed, k), true
 		}
 	}
-	if dk, has := dottedRoutingKey(trimmed); has {
+	if dk, has := model.DottedRoutingKey(trimmed); has {
 		return dk, dk + "\x00" + commentOf(trimmed, dk), true
 	}
 	return "", "", false

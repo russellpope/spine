@@ -7,9 +7,17 @@
 // Inputs, all read-only:
 //   - docs/issues/*.md frontmatter: id plus the optional annotation fields
 //     tier / execution-mode / effort / risk-triggers / review-tier.
-//   - WORKFLOW.md `model_routing:` block: tier -> full model id for
-//     primary / routine / mechanical / fallback, parsed tolerantly
-//     (inline comments stripped, unknown keys ignored).
+//   - The shared model resolver (internal/model, design D13): tier -> id
+//     resolution is flavor-scoped and goes through model.Resolve, honoring
+//     the repo's WORKFLOW.md mirror overrides (dotted gen-10 keys; bare
+//     gen ≤9 tier keys as claude values) and falling back to the embedded
+//     defaults when the file, block, or key is absent — exactly what
+//     dispatch-time resolution returns, so dispatched and verified cannot
+//     disagree. The audit owns no WORKFLOW.md parser of its own.
+//   - WORKFLOW.md's template_version stamp (via update.ExtractKeys, the one
+//     top-level-key parser): a generation newer than this binary compiles
+//     is refused (design D14), matching spine update's gate — an
+//     un-upgraded binary must not emit confident verdicts from a misparse.
 //   - .superpowers/sdd/progress.md: one-line ESCALATION / FALLBACK records.
 //   - The harness transcript dir: <dir>/*.jsonl session records plus
 //     <dir>/<session>/subagents/agent-*.jsonl (+ sibling .meta.json). This
@@ -28,12 +36,23 @@
 //     dispatch's model alias; a dispatch with neither contributes nothing.
 //     Main-session assistant models are never ticket evidence — inline
 //     execution is out of the audit's scope by design.
-//   - Alias/id -> tier: a token maps to a tier when it equals the mapped id
-//     or the mapped id contains it (alias case, e.g. claude-sonnet-5 ~
-//     "sonnet"). When a token maps to several ordered tiers, the reading
-//     closest to a non-verdict wins: declared tier if present, else the
-//     highest — degradation must not manufacture descent. A token mapping
-//     only to fallback is lateral: covered by a FALLBACK record ->
+//   - Flavor of a dispatch is derived from the transcript source
+//     (design D15; see transcriptFlavor, the deferred codex-audit's seam).
+//     Only the claude harness's transcripts are parsed today, so every
+//     audited dispatch resolves within the claude flavor; ids declared
+//     under other flavors are deliberately invisible to it.
+//   - Token -> tier, within the dispatch's flavor: a token maps to a tier
+//     when it equals the resolved id, one of the table entry's explicitly
+//     declared aliases, or an id the entry shipped as a default before the
+//     current one (historical ids carry no aliases, so a pre-refresh
+//     transcript — e.g. a claude-opus-4-8 dispatch — matches by full id
+//     only). Substring containment is retired (design D13): it collides as
+//     model names multiply across flavors with unrelated naming schemes.
+//     When a token maps to several ordered tiers — two tiers sharing an id
+//     is legal, e.g. the shipped codex.routine/codex.fallback pair — the
+//     reading closest to a non-verdict wins: declared tier if present, else
+//     the highest — degradation must not manufacture descent. A token
+//     mapping only to fallback is lateral: covered by a FALLBACK record ->
 //     escalated-with-reason; covered by a `tier: fallback` annotation ->
 //     match; otherwise the warn-level unexplained-fallback. (A fallback id
 //     shared with an ordered tier below the annotation resolves through the
@@ -51,8 +70,11 @@
 //   - A ticket's verdict is its worst token's verdict: silent-descent >
 //     unmapped-dispatch > unexplained-fallback > escalated-no-reason >
 //     escalated-with-reason > match.
-//   - A missing docs/issues dir is the one hard error (not a scaffolded
-//     repo — CLI usage error); everything else degrades to warnings.
+//   - Hard errors are a missing docs/issues dir (not a scaffolded repo —
+//     CLI usage error) and the D14 version-gate refusal above; everything
+//     else degrades to warnings. A missing or unreadable WORKFLOW.md is a
+//     warning, not an error: resolution falls back to embedded defaults,
+//     and the report says so.
 package audit
 
 import (
@@ -63,7 +85,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/russellpope/spine/internal/model"
+	"github.com/russellpope/spine/internal/tmpl"
+	"github.com/russellpope/spine/internal/update"
 )
 
 // Verdict classifies one ticket's declared-vs-actual routing.
@@ -128,17 +155,25 @@ var tierRank = map[string]int{"mechanical": 1, "routine": 2, "primary": 3, "fall
 
 // Run audits repoDir's declared routing against the transcript records in
 // transcriptsDir. Transcript trouble of any kind degrades to Warnings; the
-// only error is a repo without docs/issues.
+// only errors are a repo without docs/issues and the D14 version-gate
+// refusal (see the package comment).
 func Run(repoDir, transcriptsDir string) (Report, error) {
 	var rep Report
 	tickets, err := readTickets(filepath.Join(repoDir, "docs", "issues"))
 	if err != nil {
 		return Report{}, err
 	}
+	if err := gateTemplateVersion(repoDir, &rep.Warnings); err != nil {
+		return Report{}, err
+	}
 	if !anyAnnotated(tickets) {
 		rep.Warnings = append(rep.Warnings, "nothing audited — no annotated tickets found (zero docs/issues tickets carry a tier: annotation); an exit-0 run judged nothing")
 	}
-	mapping := readMapping(filepath.Join(repoDir, "WORKFLOW.md"), &rep.Warnings)
+	flavor := transcriptFlavor(transcriptsDir)
+	mapping, err := resolveFlavorTiers(repoDir, flavor)
+	if err != nil {
+		return Report{}, err
+	}
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
 	dispatches, agents := readTranscripts(transcriptsDir, &rep.Warnings)
 
@@ -187,7 +222,7 @@ func Run(repoDir, transcriptsDir string) (Report, error) {
 
 	for _, t := range tickets {
 		row := TicketRow{ID: t.id, Tier: t.tier, Actuals: dedupSorted(evidence[t.id])}
-		row.Verdict, row.Detail = judge(t, row.Actuals, mapping, ledger)
+		row.Verdict, row.Detail = judge(t, row.Actuals, flavor, mapping, ledger)
 		rep.Tickets = append(rep.Tickets, row)
 	}
 	sort.Slice(rep.Tickets, func(i, j int) bool { return rep.Tickets[i].ID < rep.Tickets[j].ID })
@@ -195,8 +230,9 @@ func Run(repoDir, transcriptsDir string) (Report, error) {
 }
 
 // judge decides one ticket's verdict from its declared tier, its observed
-// model tokens, the tier mapping, and the ledger records.
-func judge(t ticket, actuals []string, mapping map[string]string, l ledger) (Verdict, string) {
+// model tokens, the dispatch flavor's resolved tier table, and the ledger
+// records.
+func judge(t ticket, actuals []string, flavor string, mapping map[string]resolvedTier, l ledger) (Verdict, string) {
 	if t.tier == "" {
 		return VerdictUnannotated, "no tier annotation — not judged"
 	}
@@ -213,18 +249,18 @@ func judge(t ticket, actuals []string, mapping map[string]string, l ledger) (Ver
 		}
 	}
 	for _, token := range actuals {
-		v, d := judgeToken(token, t, mapping, l)
+		v, d := judgeToken(token, t, flavor, mapping, l)
 		worse(v, d)
 	}
 	return verdict, detail
 }
 
 // judgeToken classifies a single observed model token against the ticket's
-// declared tier.
-func judgeToken(token string, t ticket, mapping map[string]string, l ledger) (Verdict, string) {
+// declared tier, resolving the token within the dispatch's flavor.
+func judgeToken(token string, t ticket, flavor string, mapping map[string]resolvedTier, l ledger) (Verdict, string) {
 	tiers := tiersOf(token, mapping)
 	if len(tiers) == 0 {
-		return VerdictUnmappedDispatch, fmt.Sprintf("%s maps to no tier in model_routing", token)
+		return VerdictUnmappedDispatch, fmt.Sprintf("%s maps to no %s entry in the model table", token, flavor)
 	}
 	actual := pickTier(tiers, t.tier)
 	if actual == t.tier {
@@ -247,12 +283,15 @@ func judgeToken(token string, t ticket, mapping map[string]string, l ledger) (Ve
 	return VerdictEscalatedNoReason, fmt.Sprintf("%s (%s) above declared %s with no ESCALATION record", token, actual, t.tier)
 }
 
-// tiersOf resolves a model token to every tier it could mean: exact id
-// match, or the alias case where the mapped id contains the token.
-func tiersOf(token string, mapping map[string]string) []string {
+// tiersOf resolves a model token to every tier it could mean within one
+// flavor's resolved table: exact match on the resolved id, on an explicitly
+// declared alias, or on an id the entry's default ever shipped (historical
+// ids carry no aliases — a pre-refresh transcript matches by full id only).
+// Substring containment is retired (design D13).
+func tiersOf(token string, mapping map[string]resolvedTier) []string {
 	var tiers []string
-	for tier, id := range mapping {
-		if id == token || strings.Contains(id, token) {
+	for tier, rt := range mapping {
+		if rt.matches(token) {
 			tiers = append(tiers, tier)
 		}
 	}
@@ -260,9 +299,13 @@ func tiersOf(token string, mapping map[string]string) []string {
 	return tiers
 }
 
-// pickTier chooses the reading of an ambiguous token: the declared tier if
-// it is among the candidates, else the highest-ranked ordered candidate,
-// else fallback. Ambiguity must not manufacture a verdict.
+// pickTier chooses the reading of an ambiguous token — one that maps to
+// several tiers because they share an id or alias, which the table permits
+// (the shipped codex.routine/codex.fallback "terra" pair is the live case;
+// design D15's flavor scoping decides between flavors, this rule decides
+// within one): the declared tier if it is among the candidates, else the
+// highest-ranked ordered candidate, else fallback. Ambiguity must not
+// manufacture a verdict.
 func pickTier(tiers []string, declared string) string {
 	best := ""
 	for _, tier := range tiers {
@@ -349,43 +392,84 @@ func frontmatter(content string) map[string]string {
 	return fm
 }
 
-// readMapping extracts tier -> model id from WORKFLOW.md's model_routing
-// block. Absence of the file or the block degrades to a warning.
-func readMapping(path string, warnings *[]string) map[string]string {
-	raw, err := os.ReadFile(path)
+// transcriptFlavor derives the flavor of the dispatches audited from
+// transcriptsDir — THE flavor-derivation seam (design D15): flavor comes
+// from the transcript source, never from the ticket or the table. Exactly
+// one source is parsed today, the claude harness's ~/.claude/projects
+// layout (readTranscripts), so every audited dispatch resolves within the
+// claude flavor. The deferred codex-audit effort plugs in here: derive the
+// flavor per transcript file and thread it beside each token into judge,
+// instead of once per run.
+func transcriptFlavor(transcriptsDir string) string {
+	return "claude"
+}
+
+// resolvedTier is the audit's view of one (flavor, tier) row, obtained
+// through the shared resolver (design D13) so the audit judges exactly what
+// dispatch-time resolution returns — the audit owns no WORKFLOW.md routing
+// parser of its own.
+type resolvedTier struct {
+	id      string   // resolved model id: the repo's mirror value if present, else the embedded default
+	aliases []string // the table entry's explicitly declared aliases
+	history []string // ids this entry shipped as defaults before the current one (exact-match only)
+}
+
+func (rt resolvedTier) matches(token string) bool {
+	if token == rt.id {
+		return true
+	}
+	for _, a := range rt.aliases {
+		if token == a {
+			return true
+		}
+	}
+	for _, h := range rt.history {
+		if token == h {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveFlavorTiers builds one flavor's tier -> resolvedTier table for
+// repoDir via model.Resolve. An error is a broken embedded table or an
+// unknown flavor — never a repo state — and refuses the audit outright:
+// judging a fleet against a half-resolved table is exactly the confident
+// misparse D13/D14 exist to prevent. (Unreachable today: the embedded table
+// is load-time validated and transcriptFlavor only names shipped flavors.)
+func resolveFlavorTiers(repoDir, flavor string) (map[string]resolvedTier, error) {
+	mapping := map[string]resolvedTier{}
+	for _, tier := range model.Tiers {
+		e, err := model.Resolve(repoDir, flavor, tier)
+		if err != nil {
+			return nil, fmt.Errorf("model table resolution failed for %s.%s: %w", flavor, tier, err)
+		}
+		mapping[tier] = resolvedTier{id: e.ID, aliases: e.Aliases, history: model.HistoricalIDs(flavor, tier)}
+	}
+	return mapping, nil
+}
+
+// gateTemplateVersion refuses a WORKFLOW.md stamped with a template
+// generation newer than this binary compiles (design D14) — the same gate
+// spine update applies, for the same reason: an un-upgraded binary reading
+// a newer format must fail loudly, not emit confident verdicts from a
+// misparse. Non-integer stamps fall through, matching update. An unreadable
+// WORKFLOW.md is a warning, not an error: the resolver falls back to the
+// embedded defaults and the report says so.
+func gateTemplateVersion(repoDir string, warnings *[]string) error {
+	raw, err := os.ReadFile(filepath.Join(repoDir, "WORKFLOW.md"))
 	if err != nil {
-		*warnings = append(*warnings, "WORKFLOW.md unreadable — every dispatch will report unmapped: "+err.Error())
+		*warnings = append(*warnings, "WORKFLOW.md unreadable — routing resolved from embedded defaults: "+err.Error())
 		return nil
 	}
-	mapping := map[string]string{}
-	inBlock := false
-	for _, line := range strings.Split(string(raw), "\n") {
-		if strings.HasPrefix(line, "model_routing:") {
-			inBlock = true
-			continue
-		}
-		if !inBlock {
-			continue
-		}
-		if !strings.HasPrefix(line, "  ") || strings.TrimSpace(line) == "" {
-			break
-		}
-		k, v, ok := strings.Cut(strings.TrimSpace(line), ":")
-		if !ok {
-			continue
-		}
-		tier := strings.TrimSpace(k)
-		if _, known := tierRank[tier]; !known {
-			continue // unknown keys ignored by contract
-		}
-		if id := stripComment(v); id != "" {
-			mapping[tier] = id
+	if tv := update.ExtractKeys(string(raw))["template_version"]; tv != "" {
+		if n, err := strconv.Atoi(tv); err == nil && n > tmpl.Version() {
+			return fmt.Errorf(
+				"WORKFLOW.md is template generation %d but this spine binary compiles generation %d — refusing to audit a newer format; upgrade spine (make install in ~/Projects/github.com/spine)",
+				n, tmpl.Version())
 		}
 	}
-	if len(mapping) == 0 {
-		*warnings = append(*warnings, "no model_routing tier mapping found in WORKFLOW.md — every dispatch will report unmapped")
-	}
-	return mapping
+	return nil
 }
 
 // stripComment trims a value and drops any trailing "# comment".

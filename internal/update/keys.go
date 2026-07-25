@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/tmpl"
 )
 
@@ -15,31 +16,15 @@ var topKeys = []string{
 	"effort", "model_default", "security_routing", "stages",
 }
 
-var routingKeys = []string{"primary", "fallback", "routine", "mechanical"}
-
+// isRoutingKey reports whether k names a bare routing tier. The tier list is
+// the resolver's — one definition estate-wide.
 func isRoutingKey(k string) bool {
-	for _, r := range routingKeys {
+	for _, r := range model.Tiers {
 		if r == k {
 			return true
 		}
 	}
 	return false
-}
-
-// dottedRoutingKey reports whether trimmed begins with a gen-10
-// "<flavor>.<tier>:" mirror key (design D8) and returns the dotted key. The
-// flavor half is open-ended data, so any dot-free non-empty token counts;
-// the tier half must be a known tier.
-func dottedRoutingKey(trimmed string) (string, bool) {
-	head, _, found := strings.Cut(trimmed, ":")
-	if !found {
-		return "", false
-	}
-	flavor, tier, dotted := strings.Cut(head, ".")
-	if !dotted || flavor == "" || strings.ContainsAny(flavor, " \t.") || !isRoutingKey(tier) {
-		return "", false
-	}
-	return head, true
 }
 
 func splitLines(s string) []string { return strings.Split(s, "\n") }
@@ -56,53 +41,24 @@ func cutKey(line, key string) (string, bool) {
 	return strings.TrimSpace(rest), true
 }
 
-// commentIndex finds the offset of a comment-starting '#' in s: one that
-// begins the value (only whitespace, if any, precedes it) or is itself
-// preceded by whitespace. A '#' embedded inside a value (e.g.
-// "quality#framing") is data, not a comment, and is skipped. Returns -1
-// when s has no comment-starting '#'.
-func commentIndex(s string) int {
-	start := len(s) - len(strings.TrimLeft(s, " \t"))
-	for i := start; i < len(s); i++ {
-		if s[i] != '#' {
-			continue
-		}
-		if i == start || s[i-1] == ' ' || s[i-1] == '\t' {
-			return i
-		}
-	}
-	return -1
-}
+// commentIndex delegates to the consolidated comment rule in internal/model
+// (I037): one definition of where a trailing comment starts, shared by every
+// WORKFLOW.md reader.
+func commentIndex(s string) int { return model.CommentIndex(s) }
 
 // ExtractKeys pulls known config keys out of WORKFLOW.md content. Sub-keys of
-// model_routing come back dotted: "model_routing.primary".
+// model_routing come back dotted — "model_routing.primary" for a bare gen ≤9
+// tier key, "model_routing.claude.primary" for a gen-10 mirror key — read
+// through the shared model_routing parser (model.RoutingKeys, I037): one
+// block grammar for dispatch resolution, update, and audit alike. Top-level
+// keys are scanned line-wise; routing-block lines are indented and can never
+// match a top-level key prefix.
 func ExtractKeys(content string) map[string]string {
 	keys := map[string]string{}
-	inRouting := false
+	for k, v := range model.RoutingKeys(content) {
+		keys["model_routing."+k] = v
+	}
 	for _, line := range splitLines(content) {
-		if strings.HasPrefix(line, "model_routing:") {
-			inRouting = true
-			continue
-		}
-		if inRouting {
-			if strings.HasPrefix(line, "  ") {
-				trimmed := strings.TrimSpace(line)
-				for _, k := range routingKeys {
-					if v, ok := cutKey(trimmed, k); ok {
-						keys["model_routing."+k] = v
-					}
-				}
-				// gen-10 dotted "<flavor>.<tier>" mirror keys (design D8)
-				// come back as "model_routing.<flavor>.<tier>".
-				if dk, ok := dottedRoutingKey(trimmed); ok {
-					if v, has := cutKey(trimmed, dk); has {
-						keys["model_routing."+dk] = v
-					}
-				}
-				continue
-			}
-			inRouting = false
-		}
 		for _, k := range topKeys {
 			if v, ok := cutKey(line, k); ok {
 				keys[k] = v

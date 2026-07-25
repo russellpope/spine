@@ -298,6 +298,23 @@ func TestResolveFrom_PartialTable_ReturnsError(t *testing.T) {
 	}
 }
 
+// The consolidated block rule (I037): a whitespace-only line ends the
+// model_routing block, for every consumer of the shared parser. The mirror
+// is machine-rendered contiguous, so an override stranded after a stray
+// blank line is not attributable to the block — it is ignored and the entry
+// resolves to its default, rather than indented prose further down the file
+// being read as routing entries.
+func TestResolve_BlankLineEndsRoutingBlock(t *testing.T) {
+	dir := writeWorkflow(t, "model_routing:\n  primary: claude-fable-5\n\n  fallback: stranded-override\n")
+	entry, err := Resolve(dir, "claude", "fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Provenance != Default {
+		t.Errorf("got %+v, want the embedded default — a value after a blank line is outside the block", entry)
+	}
+}
+
 // TRANSITIONAL bare-tier affordance (I035): a gen ≤9 mirror's bare tier key
 // (`fallback: claude-opus-4-8`) is read as a claude-flavored value — this is
 // what every real repo carries today, so the refresh rule must see it. A

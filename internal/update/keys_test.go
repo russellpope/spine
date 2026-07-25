@@ -48,6 +48,27 @@ func TestExtractKeysRoutingSubBlock(t *testing.T) {
 	}
 }
 
+// The consolidated block rule (I037): a whitespace-only line ends the
+// model_routing block. Pre-consolidation, ExtractKeys alone scanned on past
+// blank lines and could read indented prose as routing entries; the
+// conservative rule — the block is the contiguous indented run, kept from
+// the resolver's reader — now applies to every consumer of the shared
+// parser. Keys after the break are dropped, and top-level keys still
+// extract past it.
+func TestExtractKeysRoutingBlockEndsAtBlankLine(t *testing.T) {
+	content := "model_routing:\n  primary: claude-fable-5\n\n  fallback: stray-after-blank\neffort: high\n"
+	keys := ExtractKeys(content)
+	if keys["model_routing.primary"] != "claude-fable-5" {
+		t.Errorf("primary lost: %#v", keys)
+	}
+	if v, ok := keys["model_routing.fallback"]; ok {
+		t.Errorf("fallback after a blank line must not parse as a routing key, got %q", v)
+	}
+	if keys["effort"] != "high" {
+		t.Errorf("top-level key after the block lost: %#v", keys)
+	}
+}
+
 func TestProjectFromWorkflow(t *testing.T) {
 	if got := ProjectFromWorkflow(gen0Hbmview, "fb"); got != "hbmview" {
 		t.Errorf("got %q", got)

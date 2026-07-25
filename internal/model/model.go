@@ -312,32 +312,47 @@ func flavorsOf(t table) []string {
 	return out
 }
 
-// override is one on-disk "<flavor>.<tier>" mirror value.
-type override struct {
-	id     string
-	effort string
+// HistoricalIDs returns every model id the embedded (flavor, tier) entry
+// shipped as a default before the current one, in shipped order. The routing
+// audit maps transcript tokens from pre-refresh dispatches through these by
+// exact id — historical ids carry no aliases (I033), so an alias token in an
+// old transcript deliberately does not match them. Unknown flavor or tier
+// returns nil.
+func HistoricalIDs(flavor, tier string) []string {
+	var ids []string
+	for _, h := range defaults.Flavors[flavor][tier].History {
+		ids = append(ids, h.ID)
+	}
+	return ids
 }
 
-// readOverride looks up repoDir's WORKFLOW.md model_routing block for the
-// dotted "<flavor>.<tier>" key design D8 defines for the gen-10 mirror,
-// falling back to the bare "<tier>" key for the claude flavor (the
-// transitional gen ≤9 affordance described in the package comment; a dotted
-// key wins). Absence of repoDir, the file, the block, or the key all report
-// not-found, never an error — that is the "no override" and "outside a
-// spine repo" cases, not failures.
-func readOverride(repoDir, flavor, tier string) (override, bool) {
-	if repoDir == "" {
-		return override{}, false
-	}
-	raw, err := os.ReadFile(filepath.Join(repoDir, "WORKFLOW.md"))
-	if err != nil {
-		return override{}, false
-	}
-	want := flavor + "." + tier
-	var bare override
-	bareFound := false
+// RoutingKeys parses the model_routing: block out of WORKFLOW.md content —
+// the single parser of that block (I037 consolidation, design D13). Before
+// this, three independent readers (this package's override reader, update's
+// ExtractKeys, audit's mapping reader) each parsed it with diverging
+// block-termination and comment rules; every consumer now reads through here
+// (the audit indirectly, via Resolve).
+//
+// Grammar: the block starts at a column-0 "model_routing:" line and is the
+// contiguous run of two-space-indented, non-blank lines after it; the first
+// whitespace-only or non-indented line ends it, and scanning stops there.
+// The mirror is machine-rendered contiguous, so nothing past a break is
+// safely attributable to the block — the conservative rule, kept from the
+// resolver's and audit's original readers (2 of the 3; ExtractKeys used to
+// scan on past whitespace-only lines and could read indented prose as
+// routing entries).
+//
+// Keys: bare known-tier keys ("fallback" — the gen ≤9 format the un-swept
+// fleet runs until I039) and dotted "<flavor>.<tier>" gen-10 mirror keys
+// (design D8). Unknown keys are ignored by contract; the last occurrence of
+// a duplicated key wins (map semantics — duplicates never occur in a
+// machine-rendered mirror). Values come back with any trailing comment
+// stripped first, per CommentIndex, before any caller splits on the " @ "
+// effort separator — D9's corrected order.
+func RoutingKeys(content string) map[string]string {
+	keys := map[string]string{}
 	inBlock := false
-	for _, line := range strings.Split(string(raw), "\n") {
+	for _, line := range strings.Split(content, "\n") {
 		if strings.HasPrefix(line, "model_routing:") {
 			inBlock = true
 			continue
@@ -348,44 +363,104 @@ func readOverride(repoDir, flavor, tier string) (override, bool) {
 		if !strings.HasPrefix(line, "  ") || strings.TrimSpace(line) == "" {
 			break
 		}
-		k, v, ok := strings.Cut(strings.TrimSpace(line), ":")
+		trimmed := strings.TrimSpace(line)
+		k, v, ok := strings.Cut(trimmed, ":")
 		if !ok {
 			continue
 		}
-		switch strings.TrimSpace(k) {
-		case want:
-			return parseValue(v), true
-		case tier:
-			// TRANSITIONAL (I035 → retired by I036): a bare tier key is a
-			// claude-flavored value — claude is the only flavor any gen ≤9
-			// mirror ever rendered. Recorded, not returned, so a dotted key
-			// later in the block still wins; last bare occurrence wins,
-			// matching internal/update's ExtractKeys.
-			if flavor == "claude" {
-				bare = parseValue(v)
-				bareFound = true
+		key := strings.TrimSpace(k)
+		if !isKnownTier(key) {
+			if _, dotted := DottedRoutingKey(trimmed); !dotted {
+				continue
 			}
 		}
+		if i := CommentIndex(v); i >= 0 {
+			v = v[:i]
+		}
+		keys[key] = strings.TrimSpace(v)
 	}
-	return bare, bareFound
+	return keys
+}
+
+// DottedRoutingKey reports whether trimmed begins with a gen-10
+// "<flavor>.<tier>:" mirror key (design D8) and returns the dotted key. The
+// flavor half is open-ended data, so any dot-free non-empty token counts;
+// the tier half must be a known tier. (Moved from internal/update in the
+// I037 parser consolidation; update's line-signature scan still uses it.)
+func DottedRoutingKey(trimmed string) (string, bool) {
+	head, _, found := strings.Cut(trimmed, ":")
+	if !found {
+		return "", false
+	}
+	flavor, tier, dotted := strings.Cut(head, ".")
+	if !dotted || flavor == "" || strings.ContainsAny(flavor, " \t.") || !isKnownTier(tier) {
+		return "", false
+	}
+	return head, true
+}
+
+// CommentIndex finds the offset of a comment-starting '#' in s: one that
+// begins the value (only whitespace, if any, precedes it) or is itself
+// preceded by whitespace. A '#' embedded inside a value (e.g.
+// "quality#framing") is data, not a comment, and is skipped. Returns -1
+// when s has no comment-starting '#'. (Moved from internal/update in the
+// I037 consolidation so every WORKFLOW.md reader shares one comment rule.)
+func CommentIndex(s string) int {
+	start := len(s) - len(strings.TrimLeft(s, " \t"))
+	for i := start; i < len(s); i++ {
+		if s[i] != '#' {
+			continue
+		}
+		if i == start || s[i-1] == ' ' || s[i-1] == '\t' {
+			return i
+		}
+	}
+	return -1
+}
+
+// override is one on-disk "<flavor>.<tier>" mirror value.
+type override struct {
+	id     string
+	effort string
+}
+
+// readOverride looks up repoDir's WORKFLOW.md model_routing block for the
+// dotted "<flavor>.<tier>" key design D8 defines for the gen-10 mirror,
+// falling back to the bare "<tier>" key for the claude flavor — the
+// TRANSITIONAL gen ≤9 affordance described in the package comment (I035,
+// retired by I036's mirror): claude is the only flavor any gen ≤9 mirror
+// ever rendered, and bare keys stay invisible to every other flavor. A
+// dotted key wins over a bare one. Absence of repoDir, the file, the block,
+// or the key all report not-found, never an error — that is the "no
+// override" and "outside a spine repo" cases, not failures.
+func readOverride(repoDir, flavor, tier string) (override, bool) {
+	if repoDir == "" {
+		return override{}, false
+	}
+	raw, err := os.ReadFile(filepath.Join(repoDir, "WORKFLOW.md"))
+	if err != nil {
+		return override{}, false
+	}
+	keys := RoutingKeys(string(raw))
+	if v, ok := keys[flavor+"."+tier]; ok {
+		return parseValue(v), true
+	}
+	if flavor == "claude" {
+		if v, ok := keys[tier]; ok {
+			return parseValue(v), true
+		}
+	}
+	return override{}, false
 }
 
 // parseValue splits one mirror value into id and optional effort per D9:
-// "<id>" or "<id> @ <effort>", comment stripped first as the existing
-// WORKFLOW.md parsers do.
+// "<id>" or "<id> @ <effort>". RoutingKeys has already stripped any trailing
+// comment — D9's corrected order (comment first, then the separator split).
 func parseValue(v string) override {
-	v = stripComment(v)
 	id, effort, hasEffort := strings.Cut(v, "@")
 	ov := override{id: strings.TrimSpace(id)}
 	if hasEffort {
 		ov.effort = strings.TrimSpace(effort)
 	}
 	return ov
-}
-
-func stripComment(v string) string {
-	if i := strings.Index(v, "#"); i >= 0 {
-		v = v[:i]
-	}
-	return strings.TrimSpace(v)
 }

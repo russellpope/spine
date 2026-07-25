@@ -10,13 +10,14 @@ import (
 	"github.com/russellpope/spine/internal/scaffold"
 )
 
-// Proof (I003, format frozen at gen 9): the bare-tier model_routing block
-// every gen 6–9 repo carries on disk — the format the fleet still runs until
-// the I039 sweep — parses with this package's WORKFLOW.md reader exactly as
-// the supplement's "block shape" note requires: model_routing: at column 0
-// plus two-space-indented `key: value  # comment` lines, all four tiers, no
-// warnings. Inline fixture rather than scaffold.Init because gen 10's
-// scaffold no longer renders this format (see the gen-10 test below).
+// Proof (I003, format frozen at gen 9; reworked in I037 to run through the
+// audit's real boundary, since the audit's own block reader is gone): the
+// bare-tier model_routing block every gen 6–9 repo carries on disk — the
+// format the fleet still runs until the I039 sweep — reaches the audit
+// through the shared resolver's transitional bare-key affordance. All four
+// tiers resolve; a bespoke per-repo override matches (embedded defaults
+// alone could never produce it, so this pins that the on-disk block was
+// actually read); a prior shipped default still reads as the fallback id.
 func TestGen9BareTierModelRoutingParses(t *testing.T) {
 	dir := t.TempDir()
 	wf := `# Workflow — proof
@@ -25,61 +26,98 @@ profile: go-service
 template_version: 9
 model_routing:
   primary: claude-fable-5          # default thinker: design, judgment, orchestration, final review
-  routine: claude-sonnet-5         # multi-step mechanical subagent roles
+  routine: my-team-tuned-model     # deliberate per-repo override
   mechanical: claude-haiku-4-5     # verbatim plan-transcription + single-file mechanical fixes ONLY
   fallback: claude-opus-4-8        # primary-refused or security-framed work
 `
-	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte(wf), 0o644); err != nil {
+	writeAuditRepo(t, dir, wf, map[string]string{
+		"I501": "primary", "I502": "routine", "I503": "mechanical", "I504": "fallback",
+	})
+	tdir := t.TempDir()
+	writeDispatchTranscript(t, tdir, map[string]string{
+		"I501": "claude-fable-5",
+		"I502": "my-team-tuned-model",
+		"I503": "claude-haiku-4-5",
+		"I504": "claude-opus-4-8",
+	})
+	rep, err := Run(dir, tdir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var warnings []string
-	mapping := readMapping(filepath.Join(dir, "WORKFLOW.md"), &warnings)
-	if len(warnings) != 0 {
-		t.Errorf("unexpected warnings reading the gen-9 model_routing block: %v", warnings)
+	if len(rep.Warnings) != 0 {
+		t.Errorf("unexpected warnings auditing the gen-9 block: %v", rep.Warnings)
 	}
-	want := map[string]string{
-		"primary":    "claude-fable-5",
-		"routine":    "claude-sonnet-5",
-		"mechanical": "claude-haiku-4-5",
-		"fallback":   "claude-opus-4-8",
-	}
-	if len(mapping) != len(want) {
-		t.Fatalf("mapping = %v, want exactly the four tiers %v", mapping, want)
-	}
-	for tier, id := range want {
-		if mapping[tier] != id {
-			t.Errorf("mapping[%q] = %q, want %q", tier, mapping[tier], id)
+	rows := rowsByID(t, rep)
+	for _, id := range []string{"I501", "I502", "I503", "I504"} {
+		if r := rows[id]; r.Verdict != VerdictMatch {
+			t.Errorf("%s: verdict = %s (%s), want match", id, r.Verdict, r.Detail)
 		}
+	}
+	if rep.Blocking() {
+		t.Error("a clean gen-9 audit must not block")
 	}
 }
 
-// I036 transition state (design D8, resolved by I037): the gen-10 scaffold
-// renders the dotted flavor-axis mirror, which this package's pre-I037
-// bare-tier reader deliberately cannot parse — the mapping comes back empty
-// and the existing "no tier mapping found" warning fires. This is the loud,
-// obviously-broken failure mode the dotted syntax was chosen for (spec user
-// story 18); the silent alternative (nested blocks misparsed as bare tiers,
-// last flavor winning) is the regression this test guards against. I037
-// replaces readMapping with the shared resolver and rewrites this
-// expectation.
-func TestGen10ScaffoldMirrorFailsLoudlyUntilAuditConsolidation(t *testing.T) {
+// I036 rendered the gen-10 dotted flavor mirror, which the audit's pre-I037
+// bare-tier reader could not parse; TestGen10ScaffoldMirrorFailsLoudlyUntil-
+// AuditConsolidation pinned that loud failure. Its premise died with I037:
+// the audit now consumes the shared resolver, so a gen-10 scaffold resolves
+// cleanly end to end — including a dotted per-repo override, which embedded
+// defaults alone could never match, pinning that the dotted mirror is
+// actually read (the nested-block silent misparse D8 warns about would fail
+// this: the override lives under a claude. prefix a bare-tier reader would
+// strip or skip).
+func TestGen10ScaffoldMirrorResolvesThroughAudit(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := scaffold.Init(dir, "go-service", "proof"); err != nil {
 		t.Fatal(err)
 	}
-	var warnings []string
-	mapping := readMapping(filepath.Join(dir, "WORKFLOW.md"), &warnings)
-	if len(mapping) != 0 {
-		t.Errorf("mapping = %v, want empty — a bare-tier reader must not half-parse the dotted mirror", mapping)
+	path := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	loud := false
-	for _, w := range warnings {
-		if strings.Contains(w, "no model_routing tier mapping found") {
-			loud = true
+	lines := strings.Split(string(raw), "\n")
+	replaced := false
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "claude.routine:") {
+			lines[i] = "  claude.routine: my-pinned-routine-model"
+			replaced = true
 		}
 	}
-	if !loud {
-		t.Errorf("warnings = %v, want the loud no-mapping warning", warnings)
+	if !replaced {
+		t.Fatal("gen-10 scaffold renders no claude.routine row — mirror shape changed?")
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for id, tier := range map[string]string{
+		"I601": "primary", "I602": "routine", "I603": "mechanical", "I604": "fallback",
+	} {
+		gen6ProofTicket(t, dir, id, tier)
+	}
+	tdir := t.TempDir()
+	writeDispatchTranscript(t, tdir, map[string]string{
+		"I601": "fable",
+		"I602": "my-pinned-routine-model",
+		"I603": "claude-haiku-4-5",
+		"I604": "opus",
+	})
+	rep, err := Run(dir, tdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Warnings) != 0 {
+		t.Errorf("unexpected warnings auditing the gen-10 mirror: %v", rep.Warnings)
+	}
+	rows := rowsByID(t, rep)
+	for _, id := range []string{"I601", "I602", "I603", "I604"} {
+		if r := rows[id]; r.Verdict != VerdictMatch {
+			t.Errorf("%s: verdict = %s (%s), want match", id, r.Verdict, r.Detail)
+		}
+	}
+	if rep.Blocking() {
+		t.Error("a clean gen-10 audit must not block")
 	}
 }
 
