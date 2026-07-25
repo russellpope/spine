@@ -18,7 +18,7 @@ Design D1–D5, D11. A new module owning the estate's model table and answering 
 
 Ships the defaults as versioned data embedded at build time alongside the existing template assets, keyed by flavor (`claude`, `codex`) as open-ended map keys rather than an enum, each entry carrying a model id plus optional effort and explicit aliases. The data records not only the current default per entry but **every default previously shipped** — the history that makes an inherited value distinguishable from a deliberate override by direct lookup instead of re-render-and-diff.
 
-Exposes one pure resolution function: repo directory + flavor + tier in; resolved id, effort and provenance (default vs override) out. Repo context comes from the working directory as with other commands, overridable by flag; outside a spine repo it returns embedded defaults. Effort resolution always yields a determinate value — an entry omitting effort inherits its tier's default, which also moves from prose-in-a-comment into this data.
+Exposes one pure resolution function: repo directory + flavor + tier in; resolved id, effort and provenance (**default, inherited, or override** — three values, not two; `inherited` is what the shipped-default history exists to produce) out. Repo context comes from the working directory as with other commands, overridable by flag; outside a spine repo it returns embedded defaults. Effort resolution always yields a determinate value — an entry omitting effort inherits its tier's default, which also moves from prose-in-a-comment into this data.
 
 Claude's fallback default is `claude-opus-5`, with `claude-opus-4-8` recorded in its history. Codex ships all four tiers, primary and fallback carrying explicit effort overrides.
 

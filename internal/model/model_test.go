@@ -222,3 +222,112 @@ func TestResolve_OverrideScopedToItsOwnFlavorAndTier(t *testing.T) {
 		t.Errorf("sibling flavor codex.primary leaked override: %+v, err=%v", entry, err)
 	}
 }
+
+// Regression for task review Important #1: a deliberate effort override on
+// an id that otherwise matches the current default must not be misreported
+// as Inherited — I036's refresh rule would silently revert exactly this
+// choice (user stories 6/14).
+func TestResolve_EffortOverrideOnDefaultID_ReportsOverride(t *testing.T) {
+	dir := writeWorkflow(t, "model_routing:\n  claude.primary: claude-fable-5 @ low\n")
+	entry, err := Resolve(dir, "claude", "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Provenance != Override {
+		t.Errorf("Provenance = %s, want %s (id matches default but effort was deliberately overridden)", entry.Provenance, Override)
+	}
+	if entry.Effort != "low" {
+		t.Errorf("Effort = %q, want low", entry.Effort)
+	}
+}
+
+// Regression for task review Important #1's converse: an override that
+// repeats the default id but omits effort, where the default itself carries
+// an explicit effort (codex primary's xhigh), resolves to the *tier*
+// default effort (high) per D3 — which disagrees with what codex primary
+// actually ships. That disagreement must be reported as Override, not
+// Inherited: an "inherited" entry that silently resolves to a different
+// effort than the default it claims to inherit is the bug.
+func TestResolve_DefaultIDOmittedEffortDivergesFromShipped_ReportsOverride(t *testing.T) {
+	dir := writeWorkflow(t, "model_routing:\n  codex.primary: gpt-5.6-sol\n")
+	entry, err := Resolve(dir, "codex", "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Provenance != Override {
+		t.Errorf("Provenance = %s, want %s (resolves to effort %q, not shipped xhigh)", entry.Provenance, Override, entry.Effort)
+	}
+	if entry.Effort != "high" {
+		t.Errorf("Effort = %q, want high (tier default for an entry with no effort suffix)", entry.Effort)
+	}
+}
+
+// Regression for task review Important #2: a flavor present in the table
+// but missing one of the four tiers (the shape a partially-populated third
+// flavor would take) must error, never resolve to a zero-value Entry with
+// an empty id. Exercised via resolveFrom against a synthetic table, since
+// the real models/defaults.json is validated complete at load time and
+// can't itself be made partial without touching the shipped data.
+func TestResolveFrom_PartialTable_ReturnsError(t *testing.T) {
+	partial := table{
+		TierDefaultEffort: map[string]string{"primary": "high", "routine": "medium", "mechanical": "low", "fallback": "high"},
+		Flavors: map[string]map[string]tableEntry{
+			"local": {
+				"primary": {ID: "local-big-model"},
+				// routine, mechanical, fallback deliberately absent.
+			},
+		},
+	}
+
+	entry, err := resolveFrom(partial, "", "local", "routine")
+	if err == nil {
+		t.Fatalf("expected an error for a missing tier entry, got %+v", entry)
+	}
+	if entry.ID != "" {
+		t.Errorf("entry.ID = %q on error, want zero value", entry.ID)
+	}
+
+	// The present tier still resolves normally.
+	entry, err = resolveFrom(partial, "", "local", "primary")
+	if err != nil {
+		t.Fatalf("resolveFrom(local, primary): %v", err)
+	}
+	if entry.ID != "local-big-model" {
+		t.Errorf("ID = %q, want local-big-model", entry.ID)
+	}
+}
+
+// Load-time validation (the fix vehicle task review Minor #6 names for
+// Important #2) must reject an incomplete table before Resolve ever sees
+// it: a flavor missing a tier's id fails fast.
+func TestValidateTable_PanicsOnFlavorMissingTierID(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("expected validateTable to panic on a flavor missing a tier id")
+		}
+	}()
+	validateTable(table{
+		TierDefaultEffort: map[string]string{"primary": "high", "routine": "medium", "mechanical": "low", "fallback": "high"},
+		Flavors: map[string]map[string]tableEntry{
+			"local": {"primary": {ID: "local-big-model"}},
+		},
+	})
+}
+
+// Load-time validation must also reject a tierDefaultEffort map missing a
+// tier — the same silent-empty-value failure mode, one field over.
+func TestValidateTable_PanicsOnMissingTierDefaultEffort(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("expected validateTable to panic on a missing tierDefaultEffort entry")
+		}
+	}()
+	complete := map[string]tableEntry{}
+	for _, tier := range Tiers {
+		complete[tier] = tableEntry{ID: "id-for-" + tier}
+	}
+	validateTable(table{
+		TierDefaultEffort: map[string]string{"primary": "high"}, // routine/mechanical/fallback missing
+		Flavors:           map[string]map[string]tableEntry{"claude": complete},
+	})
+}

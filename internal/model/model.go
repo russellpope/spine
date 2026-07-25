@@ -18,15 +18,28 @@
 //     bare-tier `model_routing:` block that internal/audit and
 //     internal/update read is a distinct, untouched format; a dotted key
 //     never collides with a bare one, and this reader ignores bare keys.
-//   - An on-disk value is Inherited when it equals the entry's current
-//     default or any id in its shipped history, and Override otherwise
-//     (design D5/D6): "every default previously shipped" is read as
-//     including the current one, so only a value matching no default ever
-//     shipped counts as a deliberate override.
+//   - An on-disk value is Inherited when its (id, effective effort) pair
+//     matches the entry's current default or any value it has ever shipped,
+//     and Override otherwise (design D5/D6, corrected per task review
+//     Important #1): matching on id alone let a deliberate effort override
+//     on an otherwise-default id masquerade as Inherited, which would make
+//     I036's refresh rule silently revert it — precisely the case user
+//     stories 6/14 protect. "Effective effort" is each side's own effort if
+//     set, else the tier default, so an override that repeats the default id
+//     but omits effort where the default carries one (e.g. codex primary's
+//     xhigh) reports Override, not Inherited, because the two sides'
+//     effective efforts disagree.
 //   - Effort inheritance (D3) applies uniformly to whichever entry is
 //     authoritative — the override if one is present, else the shipped
 //     default — so an override that sets an id but omits effort still
 //     inherits the tier default, not the default entry's effort.
+//   - A (flavor, tier) pair with no id in the table (an unshipped tier on an
+//     otherwise-known flavor — the shape a partially-populated third flavor
+//     would take) is a hard error, never a zero-value Entry: an empty model
+//     id silently interpolated into a dispatch command is exactly the loud-
+//     failure principle D8 itself is justified by. Guarded twice: load-time
+//     validation in mustLoadDefaults fails a bad models/defaults.json at
+//     test time, and Resolve itself refuses defensively.
 package model
 
 import (
@@ -86,10 +99,11 @@ type table struct {
 
 var defaults = mustLoadDefaults()
 
-// mustLoadDefaults parses the embedded defaults.json. Its presence and shape
-// are compile-time invariants of this repo (see models/embed.go), so any
-// failure here is unreachable at runtime — same convention as
-// internal/tmpl.Version's panic on a missing templates/VERSION.
+// mustLoadDefaults parses the embedded defaults.json and validates it's
+// complete. Its presence, shape, and completeness are compile-time
+// invariants of this repo (see models/embed.go), so any failure here is
+// unreachable at runtime — same convention as internal/tmpl.Version's panic
+// on a missing templates/VERSION.
 func mustLoadDefaults() table {
 	raw, err := models.FS.ReadFile("defaults.json")
 	if err != nil {
@@ -99,18 +113,34 @@ func mustLoadDefaults() table {
 	if err := json.Unmarshal(raw, &t); err != nil {
 		panic("models/defaults.json invalid: " + err.Error())
 	}
+	validateTable(t)
 	return t
+}
+
+// validateTable enforces the completeness Resolve depends on: every flavor
+// carries a non-empty id for all four Tiers, and tierDefaultEffort covers
+// every tier. Without this, a data edit that ships a flavor with a partial
+// tier table would resolve silently to an empty id at runtime instead of
+// failing the build's own tests (task review Important #2 / Minor #6).
+func validateTable(t table) {
+	for _, tier := range Tiers {
+		if t.TierDefaultEffort[tier] == "" {
+			panic(fmt.Sprintf("models/defaults.json: tierDefaultEffort has no default for tier %q", tier))
+		}
+	}
+	for flavor, tiers := range t.Flavors {
+		for _, tier := range Tiers {
+			if tiers[tier].ID == "" {
+				panic(fmt.Sprintf("models/defaults.json: flavor %q has no id for tier %q", flavor, tier))
+			}
+		}
+	}
 }
 
 // Flavors returns the known flavors, sorted. Data-driven: a third flavor
 // becomes known by adding it to models/defaults.json, no code change.
 func Flavors() []string {
-	out := make([]string, 0, len(defaults.Flavors))
-	for f := range defaults.Flavors {
-		out = append(out, f)
-	}
-	sort.Strings(out)
-	return out
+	return flavorsOf(defaults)
 }
 
 func isKnownTier(tier string) bool {
@@ -128,14 +158,26 @@ func isKnownTier(tier string) bool {
 // outside a spine repo, resolution returns embedded defaults). Pure: no
 // current-directory lookup, no mutation of package state.
 func Resolve(repoDir, flavor, tier string) (Entry, error) {
-	tiers, ok := defaults.Flavors[flavor]
+	return resolveFrom(defaults, repoDir, flavor, tier)
+}
+
+// resolveFrom is Resolve against an explicit table rather than the package's
+// loaded defaults, so tests can exercise a deliberately partial table (task
+// review Important #2) without touching the real, always-complete
+// models/defaults.json.
+func resolveFrom(t table, repoDir, flavor, tier string) (Entry, error) {
+	tiers, ok := t.Flavors[flavor]
 	if !ok {
-		return Entry{}, fmt.Errorf("unknown flavor %q (known: %s)", flavor, strings.Join(Flavors(), ", "))
+		return Entry{}, fmt.Errorf("unknown flavor %q (known: %s)", flavor, strings.Join(flavorsOf(t), ", "))
 	}
 	if !isKnownTier(tier) {
 		return Entry{}, fmt.Errorf("unknown tier %q (known: %s)", tier, strings.Join(Tiers, ", "))
 	}
 	def := tiers[tier]
+	if def.ID == "" {
+		return Entry{}, fmt.Errorf("flavor %q has no %s entry", flavor, tier)
+	}
+	tierDefaultEffort := t.TierDefaultEffort[tier]
 
 	entry := Entry{
 		Flavor: flavor, Tier: tier,
@@ -146,7 +188,7 @@ func Resolve(repoDir, flavor, tier string) (Entry, error) {
 	if ov, found := readOverride(repoDir, flavor, tier); found {
 		entry.ID = ov.id
 		entry.Effort = ov.effort
-		if everShipped(def, ov.id) {
+		if everShipped(def, tierDefaultEffort, ov.id, ov.effort) {
 			entry.Provenance = Inherited
 		} else {
 			entry.Provenance = Override
@@ -154,23 +196,50 @@ func Resolve(repoDir, flavor, tier string) (Entry, error) {
 	}
 
 	if entry.Effort == "" {
-		entry.Effort = defaults.TierDefaultEffort[tier]
+		entry.Effort = tierDefaultEffort
 	}
 	return entry, nil
 }
 
-// everShipped reports whether id is def's current default or anywhere in its
-// shipped history (D5/D6).
-func everShipped(def tableEntry, id string) bool {
-	if id == def.ID {
-		return true
+// everShipped reports whether (id, effort) was ever the shipped default for
+// def: id must be the current id or in its history, AND the effective
+// effort — the caller's effort if set, else the tier default — must match
+// def's own effective effort the same way (task review Important #1). This
+// keeps a deliberate effort override on an otherwise-default id from being
+// misreported as Inherited, and keeps an entry that resolves to a different
+// effort than what a matching id actually shipped with from being reported
+// as Inherited either.
+func everShipped(def tableEntry, tierDefaultEffort, id, effort string) bool {
+	if id != def.ID && !containsStr(def.History, id) {
+		return false
 	}
-	for _, h := range def.History {
-		if id == h {
+	shippedEffort := def.Effort
+	if shippedEffort == "" {
+		shippedEffort = tierDefaultEffort
+	}
+	effective := effort
+	if effective == "" {
+		effective = tierDefaultEffort
+	}
+	return effective == shippedEffort
+}
+
+func containsStr(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
 			return true
 		}
 	}
 	return false
+}
+
+func flavorsOf(t table) []string {
+	out := make([]string, 0, len(t.Flavors))
+	for f := range t.Flavors {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // override is one on-disk "<flavor>.<tier>" mirror value.
