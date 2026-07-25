@@ -32,5 +32,5 @@ The failure mode to guard: if the routing keys stay in the generic extraction pa
 - [ ] Nothing is written without the existing write flag; the plan is reviewable first
 - [ ] Model-routing keys no longer appear in generic choice extraction — verified by test, not inspection
 - [ ] Non-model keys (profile, reviewers, stages, harness) still follow the unchanged choice-vs-default rule
-- [ ] Existing generation-migration tests still pass unchanged
+- [ ] Existing generation-migration tests still pass unchanged apart from the sanctioned model-refresh diff pair (`modelRefreshDiffLines`) in the pristine gen 1–8 fixture locks — ratified 2026-07-24: a working refresh necessarily touches those locks, whose old allowlists were pinning the propagation bug itself (amended 2026-07-25 per final whole-branch review; see modelrouting_test.go)
 - [ ] `go test ./...` green
