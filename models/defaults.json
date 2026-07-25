@@ -1,0 +1,56 @@
+{
+  "tierDefaultEffort": {
+    "primary": "high",
+    "routine": "medium",
+    "mechanical": "low",
+    "fallback": "high"
+  },
+  "flavors": {
+    "claude": {
+      "primary": {
+        "id": "claude-fable-5",
+        "aliases": ["claude-fable-5", "fable"],
+        "history": []
+      },
+      "routine": {
+        "id": "claude-sonnet-5",
+        "aliases": ["claude-sonnet-5", "sonnet"],
+        "history": []
+      },
+      "mechanical": {
+        "id": "claude-haiku-4-5",
+        "aliases": ["claude-haiku-4-5", "haiku"],
+        "history": []
+      },
+      "fallback": {
+        "id": "claude-opus-5",
+        "aliases": ["claude-opus-5", "opus"],
+        "history": ["claude-opus-4-8"]
+      }
+    },
+    "codex": {
+      "primary": {
+        "id": "gpt-5.6-sol",
+        "effort": "xhigh",
+        "aliases": ["gpt-5.6-sol", "sol"],
+        "history": []
+      },
+      "routine": {
+        "id": "gpt-5.6-terra",
+        "aliases": ["gpt-5.6-terra", "terra"],
+        "history": []
+      },
+      "mechanical": {
+        "id": "gpt-5.6-luna",
+        "aliases": ["gpt-5.6-luna", "luna"],
+        "history": []
+      },
+      "fallback": {
+        "id": "gpt-5.6-terra",
+        "effort": "xhigh",
+        "aliases": ["gpt-5.6-terra", "terra"],
+        "history": []
+      }
+    }
+  }
+}
