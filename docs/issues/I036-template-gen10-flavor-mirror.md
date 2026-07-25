@@ -39,6 +39,6 @@ model_routing:                      # spine-managed defaults; edit a value to ov
 - [ ] The top-level `effort:` key is absent after upgrade; a customized value survives as per-entry overrides
 - [ ] The retired key's prior line is recognized as machine-emitted, not flagged as an unrecognized local edit
 - [ ] A repo with a model override keeps it through the format change
-- [ ] Value parsing splits id from effort before comment stripping; a value with neither still parses
+- [ ] Value parsing strips the trailing comment FIRST, then splits id from effort (corrected 2026-07-24 to match D9 — the original ordering would let an `@` inside a comment corrupt the id; reordering the parser is a regression, not conformance); a value with neither still parses
 - [ ] Per-ticket effort annotations and escalation records are unaffected
 - [ ] `go test ./...` green
