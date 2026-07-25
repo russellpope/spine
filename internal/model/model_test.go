@@ -3,6 +3,7 @@ package model
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -434,4 +435,91 @@ func TestValidateTable_PanicsOnMissingTierDefaultEffort(t *testing.T) {
 		TierDefaultEffort: map[string]string{"primary": "high"}, // routine/mechanical/fallback missing
 		Flavors:           map[string]map[string]tableEntry{"claude": complete},
 	})
+}
+
+// I036 (D9): a mirror value parses in every emitted shape — bare id (neither
+// effort suffix nor comment), id with comment only, id with effort only, and
+// id with both — with the id and effort landing intact in each case.
+func TestResolve_MirrorValueShapes(t *testing.T) {
+	cases := []struct {
+		line, id, effort string
+	}{
+		{"  claude.primary: pinned-model", "pinned-model", "high"},
+		{"  claude.primary: pinned-model    # local pin", "pinned-model", "high"},
+		{"  claude.primary: pinned-model @ xhigh", "pinned-model", "xhigh"},
+		{"  claude.primary: pinned-model @ xhigh    # local pin", "pinned-model", "xhigh"},
+	}
+	for _, c := range cases {
+		dir := writeWorkflow(t, "model_routing:\n"+c.line+"\n")
+		entry, err := Resolve(dir, "claude", "primary")
+		if err != nil {
+			t.Fatalf("%q: %v", c.line, err)
+		}
+		if entry.ID != c.id || entry.Effort != c.effort {
+			t.Errorf("%q resolved to {%s, %s}, want {%s, %s}", c.line, entry.ID, entry.Effort, c.id, c.effort)
+		}
+	}
+}
+
+// I036 (D8/D9): MirrorValue renders the effort suffix exactly when the
+// entry's effective effort deviates from its tier default — codex primary
+// carries " @ xhigh", claude primary stays a bare id.
+func TestMirrorValue_EffortSuffixOnlyOnDeviation(t *testing.T) {
+	codex, err := Resolve("", "codex", "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := MirrorValue(codex); got != "gpt-5.6-sol @ xhigh" {
+		t.Errorf("MirrorValue(codex primary) = %q, want %q", got, "gpt-5.6-sol @ xhigh")
+	}
+	claude, err := Resolve("", "claude", "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := MirrorValue(claude); got != "claude-fable-5" {
+		t.Errorf("MirrorValue(claude primary) = %q, want %q", got, "claude-fable-5")
+	}
+}
+
+// I036 (D8): MirrorRows renders one row per (flavor, tier) of the embedded
+// table — flavors sorted, tiers in Tiers order — and every row round-trips
+// through Resolve: written to a WORKFLOW.md, each row resolves back to the
+// table's own (id, effort), so the rendered mirror and the reader can never
+// disagree on the emitted format.
+func TestMirrorRows_CoverEveryFlavorTierAndRoundTrip(t *testing.T) {
+	rows := MirrorRows()
+	if want := len(Flavors()) * len(Tiers); len(rows) != want {
+		t.Fatalf("MirrorRows() = %d rows, want %d (every flavor x tier)", len(rows), want)
+	}
+	content := "model_routing:\n"
+	for _, row := range rows {
+		content += row + "\n"
+	}
+	dir := writeWorkflow(t, content)
+	i := 0
+	for _, flavor := range Flavors() {
+		for _, tier := range Tiers {
+			key := flavor + "." + tier + ":"
+			if !strings.Contains(rows[i], key) {
+				t.Errorf("rows[%d] = %q, want key %q (flavor-sorted, tier-fixed order)", i, rows[i], key)
+			}
+			i++
+			def, err := Resolve("", flavor, tier)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Resolve(dir, flavor, tier)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ID != def.ID || got.Effort != def.Effort {
+				t.Errorf("round-trip %s.%s = {%s, %s}, want {%s, %s}", flavor, tier, got.ID, got.Effort, def.ID, def.Effort)
+			}
+			// A rendered default read back from disk reports Inherited, the
+			// provenance the refresh rule keys on.
+			if got.Provenance != Inherited {
+				t.Errorf("round-trip %s.%s provenance = %s, want %s", flavor, tier, got.Provenance, Inherited)
+			}
+		}
+	}
 }

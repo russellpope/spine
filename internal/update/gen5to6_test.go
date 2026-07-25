@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/russellpope/spine/internal/model"
 )
 
 // gen6ContentLines are the emitted-content changes gen 6 ships (I003), both
@@ -112,6 +114,9 @@ func TestGen5To6IsStampPlusDeclaredContent(t *testing.T) {
 				if isGen9ContentDiffLine(line) { // gen 9's conscious content edit; see gen8to9_test.go
 					continue
 				}
+				if isGen10ContentDiffLine(line) { // gen 10's conscious content edit; see gen9to10_test.go
+					continue
+				}
 				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
 					continue
 				}
@@ -149,17 +154,19 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"template_version: 9",
-		"primary: claude-fable-5",
-		"routine: claude-sonnet-5",
-		"mechanical: claude-haiku-4-5",
-		// I035: the fixture's inherited claude-opus-4-8 fallback is refreshed
-		// to the current table default during migration (design D6).
-		"fallback: claude-opus-5",
+		"template_version: 10",
 		"spine audit routing",
 	} {
 		if !strings.Contains(string(wf), want) {
 			t.Errorf("migrated WORKFLOW.md missing %q", want)
+		}
+	}
+	// I036: the migrated mirror is the table-rendered dotted flavor rows —
+	// including the fixture's inherited claude-opus-4-8 fallback refreshed to
+	// the current table default during migration (design D6, I035).
+	for _, row := range model.MirrorRows() {
+		if !containsLine(string(wf), row) {
+			t.Errorf("migrated WORKFLOW.md missing mirror row %q", row)
 		}
 	}
 	for _, unwanted := range []string{"security_routing", "auto"} {
@@ -171,8 +178,8 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(cl), "<!-- spine:begin v9 -->") {
-		t.Error("migrated CLAUDE.md missing v9 marker")
+	if !strings.HasPrefix(string(cl), "<!-- spine:begin v10 -->") {
+		t.Error("migrated CLAUDE.md missing v10 marker")
 	}
 	if !strings.Contains(string(cl), "primary / routine / mechanical / fallback") {
 		t.Error("migrated CLAUDE.md Model pointer missing the four-tier parenthetical")

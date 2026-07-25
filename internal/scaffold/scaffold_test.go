@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/scaffold"
 )
 
@@ -65,7 +66,7 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 9",
+	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 10",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli",
 		"## Stage cursor (consistency rule)", "<!-- spine:cursor -->"} {
 		if !strings.Contains(string(wf), want) {
@@ -97,17 +98,17 @@ func TestInitGen6DispatchContract(t *testing.T) {
 	}
 	content := string(wf)
 
+	// I036: the mirror renders every (flavor, tier) of the model table as
+	// dotted rows (design D8) — asserted via the table's own renderer so a
+	// defaults change needs no edit here. The retired effort: key's tier
+	// defaults now live in the table (D3/D16), no longer stated in prose.
+	for _, row := range model.MirrorRows() {
+		if !strings.Contains(content, row) {
+			t.Errorf("WORKFLOW.md missing mirror row %q", row)
+		}
+	}
+
 	for _, want := range []string{
-		// four tiers present in the model_routing mapping
-		"primary: claude-fable-5",
-		"routine: claude-sonnet-5",
-		"mechanical: claude-haiku-4-5",
-		// I035: the template's rendered mirror carries the model table's
-		// current fallback default.
-		"fallback: claude-opus-5",
-		// effort defaults
-		"primary=high, routine=medium, mechanical=low, fallback=high",
-		"xhigh reserved for final verification",
 		// escalation ledger grammar (exact, unspaced arrow)
 		"ESCALATION <ticket-id> <from-tier>-><to-tier> reason: <one line>",
 		"ESCALATION <ticket-id> effort <from>-><to> reason: <one line>",

@@ -9,8 +9,8 @@ import (
 )
 
 func TestVersionMatchesCurrentGeneration(t *testing.T) {
-	if got := tmpl.Version(); got != 9 {
-		t.Fatalf("Version() = %d, want 9", got)
+	if got := tmpl.Version(); got != 10 {
+		t.Fatalf("Version() = %d, want 10", got)
 	}
 }
 
@@ -83,8 +83,9 @@ func TestCurrentWorkflowIsStamped(t *testing.T) {
 	if !strings.Contains(got, "template_version: 2") {
 		t.Error("current WORKFLOW template lacks template_version stamp")
 	}
-	if !strings.Contains(got, "primary: claude-fable-5") {
-		t.Error("current WORKFLOW template lacks model_routing")
+	// I036: the mirror rows are table-rendered dotted flavor keys (D8).
+	if !strings.Contains(got, "claude.primary:") || !strings.Contains(got, "claude-fable-5") {
+		t.Error("current WORKFLOW template lacks the model_routing mirror")
 	}
 }
 

@@ -17,6 +17,31 @@ var topKeys = []string{
 
 var routingKeys = []string{"primary", "fallback", "routine", "mechanical"}
 
+func isRoutingKey(k string) bool {
+	for _, r := range routingKeys {
+		if r == k {
+			return true
+		}
+	}
+	return false
+}
+
+// dottedRoutingKey reports whether trimmed begins with a gen-10
+// "<flavor>.<tier>:" mirror key (design D8) and returns the dotted key. The
+// flavor half is open-ended data, so any dot-free non-empty token counts;
+// the tier half must be a known tier.
+func dottedRoutingKey(trimmed string) (string, bool) {
+	head, _, found := strings.Cut(trimmed, ":")
+	if !found {
+		return "", false
+	}
+	flavor, tier, dotted := strings.Cut(head, ".")
+	if !dotted || flavor == "" || strings.ContainsAny(flavor, " \t.") || !isRoutingKey(tier) {
+		return "", false
+	}
+	return head, true
+}
+
 func splitLines(s string) []string { return strings.Split(s, "\n") }
 
 // cutKey returns the value of "key: value  # comment" with comment stripped.
@@ -65,6 +90,13 @@ func ExtractKeys(content string) map[string]string {
 				for _, k := range routingKeys {
 					if v, ok := cutKey(trimmed, k); ok {
 						keys["model_routing."+k] = v
+					}
+				}
+				// gen-10 dotted "<flavor>.<tier>" mirror keys (design D8)
+				// come back as "model_routing.<flavor>.<tier>".
+				if dk, ok := dottedRoutingKey(trimmed); ok {
+					if v, has := cutKey(trimmed, dk); has {
+						keys["model_routing."+dk] = v
 					}
 				}
 				continue
@@ -123,6 +155,13 @@ func Choices(extracted map[string]string, gen, project string) (map[string]strin
 			// zero repos — and fight the resolver over the same keys.
 			continue
 		}
+		if k == "effort" || k == "model_default" {
+			// Both retire in gen 10 (design D16 + controller ruling, I036):
+			// effort migrates into per-entry overrides and model_default is
+			// checked against the resolved primary — in applyModelRouting,
+			// outside this rule for the same D7 reason as the routing keys.
+			continue
+		}
 		if defaults[k] != v {
 			choices[k] = v
 		}
@@ -171,11 +210,13 @@ func replaceValue(line, key, val string) string {
 	// Extract old value (before comment or end of line)
 	oldVal := rest
 	if i := commentIndex(rest); i >= 0 {
-		oldVal = strings.TrimRight(rest[:i], " ")
+		oldVal = rest[:i]
 	}
 
-	// If value hasn't changed, preserve the line exactly as-is
-	if oldVal == val {
+	// If value hasn't changed, preserve the line exactly as-is — including
+	// any alignment padding between key and value, which the gen-10 mirror
+	// rows carry (design D8) and which is never itself a value change.
+	if strings.TrimSpace(oldVal) == val {
 		return line
 	}
 

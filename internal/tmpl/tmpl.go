@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/templates"
 )
 
@@ -97,12 +98,17 @@ func Render(gen, name string, v Values) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("template %s/%s: %w", gen, name, err)
 	}
+	// The model_routing mirror rows come from the embedded model table, not
+	// from literals in the template (design D8, I036): a defaults change
+	// reaches init/adopt/update renders with no template edit, which is what
+	// ends the table-change-needs-template-bump coupling I035 documented.
 	r := strings.NewReplacer(
 		"{{PROJECT}}", v.Project,
 		"{{PROFILE}}", v.Profile,
 		"{{REVIEWERS}}", v.Reviewers,
 		"{{HARNESS}}", v.Harness,
 		"{{VERSION}}", strconv.Itoa(v.Version),
+		"{{MODEL_ROUTING_ROWS}}", strings.Join(model.MirrorRows(), "\n"),
 	)
 	return r.Replace(string(raw)), nil
 }

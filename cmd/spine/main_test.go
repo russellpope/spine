@@ -44,7 +44,7 @@ func TestUnknownCommand(t *testing.T) {
 
 func TestVersionCommand(t *testing.T) {
 	code, out, _ := runCmd(t, "version")
-	if code != 0 || !strings.Contains(out, "spine template generation 9") {
+	if code != 0 || !strings.Contains(out, "spine template generation 10") {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
@@ -128,7 +128,7 @@ func TestUpdateDryRunThenWrite(t *testing.T) {
 		}
 	}
 	code, out, _ = runCmd(t, "update", "--dir", dir)
-	if code != 1 || !strings.Contains(out, "+ template_version: 9") {
+	if code != 1 || !strings.Contains(out, "+ template_version: 10") {
 		t.Fatalf("dry-run code=%d out=%q", code, out)
 	}
 	// also remove a simple machine-owned file entirely, so --write must
@@ -163,10 +163,12 @@ func TestUpdateItemizesModelRefreshAndOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Regress fallback to the previous shipped default (inherited) and pin
-	// routine to a value no default ever shipped (override).
-	content := strings.Replace(string(raw), "fallback: claude-opus-5", "fallback: claude-opus-4-8", 1)
-	content = strings.Replace(content, "routine: claude-sonnet-5", "routine: local-llama-70b", 1)
+	// Regress the claude fallback to the previous shipped default (inherited)
+	// and pin the claude routine to a value no default ever shipped
+	// (override) — value-only replacements, so the dotted mirror rows'
+	// alignment padding (I036) is irrelevant.
+	content := strings.Replace(string(raw), "claude-opus-5", "claude-opus-4-8", 1)
+	content = strings.Replace(content, "claude-sonnet-5", "local-llama-70b", 1)
 	if content == string(raw) {
 		t.Fatal("could not stage fallback/routine values in scaffolded WORKFLOW.md")
 	}
@@ -178,22 +180,22 @@ func TestUpdateItemizesModelRefreshAndOverride(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("dry-run code=%d out=%q", code, out)
 	}
-	if !strings.Contains(out, "model refresh (inherited): model_routing.fallback: claude-opus-4-8 -> claude-opus-5") {
+	if !strings.Contains(out, "model refresh (inherited): model_routing.claude.fallback: claude-opus-4-8 -> claude-opus-5") {
 		t.Errorf("dry-run plan missing itemized refresh, out=%q", out)
 	}
-	if !strings.Contains(out, "model override preserved: model_routing.routine: local-llama-70b") {
+	if !strings.Contains(out, "model override preserved: model_routing.claude.routine: local-llama-70b") {
 		t.Errorf("dry-run plan missing override report, out=%q", out)
 	}
 
 	code, out, _ = runCmd(t, "update", "--dir", dir, "--write")
-	if code != 0 || !strings.Contains(out, "model refresh (inherited): model_routing.fallback: claude-opus-4-8 -> claude-opus-5") {
+	if code != 0 || !strings.Contains(out, "model refresh (inherited): model_routing.claude.fallback: claude-opus-4-8 -> claude-opus-5") {
 		t.Fatalf("write code=%d out=%q", code, out)
 	}
 	got, err := os.ReadFile(wfPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "fallback: claude-opus-5") || strings.Contains(string(got), "claude-opus-4-8") {
+	if !strings.Contains(string(got), "claude-opus-5") || strings.Contains(string(got), "claude-opus-4-8") {
 		t.Errorf("written WORKFLOW.md not refreshed:\n%s", got)
 	}
 	if !strings.Contains(string(got), "routine: local-llama-70b") {
@@ -394,14 +396,14 @@ func TestAdoptDryRunShowsDiffs(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("want pending exit 1, got %d out=%q", code, out)
 	}
-	if !strings.Contains(out, "+ template_version: 9") {
+	if !strings.Contains(out, "+ template_version: 10") {
 		t.Errorf("dry-run text output missing diff content: out=%q", out)
 	}
 	// --json must never carry the diff text as loose prose in the payload
 	// stream; the JSON test above already checks the stream is pure JSON,
 	// this just confirms diffs are a text-mode-only addition.
 	_, jsonOut, _ := runCmd(t, "adopt", "--dir", dir, "--json")
-	if strings.Contains(jsonOut, "+ template_version: 9\n") {
+	if strings.Contains(jsonOut, "+ template_version: 10\n") {
 		t.Errorf("json output should not contain raw diff text: out=%q", jsonOut)
 	}
 }

@@ -43,19 +43,21 @@ func TestHbmviewUnstranding(t *testing.T) {
 		t.Fatal(err)
 	}
 	wf, _ := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
-	for _, want := range []string{"# Workflow — hbmview", "profile: rust", "template_version: 9",
-		"primary: claude-fable-5", "model_default: claude-fable-5",
+	for _, want := range []string{"# Workflow — hbmview", "profile: rust", "template_version: 10",
+		"claude.primary:", "claude-fable-5",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli",
 		"## Execution modes"} {
 		if !strings.Contains(string(wf), want) {
 			t.Errorf("WORKFLOW.md missing %q", want)
 		}
 	}
-	if strings.Contains(string(wf), "model_default: claude-opus-4-8") {
-		t.Error("stale model_default survived")
+	// I036: hbmview's gen0 model_default (claude-opus-4-8) is an inherited
+	// default of the retired key — retired quietly, not flagged or kept.
+	if strings.Contains(string(wf), "model_default") {
+		t.Error("retired model_default key survived unstranding")
 	}
 	cl, _ := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-	if !strings.HasPrefix(string(cl), "<!-- spine:begin v9 -->") ||
+	if !strings.HasPrefix(string(cl), "<!-- spine:begin v10 -->") ||
 		strings.Count(string(cl), "# hbmview") != 1 {
 		t.Errorf("CLAUDE.md claim wrong:\n%s", cl)
 	}

@@ -267,6 +267,18 @@ func planWorkflow(opts Options) (FileReport, tmpl.Values, string, error) {
 	}
 	report.ModelRefreshes = refreshes
 	report.ModelOverrides = modelOverrides
+	// Gen-10 retirement pass (D16): customized effort:/model_default: lines
+	// are machine-owned retirement work — migrated or checked above — not
+	// local edits; what remains surfaced is only a model_default value that
+	// genuinely diverges from the resolved primary (controller ruling).
+	report.Unrecognized = dropRetiredKeyLines(report.Unrecognized)
+	divergence, err := modelDefaultDivergence(opts.Dir, gen, keys)
+	if err != nil {
+		return report, tmpl.Values{}, "", err
+	}
+	if divergence != "" {
+		report.Unrecognized = append(report.Unrecognized, divergence)
+	}
 	if d := Diff(report.Path, old, newContent); d != "" {
 		report.State = Pending
 		report.Diff = d
@@ -412,6 +424,25 @@ func planSimple(dir, gen, tmplName, relPath string, inGen0 bool, vals tmpl.Value
 	return report, nil
 }
 
+// dropRetiredKeyLines removes customized top-level effort: and
+// model_default: lines from the unrecognized set: both keys retire in gen 10
+// (design D16 + controller ruling, I036) and their values are handled by
+// applyModelRouting (a customized effort migrates into per-entry overrides)
+// and modelDefaultDivergence (a deliberate divergent model_default is
+// surfaced), so the raw lines are machine-owned retirement work, not local
+// edits. Top-level only: the indented per-ticket/cursor-grammar effort:
+// lines (design D17) never match the column-0 prefix.
+func dropRetiredKeyLines(unrec []string) []string {
+	var out []string
+	for _, l := range unrec {
+		if strings.HasPrefix(l, "effort:") || strings.HasPrefix(l, "model_default:") {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
 // supersededLines are lines a prior generation emitted that the current one
 // no longer does. Unrecognized-detection renders only gen0 and current, so
 // without this list a machine-emitted line changed by a content-bearing bump
@@ -463,6 +494,24 @@ var supersededLines = map[string]bool{
 	// the doctor-advises half of the I014 backstop alongside the
 	// already-stated audit-stages-blocks half.
 	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone.": true,
+
+	// gen 6–9 WORKFLOW.md model_routing block, superseded in gen 10 (I036,
+	// design D8/D16) by the flavor-axis dotted mirror rendered from the model
+	// table: the uncommented block header, the four bare claude tier rows
+	// (both fallback values gen 9 ever emitted — pre- and post-I035), and the
+	// retired top-level effort: and model_default: keys. The retired keys'
+	// emitted spellings are listed so they read as machine-emitted, never as
+	// local edits (I036 AC); customized values of the retired keys are
+	// handled by planWorkflow's retirement pass, not by this set.
+	"model_routing:": true,
+	"  primary: claude-fable-5          # default thinker: design, judgment, orchestration, final review":  true,
+	"  routine: claude-sonnet-5         # multi-step mechanical subagent roles":                            true,
+	"  mechanical: claude-haiku-4-5     # verbatim plan-transcription + single-file mechanical fixes ONLY": true,
+	"  fallback: claude-opus-4-8        # primary-refused or security-framed work":                         true,
+	"  fallback: claude-opus-5          # primary-refused or security-framed work":                         true,
+	"effort: high                       # tier default: primary=high, routine=medium, mechanical=low, fallback=high; xhigh reserved for final verification and security-critical passes; per-ticket effort: only on deviation": true,
+	"model_default: claude-fable-5      # swappable; re-evaluate on major model/platform releases":                                                                                                                             true,
+	"model_default: claude-opus-4-8     # swappable; re-evaluate on major model/platform releases":                                                                                                                             true,
 }
 
 // unrecognizedLines returns non-blank lines of got that expected does not
@@ -490,7 +539,16 @@ func unrecognizedLines(got, expected, current string) []string {
 	want := map[string]bool{}
 	sigs := map[string]bool{}
 	addSig := func(l string) {
-		if k, sig, ok := keyLineSignature(l); ok && currentKeys[k] {
+		k, sig, ok := keyLineSignature(l)
+		if !ok {
+			return
+		}
+		// A bare tier key is carry-forwardable exactly when the current
+		// generation renders its claude-flavored dotted successor: the
+		// gen ≤9 bare rows are claude rows by definition (the transitional
+		// affordance in internal/model), and applyModelRouting writes their
+		// values into the dotted mirror rather than dropping them.
+		if currentKeys[k] || (isRoutingKey(k) && currentKeys["claude."+k]) {
 			sigs[sig] = true
 		}
 	}
@@ -517,12 +575,12 @@ func unrecognizedLines(got, expected, current string) []string {
 }
 
 // keyLineSignature is the identifying signature of a "key: value  #
-// comment" line — a top-level key or a two-space-indented model_routing
-// sub-key — with the value dropped and the comment kept verbatim, plus the
-// bare key so callers can gate on which keys the current generation still
-// renders. ok is false for anything that isn't a recognized key: value
-// line (prose, headers, unknown keys), which keeps exact-text comparison
-// for those.
+// comment" line — a top-level key, a two-space-indented model_routing
+// sub-key, or a gen-10 dotted "<flavor>.<tier>" mirror key — with the value
+// dropped and the comment kept verbatim, plus the bare key so callers can
+// gate on which keys the current generation still renders. ok is false for
+// anything that isn't a recognized key: value line (prose, headers, unknown
+// keys), which keeps exact-text comparison for those.
 func keyLineSignature(line string) (key, sig string, ok bool) {
 	trimmed := strings.TrimSpace(line)
 	for _, k := range topKeys {
@@ -534,6 +592,9 @@ func keyLineSignature(line string) (key, sig string, ok bool) {
 		if _, has := cutKey(trimmed, k); has {
 			return k, k + "\x00" + commentOf(trimmed, k), true
 		}
+	}
+	if dk, has := dottedRoutingKey(trimmed); has {
+		return dk, dk + "\x00" + commentOf(trimmed, dk), true
 	}
 	return "", "", false
 }

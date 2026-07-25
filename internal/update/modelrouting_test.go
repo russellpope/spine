@@ -73,13 +73,14 @@ func TestInheritedBareFallbackRefreshedAndItemized(t *testing.T) {
 		t.Fatalf("ModelRefreshes = %+v, want exactly the fallback refresh", wf.ModelRefreshes)
 	}
 	m := wf.ModelRefreshes[0]
-	if m.Key != "model_routing.fallback" || m.Old != "claude-opus-4-8" || m.New != "claude-opus-5" {
-		t.Errorf("refresh item = %+v, want {model_routing.fallback claude-opus-4-8 claude-opus-5}", m)
+	// I036: refreshes itemize under the flavor-qualified dotted key.
+	if m.Key != "model_routing.claude.fallback" || m.Old != "claude-opus-4-8" || m.New != "claude-opus-5" {
+		t.Errorf("refresh item = %+v, want {model_routing.claude.fallback claude-opus-4-8 claude-opus-5}", m)
 	}
 	if len(wf.ModelOverrides) != 0 {
 		t.Errorf("pristine fixture reported overrides: %+v", wf.ModelOverrides)
 	}
-	if !strings.Contains(wf.Diff, "fallback: claude-opus-5") {
+	if !strings.Contains(wf.Diff, "claude.fallback:   claude-opus-5") {
 		t.Errorf("diff does not carry the refreshed value:\n%s", wf.Diff)
 	}
 
@@ -90,7 +91,7 @@ func TestInheritedBareFallbackRefreshedAndItemized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "fallback: claude-opus-5") {
+	if !strings.Contains(string(got), "claude.fallback:   claude-opus-5") {
 		t.Error("written file does not carry the current fallback default")
 	}
 	if strings.Contains(string(got), "claude-opus-4-8") {
@@ -119,7 +120,7 @@ func TestOverrideBareFallbackPreservedAndReported(t *testing.T) {
 	if len(wf.ModelRefreshes) != 0 {
 		t.Errorf("override wrongly scheduled for refresh: %+v", wf.ModelRefreshes)
 	}
-	if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Key != "model_routing.fallback" ||
+	if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Key != "model_routing.claude.fallback" ||
 		wf.ModelOverrides[0].Value != "claude-opus-3-pinned" {
 		t.Errorf("ModelOverrides = %+v, want the pinned fallback reported", wf.ModelOverrides)
 	}
@@ -131,10 +132,10 @@ func TestOverrideBareFallbackPreservedAndReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "fallback: claude-opus-3-pinned") {
+	if !strings.Contains(string(got), "claude.fallback: claude-opus-3-pinned") {
 		t.Error("deliberate override did not survive the update")
 	}
-	if strings.Contains(string(got), "fallback: claude-opus-5") {
+	if strings.Contains(string(got), "claude-opus-5") {
 		t.Error("override was clobbered by the current default")
 	}
 }
@@ -165,8 +166,11 @@ func TestRefreshWritesNothingWithoutWriteFlag(t *testing.T) {
 // trap), while non-model keys keep the unchanged choice-vs-default rule.
 func TestChoicesExcludesModelRoutingKeys(t *testing.T) {
 	extracted := ExtractKeys(gen0Hbmview)
-	extracted["model_routing.fallback"] = "some-strange-value" // differs from every default
-	extracted["functional_harness"] = "rest"                   // real non-model choice (rust default is cli)
+	extracted["model_routing.fallback"] = "some-strange-value"     // differs from every default
+	extracted["model_routing.claude.fallback"] = "another-strange" // gen-10 dotted spelling
+	extracted["effort"] = "xhigh"                                  // retired key, customized (D16)
+	extracted["model_default"] = "some-strange-value"              // retired key, customized (I036 ruling)
+	extracted["functional_harness"] = "rest"                       // real non-model choice (rust default is cli)
 	choices, err := Choices(extracted, "gen0", "hbmview")
 	if err != nil {
 		t.Fatal(err)
@@ -174,6 +178,9 @@ func TestChoicesExcludesModelRoutingKeys(t *testing.T) {
 	for k := range choices {
 		if strings.HasPrefix(k, "model_routing.") {
 			t.Errorf("model key %q classified by the choice-vs-default rule", k)
+		}
+		if k == "effort" || k == "model_default" {
+			t.Errorf("retired key %q classified by the choice-vs-default rule", k)
 		}
 	}
 	if choices["functional_harness"] != "rest" {

@@ -251,6 +251,49 @@ func everShipped(def tableEntry, tierDefaultEffort, id, effort string) bool {
 	return false
 }
 
+// MirrorValue renders a resolved entry as the value half of a gen-10 mirror
+// row (design D9): the model id, followed by " @ <effort>" only when the
+// entry's effective effort deviates from its tier's default. An effort equal
+// to the tier default is omitted so the common case stays a bare id and the
+// suffix always signals a real deviation.
+func MirrorValue(e Entry) string {
+	if e.Effort != "" && e.Effort != defaults.TierDefaultEffort[e.Tier] {
+		return e.ID + " @ " + e.Effort
+	}
+	return e.ID
+}
+
+// MirrorRows renders the embedded defaults as the gen-10 WORKFLOW.md mirror
+// rows (design D8): one two-space-indented "<flavor>.<tier>: <value>" line
+// per entry, flavors sorted, tiers in Tiers order, values column-aligned.
+// Rendered from the table — never from literals in a template — so a
+// defaults change propagates to init/update with no template edit. Embedded
+// defaults only: no repo is consulted.
+func MirrorRows() []string {
+	type row struct{ key, val string }
+	var rows []row
+	width := 0
+	for _, flavor := range flavorsOf(defaults) {
+		for _, tier := range Tiers {
+			def := defaults.Flavors[flavor][tier]
+			e := Entry{Flavor: flavor, Tier: tier, ID: def.ID, Effort: def.Effort}
+			if e.Effort == "" {
+				e.Effort = defaults.TierDefaultEffort[tier]
+			}
+			k := flavor + "." + tier + ":"
+			if len(k) > width {
+				width = len(k)
+			}
+			rows = append(rows, row{k, MirrorValue(e)})
+		}
+	}
+	lines := make([]string, 0, len(rows))
+	for _, r := range rows {
+		lines = append(lines, "  "+r.key+strings.Repeat(" ", width-len(r.key)+1)+r.val)
+	}
+	return lines
+}
+
 func flavorsOf(t table) []string {
 	out := make([]string, 0, len(t.Flavors))
 	for f := range t.Flavors {

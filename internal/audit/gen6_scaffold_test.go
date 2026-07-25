@@ -4,33 +4,44 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/russellpope/spine/internal/scaffold"
 )
 
-// Proof (I003): the gen-6 model_routing block that scaffold.Init actually
-// renders parses with this package's WORKFLOW.md reader exactly as the
-// supplement's "block shape" note requires — model_routing: at column 0
-// plus two-space-indented `key: value  # comment` lines — and resolves to
-// all four tiers at their pinned ids, with no warnings.
-func TestGen6ScaffoldModelRoutingParses(t *testing.T) {
+// Proof (I003, format frozen at gen 9): the bare-tier model_routing block
+// every gen 6–9 repo carries on disk — the format the fleet still runs until
+// the I039 sweep — parses with this package's WORKFLOW.md reader exactly as
+// the supplement's "block shape" note requires: model_routing: at column 0
+// plus two-space-indented `key: value  # comment` lines, all four tiers, no
+// warnings. Inline fixture rather than scaffold.Init because gen 10's
+// scaffold no longer renders this format (see the gen-10 test below).
+func TestGen9BareTierModelRoutingParses(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := scaffold.Init(dir, "go-service", "proof"); err != nil {
+	wf := `# Workflow — proof
+
+profile: go-service
+template_version: 9
+model_routing:
+  primary: claude-fable-5          # default thinker: design, judgment, orchestration, final review
+  routine: claude-sonnet-5         # multi-step mechanical subagent roles
+  mechanical: claude-haiku-4-5     # verbatim plan-transcription + single-file mechanical fixes ONLY
+  fallback: claude-opus-4-8        # primary-refused or security-framed work
+`
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte(wf), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var warnings []string
 	mapping := readMapping(filepath.Join(dir, "WORKFLOW.md"), &warnings)
 	if len(warnings) != 0 {
-		t.Errorf("unexpected warnings reading the gen-6 model_routing block: %v", warnings)
+		t.Errorf("unexpected warnings reading the gen-9 model_routing block: %v", warnings)
 	}
 	want := map[string]string{
 		"primary":    "claude-fable-5",
 		"routine":    "claude-sonnet-5",
 		"mechanical": "claude-haiku-4-5",
-		// I035: the rendered mirror carries the model table's current
-		// fallback default.
-		"fallback": "claude-opus-5",
+		"fallback":   "claude-opus-4-8",
 	}
 	if len(mapping) != len(want) {
 		t.Fatalf("mapping = %v, want exactly the four tiers %v", mapping, want)
@@ -39,6 +50,36 @@ func TestGen6ScaffoldModelRoutingParses(t *testing.T) {
 		if mapping[tier] != id {
 			t.Errorf("mapping[%q] = %q, want %q", tier, mapping[tier], id)
 		}
+	}
+}
+
+// I036 transition state (design D8, resolved by I037): the gen-10 scaffold
+// renders the dotted flavor-axis mirror, which this package's pre-I037
+// bare-tier reader deliberately cannot parse — the mapping comes back empty
+// and the existing "no tier mapping found" warning fires. This is the loud,
+// obviously-broken failure mode the dotted syntax was chosen for (spec user
+// story 18); the silent alternative (nested blocks misparsed as bare tiers,
+// last flavor winning) is the regression this test guards against. I037
+// replaces readMapping with the shared resolver and rewrites this
+// expectation.
+func TestGen10ScaffoldMirrorFailsLoudlyUntilAuditConsolidation(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "go-service", "proof"); err != nil {
+		t.Fatal(err)
+	}
+	var warnings []string
+	mapping := readMapping(filepath.Join(dir, "WORKFLOW.md"), &warnings)
+	if len(mapping) != 0 {
+		t.Errorf("mapping = %v, want empty — a bare-tier reader must not half-parse the dotted mirror", mapping)
+	}
+	loud := false
+	for _, w := range warnings {
+		if strings.Contains(w, "no model_routing tier mapping found") {
+			loud = true
+		}
+	}
+	if !loud {
+		t.Errorf("warnings = %v, want the loud no-mapping warning", warnings)
 	}
 }
 
