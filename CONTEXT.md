@@ -22,6 +22,12 @@ declares exactly one.
 
 ## Model routing
 
+- **flavor** — which agent runtime executes work: **claude** or **codex**. The
+  second axis of the model table, orthogonal to tier. Artifacts never name a
+  flavor; the dispatcher supplies it, because the same ticket may be executed
+  by either. Distinct from **functional harness** (cli/rest/framebuffer),
+  which is about how a project is tested, not what runs the agent. Term
+  adopted from the deepthought glossary 2026-07-24.
 - **model tier** — a semantic role name, deliberately provider-agnostic:
   - **primary** — the default thinker: design, judgment, orchestration,
     final review.
@@ -32,10 +38,19 @@ declares exactly one.
     already contains the code).
   - **fallback** — where primary-refused or pre-flagged dual-use/security
     work runs.
-  Artifacts (plans, tickets) reference tiers, never model ids; the tier→id
-  mapping lives in each repo's WORKFLOW.md `model_routing` so the estate can
-  remap (new model families, local models, other providers) without
-  touching plans (decided 2026-07-09).
+  Artifacts (plans, tickets) reference tiers, never model ids (decided
+  2026-07-09, unchanged). The mapping itself is keyed by **(flavor, tier)**
+  and resolves in spine; each repo's WORKFLOW.md carries a **mirror** of it
+  so the estate can still remap per repo (revised 2026-07-24, ADR 0011).
+- **model table** — the estate's `(flavor, tier)` → model id + optional
+  effort mapping. Spine ships its defaults and remembers every default it has
+  ever shipped, which is what makes an inherited value distinguishable from a
+  deliberate override.
+- **mirror** — the rendered copy of the resolved model table in a repo's
+  WORKFLOW.md, marked spine-managed. Read by humans, not by dispatch:
+  authoritative only where a value has been edited to differ from a shipped
+  default. A value matching a shipped default is **inherited** and refreshed
+  automatically; any other value is an **override** and is preserved.
 - **reviewer floor** (decided 2026-07-09) — a task's reviewer is never a
   lower tier than its implementer; plan-time risk triggers (cross-task
   integration, concurrency/subtle state, security surfaces, plan-flagged
@@ -67,10 +82,15 @@ declares exactly one.
   push-notified). Never described as "auto" — the orchestrator is the
   mechanism.
 - **effort routing** (decided 2026-07-09) — effort follows the tier's
-  default (primary=high, routine=medium, mechanical=low, fallback=high;
-  xhigh reserved for final verification and security-critical passes)
+  default (primary=high, routine=medium, mechanical=low, fallback=high)
   (amended 2026-07-10, final review); per-ticket overrides follow the
-  escalation rule.
+  escalation rule. A model-table entry may carry its own effort, overriding
+  the tier default for that (flavor, tier) — the tier's default effort does
+  not always produce the expected behavior from a given model. Resolution
+  always yields a determinate effort; an entry that omits one inherits the
+  tier default rather than deferring to a runtime's own setting. "xhigh
+  reserved for final verification and security-critical passes" is guidance,
+  not a gate (revised 2026-07-24).
 - **routing audit** (decided 2026-07-09) — deterministic post-build diff of
   declared tier annotations vs actual models in the transcript, per task
   (`spine audit routing`). Required at the verify stage: reasoned

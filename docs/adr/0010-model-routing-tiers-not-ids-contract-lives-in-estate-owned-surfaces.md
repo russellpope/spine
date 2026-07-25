@@ -1,7 +1,7 @@
 ---
 id: "0010"
 title: "Model routing: tiers not ids, contract lives in estate-owned surfaces"
-status: Accepted
+status: Superseded by 0011
 date: 2026-07-10
 ---
 
