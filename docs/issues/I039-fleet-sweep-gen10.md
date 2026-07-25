@@ -22,7 +22,7 @@ After the sweep, a routing audit runs against a repo with real transcripts to co
 
 ## Acceptance criteria
 
-- [ ] Every scaffolded repo reports generation 10; none left behind
+- [ ] Every scaffolded primary repo reports generation 10; none left behind (worktrees are not distinct scaffold instances — they inherit through their parents' merge/rebase path; amended 2026-07-25 per I039 review requirements-attack)
 - [ ] Each repo's diff reviewed before write; any refresh of a suspected deliberate override raised rather than applied
 - [ ] Repos with genuine model overrides retain them
 - [ ] A routing audit against real transcripts resolves tiers correctly and reports no new unmapped dispatches
