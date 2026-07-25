@@ -2,7 +2,7 @@
 id: I033
 title: Model table + flavor-aware resolver
 severity: med
-status: open
+status: fixed
 affects: [models]
 blocked-by: []
 execution-mode: subagent-driven

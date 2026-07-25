@@ -2,7 +2,7 @@
 id: I039
 title: Fleet sweep — all repos to gen 10
 severity: low
-status: open
+status: fixed
 affects: [fleet]
 blocked-by: [I036, I037]
 execution-mode: subagent-driven

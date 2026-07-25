@@ -2,7 +2,7 @@
 id: I036
 title: Template gen 10 — flavor mirror, effort key retired
 severity: high
-status: open
+status: fixed
 affects: [tmpl, update, templates]
 blocked-by: [I035]
 execution-mode: subagent-driven

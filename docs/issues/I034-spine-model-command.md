@@ -2,7 +2,7 @@
 id: I034
 title: spine model command
 severity: med
-status: open
+status: fixed
 affects: [cmd, models]
 blocked-by: [I033]
 execution-mode: subagent-driven

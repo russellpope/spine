@@ -2,7 +2,7 @@
 id: I035
 title: Refresh rule — model keys leave the choice-vs-default path
 severity: high
-status: open
+status: fixed
 affects: [update, models]
 blocked-by: [I033]
 execution-mode: subagent-driven

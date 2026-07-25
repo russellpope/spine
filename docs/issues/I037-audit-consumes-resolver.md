@@ -2,7 +2,7 @@
 id: I037
 title: Routing audit consumes the resolver — flavor-scoped, aliased, version-gated
 severity: high
-status: open
+status: fixed
 affects: [audit, models]
 blocked-by: [I033, I036]
 execution-mode: subagent-driven

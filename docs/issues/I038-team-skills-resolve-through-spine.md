@@ -2,7 +2,7 @@
 id: I038
 title: Team skills resolve models through spine (deepthought tree)
 severity: high
-status: open
+status: fixed
 affects: [skills, deepthought]
 blocked-by: [I034]
 execution-mode: subagent-driven
