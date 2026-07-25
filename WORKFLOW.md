@@ -1,17 +1,19 @@
 # Workflow — spine
 
 profile: library-cli
-template_version: 9
+template_version: 10
 reviewers: [go-reviewer, python-reviewer]
 functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
-model_routing:
-  primary: claude-fable-5          # default thinker: design, judgment, orchestration, final review
-  routine: claude-sonnet-5         # multi-step mechanical subagent roles
-  mechanical: claude-haiku-4-5     # verbatim plan-transcription + single-file mechanical fixes ONLY
-  fallback: claude-opus-4-8        # primary-refused or security-framed work
-effort: high                       # tier default: primary=high, routine=medium, mechanical=low, fallback=high; xhigh reserved for final verification and security-critical passes; per-ticket effort: only on deviation
-model_default: claude-fable-5      # swappable; re-evaluate on major model/platform releases
+model_routing:                     # spine-managed defaults; edit a value to override
+  claude.primary:    claude-fable-5
+  claude.routine:    claude-sonnet-5
+  claude.mechanical: claude-haiku-4-5
+  claude.fallback:   claude-opus-5
+  codex.primary:     gpt-5.6-sol @ xhigh
+  codex.routine:     gpt-5.6-terra
+  codex.mechanical:  gpt-5.6-luna
+  codex.fallback:    gpt-5.6-terra @ xhigh
 stages: [grill, prd, issues, implement, functional-test, review, verify, ship, deploy, docs, handoff]
 
 See `docs/harness-interface.md` for the functional-test harness contract.
