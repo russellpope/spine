@@ -251,6 +251,15 @@ func everShipped(def tableEntry, tierDefaultEffort, id, effort string) bool {
 	return false
 }
 
+// TierDefaultEffort returns the effort a tier resolves to when an entry
+// omits one (design D3) — the same table MirrorValue canonicalizes against.
+// Exposed so the update path's effort migration (D16) can skip minting a
+// per-entry override that only restates the tier default, which the mirror
+// rendering would canonicalize away on the next run.
+func TierDefaultEffort(tier string) string {
+	return defaults.TierDefaultEffort[tier]
+}
+
 // MirrorValue renders a resolved entry as the value half of a gen-10 mirror
 // row (design D9): the model id, followed by " @ <effort>" only when the
 // entry's effective effort deviates from its tier's default. An effort equal

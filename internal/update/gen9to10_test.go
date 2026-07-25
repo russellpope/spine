@@ -219,6 +219,9 @@ func TestGen9To10CustomEffortMigratesToPerEntryOverrides(t *testing.T) {
 	migrated := map[string]string{}
 	for _, o := range wf.ModelOverrides {
 		migrated[o.Key] = o.Value
+		if !o.Migrated {
+			t.Errorf("ModelOverrides[%s].Migrated = false on the migration run, want true (review Important 2)", o.Key)
+		}
 	}
 	for _, tier := range model.Tiers {
 		key := "model_routing.claude." + tier
@@ -269,6 +272,74 @@ func TestGen9To10CustomEffortMigratesToPerEntryOverrides(t *testing.T) {
 	}
 	if len(wf.ModelOverrides) != 4 {
 		t.Errorf("second pass ModelOverrides = %+v, want the four migrated claude entries reported", wf.ModelOverrides)
+	}
+	for _, o := range wf.ModelOverrides {
+		if o.Migrated {
+			t.Errorf("second pass ModelOverrides[%s].Migrated = true, want false — the override now pre-exists on disk", o.Key)
+		}
+	}
+}
+
+// Review Important 1: a customized effort: equal to some tier's DEFAULT
+// effort must not mint an override on that tier — MirrorValue canonicalizes
+// an (id, tier-default-effort) pair back to the bare id, so a minted
+// " @ medium" on claude.routine would be silently stripped, without a
+// refresh item, on the very next run. effort: medium deviates for
+// primary/mechanical/fallback (defaults high/low/high) and equals routine's
+// default: exactly three overrides mint, routine stays a bare inherited
+// row, and write-then-plan is idempotent.
+func TestGen9To10EffortEqualToTierDefaultMintsNoOverride(t *testing.T) {
+	dir := stageGen9Repo(t, func(content string) string {
+		return mustReplace(t, content,
+			"effort: high                       # tier default:",
+			"effort: medium                       # tier default:")
+	})
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := report(t, reports, "WORKFLOW.md")
+	if wf.State != Pending || len(wf.Unrecognized) > 0 {
+		t.Fatalf("customized effort must migrate, not skip: state=%v unrec=%v", wf.State, wf.Unrecognized)
+	}
+	minted := map[string]string{}
+	for _, o := range wf.ModelOverrides {
+		minted[o.Key] = o.Value
+	}
+	if len(minted) != 3 {
+		t.Errorf("ModelOverrides = %+v, want exactly primary/mechanical/fallback minted", wf.ModelOverrides)
+	}
+	if v, ok := minted["model_routing.claude.routine"]; ok {
+		t.Errorf("claude.routine minted %q though medium is its tier default", v)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotStr := string(got)
+	for _, want := range []string{
+		"claude.primary: claude-fable-5 @ medium",
+		"claude.mechanical: claude-haiku-4-5 @ medium",
+		"claude.fallback: claude-opus-5 @ medium",
+	} {
+		if !strings.Contains(gotStr, want) {
+			t.Errorf("migrated WORKFLOW.md missing per-entry effort override %q", want)
+		}
+	}
+	if strings.Contains(gotStr, "claude.routine: claude-sonnet-5 @") {
+		t.Error("claude.routine carries an effort suffix equal to its tier default")
+	}
+	// Idempotence: plan again — the second plan must be clean with no diff.
+	reports, err = Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf = report(t, reports, "WORKFLOW.md")
+	if wf.State != UpToDate || wf.Diff != "" {
+		t.Errorf("second plan not clean: state=%v diff:\n%s", wf.State, wf.Diff)
+	}
+	if len(wf.ModelOverrides) != 3 {
+		t.Errorf("second pass ModelOverrides = %+v, want the same three entries — no silent strip between runs", wf.ModelOverrides)
 	}
 }
 

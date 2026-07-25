@@ -24,10 +24,14 @@ type ModelRefresh struct {
 // ModelOverride is one deliberate per-repo model choice (D6): a value
 // matching no default the entry ever shipped, preserved untouched — or, on
 // the gen-10 migration run, a per-entry effort override newly minted from a
-// customized top-level effort: key (D16).
+// customized top-level effort: key (D16). Migrated distinguishes the two so
+// the plan never announces a just-created override as "preserved": the
+// itemized lines are the net a sweep reviewer trusts, and a net that
+// mislabels what it reports is worse than no net.
 type ModelOverride struct {
-	Key   string
-	Value string
+	Key      string
+	Value    string
+	Migrated bool
 }
 
 // effortDefault is the only value the retired top-level effort: key ever
@@ -85,13 +89,18 @@ func applyModelRouting(repoDir, content string, extracted map[string]string) (st
 					refreshes = append(refreshes, ModelRefresh{Key: key, Old: model.MirrorValue(live), New: model.MirrorValue(def)})
 				}
 			}
+			// Skip the suffix when the migrated effort IS this tier's
+			// default: MirrorValue canonicalizes such a pair back to the
+			// bare id, so minting it would strip silently — without a
+			// refresh item — on the very next run (task review Important 1).
 			migrated := false
-			if effortMigration != "" && flavor == "claude" && !strings.Contains(target, "@") {
+			if effortMigration != "" && flavor == "claude" &&
+				effortMigration != model.TierDefaultEffort(tier) && !strings.Contains(target, "@") {
 				target += " @ " + effortMigration
 				migrated = true
 			}
 			if live.Provenance == model.Override || migrated {
-				overrides = append(overrides, ModelOverride{Key: key, Value: target})
+				overrides = append(overrides, ModelOverride{Key: key, Value: target, Migrated: migrated})
 			}
 			content = setKey(content, key, target)
 		}

@@ -203,6 +203,41 @@ func TestUpdateItemizesModelRefreshAndOverride(t *testing.T) {
 	}
 }
 
+// I036 review Important 2: an override minted by the effort: migration is
+// announced as created, never as "preserved" — the itemized lines are the
+// net a sweep reviewer trusts, so a just-created value must not read as
+// pre-existing. A genuinely pre-existing override keeps the preserved
+// wording (asserted by TestUpdateItemizesModelRefreshAndOverride above).
+func TestUpdateAnnouncesMigratedEffortOverridesAsCreated(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	wfPath := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(wfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reintroduce a customized retired effort: key above stages:, gen-9 style.
+	content := strings.Replace(string(raw), "\nstages:", "\neffort: xhigh\nstages:", 1)
+	if content == string(raw) {
+		t.Fatal("could not stage a top-level effort: key in scaffolded WORKFLOW.md")
+	}
+	if err := os.WriteFile(wfPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCmd(t, "update", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("dry-run code=%d out=%q", code, out)
+	}
+	if !strings.Contains(out, "model override created (migrated from retired effort:): model_routing.claude.primary: claude-fable-5 @ xhigh") {
+		t.Errorf("plan missing created-wording for the minted override, out=%q", out)
+	}
+	if strings.Contains(out, "model override preserved:") {
+		t.Errorf("a migration-minted override announced as preserved, out=%q", out)
+	}
+}
+
 func TestUpdateMissingWorkflowExits2(t *testing.T) {
 	code, _, errs := runCmd(t, "update", "--dir", t.TempDir())
 	if code != 2 || !strings.Contains(errs, "spine init") {

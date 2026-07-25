@@ -135,14 +135,21 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	outstanding := 0
 	// itemized model-table results (design D6): each inherited refresh names
 	// old and new value so a model change is never buried in template prose
-	// churn; preserved overrides are reported so a pinned model is visible.
-	// Skipped files print neither — nothing about them is applied.
+	// churn; preserved overrides are reported so a pinned model is visible,
+	// and overrides this migration mints from a retired effort: key say so —
+	// "preserved" would misstate what the plan is about to create (I036
+	// review Important 2). Skipped files print neither — nothing about them
+	// is applied.
 	modelNotes := func(r update.FileReport) {
 		for _, m := range r.ModelRefreshes {
 			fmt.Fprintf(stdout, "model refresh (inherited): %s: %s -> %s\n", m.Key, m.Old, m.New)
 		}
 		for _, o := range r.ModelOverrides {
-			fmt.Fprintf(stdout, "model override preserved: %s: %s\n", o.Key, o.Value)
+			if o.Migrated {
+				fmt.Fprintf(stdout, "model override created (migrated from retired effort:): %s: %s\n", o.Key, o.Value)
+			} else {
+				fmt.Fprintf(stdout, "model override preserved: %s: %s\n", o.Key, o.Value)
+			}
 		}
 	}
 	for _, r := range reports {
