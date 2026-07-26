@@ -10,7 +10,7 @@ This document carries what the sweep needs and the reasoning that would be expen
 effort: flavor-model-table-i033-i039
 prd: docs/specs/2026-07-24-flavor-model-table-design.md
 tickets: I033-I039
-stages: grill[x] prd[x] issues[x] implement[x] functional-test[x] review[x] verify[x] ship[<] deploy[ ] docs[ ] handoff[ ]
+stages: grill[x] prd[x] issues[x] implement[x] functional-test[x] review[x] verify[x] ship[x] deploy[x] docs[x] handoff[x]
 <!-- /spine:cursor -->
 
 `go run ./cmd/spine cursor` reports `derivation: clean` as of this writing. The literal marker block above
