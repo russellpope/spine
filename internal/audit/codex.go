@@ -563,7 +563,7 @@ func (p *gitCommitProber) knows(hash string) bool {
 // tree together, mirroring what --session does for a claude session and
 // its subagents. A zero since and empty sessionID (every pre-I047 caller)
 // filter nothing.
-func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, warnings *[]string) ([]dispatch, []subagent, []codexNearMiss) {
+func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, warnings *[]string) ([]dispatch, []subagent, []codexNearMiss, bool) {
 	absRepo, err := filepath.Abs(repoDir)
 	if err != nil {
 		absRepo = repoDir
@@ -589,7 +589,7 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, w
 	})
 	if walkErr != nil {
 		*warnings = append(*warnings, "codex sessions dir unreadable — codex tickets will report no-transcript: "+walkErr.Error())
-		return nil, nil, nil
+		return nil, nil, nil, sessionID == ""
 	}
 	sort.Strings(files)
 
@@ -597,13 +597,29 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, w
 	var dispatches []dispatch
 	var agents []subagent
 	var nearMisses []codexNearMiss
+	// matchedSession is M3's diagnostic input (I047 review): whether
+	// sessionID (non-empty) equaled at least one root id among files that
+	// SURVIVED the --since walk-time skip above. Unlike claude's
+	// sessionInScope (id lives in the filename, checkable before any
+	// parsing), a codex session's id lives inside the file
+	// (session_meta.payload.session_id; the filename is
+	// rollout-<ts>-<uuid>.jsonl, uuid unrelated to the thread id) — so a
+	// --since-excluded file's id is never discovered at all, and can't
+	// contribute to this check. An operator combining --since with a
+	// codex --session id that only exists in an excluded file gets "matched
+	// no sessions" too; that is still an honest answer (nothing in scope
+	// has that id), just not "the id exists nowhere in the store".
+	matchedSession := sessionID == ""
 	for _, path := range files {
 		res, ok := scanCodexFile(path, warnings)
 		if !ok {
 			continue
 		}
-		if sessionID != "" && res.meta.rootID() != sessionID {
-			continue // --session: restrict to one thread tree
+		if sessionID != "" {
+			if res.meta.rootID() != sessionID {
+				continue // --session: restrict to one thread tree
+			}
+			matchedSession = true
 		}
 		// D22: in scope iff cwd resolves inside the repo (clause 1) or the
 		// session's git commit hash is known to the repo (clause 2). The
@@ -691,7 +707,7 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, w
 			}
 		}
 	}
-	return dispatches, agents, nearMisses
+	return dispatches, agents, nearMisses, matchedSession
 }
 
 // DefaultCodexSessionsDir derives the discovery default for codex's session

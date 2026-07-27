@@ -90,8 +90,10 @@
 //     unmapped-dispatch > unexplained-fallback > escalated-no-reason >
 //     escalated-with-reason > match.
 //   - Hard errors are a missing docs/issues dir (not a scaffolded repo —
-//     CLI usage error) and the D14 version-gate refusal above; everything
-//     else degrades to warnings. A missing or unreadable WORKFLOW.md is a
+//     CLI usage error), the D14 version-gate refusal above, and an
+//     unparseable --since value (D28, ticket I047 review ruling 4 — an
+//     operator-typed value has no valid fallback reading); everything else
+//     degrades to warnings. A missing or unreadable WORKFLOW.md is a
 //     warning, not an error: resolution falls back to embedded defaults,
 //     and the report says so.
 package audit
@@ -204,11 +206,15 @@ type Options struct {
 	// (D28, ticket I047): an operator escape hatch, never an automatic
 	// build-start anchor (rejected at grill — see parseSince). Accepts
 	// RFC3339 or a bare YYYY-MM-DD date; empty means no filter. Applied to
-	// both flavors by comparing each transcript FILE's mtime against the
+	// both flavors by comparing each transcript session's mtime against the
 	// cutoff (see parseSince's doc for why mtime, not an in-JSONL
-	// timestamp). An unparseable value degrades to a Report warning and is
-	// ignored, matching every other operator-input-trouble path in this
-	// package.
+	// timestamp). An unparseable value is a usage error: Run returns it
+	// directly (never a Report), the same hard-error class as a missing
+	// docs/issues dir. Ratified at I047 review: an operator-typed value has
+	// no valid fallback reading, and warn-and-proceed would silently
+	// readmit exactly the sessions the operator was trying to exclude —
+	// the wrong degrade direction for a flag whose entire purpose is
+	// exclusion.
 	Since string
 	// Session restricts the transcript set to one session (D28, ticket
 	// I047): an operator escape hatch. Empty means no filter. For claude,
@@ -244,16 +250,21 @@ func Run(opts Options) (Report, error) {
 		absRepoDir = repoDir
 	}
 	repoBase := filepath.Base(absRepoDir)
+	// D28/I047 review ruling 4: an unparseable --since is a usage error
+	// (this Run returns it directly, exit 2 at the CLI boundary via the
+	// existing err != nil handling in cmdAuditRouting — no CLI change
+	// needed), not a degrade-to-warning path. An operator-typed value has
+	// no valid fallback reading, and warn-and-proceed would silently
+	// readmit exactly the sessions --since exists to exclude.
 	var since time.Time
 	if opts.Since != "" {
 		t, err := parseSince(opts.Since)
 		if err != nil {
-			rep.Warnings = append(rep.Warnings, fmt.Sprintf(
-				"--since %q unparseable (%v) — ignoring the filter; accepted formats: RFC3339 (2026-07-20T00:00:00Z) or a bare date (2026-07-20, local midnight)",
-				opts.Since, err))
-		} else {
-			since = t
+			return Report{}, fmt.Errorf(
+				"--since %q: %w (accepted formats: RFC3339 e.g. 2026-07-20T00:00:00Z, or a bare date e.g. 2026-07-20)",
+				opts.Since, err)
 		}
+		since = t
 	}
 	if err := gateTemplateVersion(repoDir, &rep.Warnings); err != nil {
 		return Report{}, err
@@ -277,7 +288,7 @@ func Run(opts Options) (Report, error) {
 	// gated on that.
 	mappings := map[string]map[string]resolvedTier{flavor: mapping, "codex": codexMapping}
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
-	dispatches, agents := readTranscripts(transcriptsDir, flavor, since, opts.Session, &rep.Warnings)
+	dispatches, agents, sessionMatched := readTranscripts(transcriptsDir, flavor, since, opts.Session, &rep.Warnings)
 	// Codex discovery only runs when CodexSessionsDir is set (the CLI always
 	// sets it — design D-doc, "discovery is always on"; leaving it empty is
 	// how every pre-I041 caller and every existing test opts out, and must
@@ -287,10 +298,20 @@ func Run(opts Options) (Report, error) {
 	// byte-identical.
 	var codexNearMisses []codexNearMiss
 	if opts.CodexSessionsDir != "" {
-		codexDispatches, codexAgents, codexNM := readCodexSessions(opts.CodexSessionsDir, repoDir, since, opts.Session, &rep.Warnings)
+		codexDispatches, codexAgents, codexNM, codexSessionMatched := readCodexSessions(opts.CodexSessionsDir, repoDir, since, opts.Session, &rep.Warnings)
 		dispatches = append(dispatches, codexDispatches...)
 		agents = append(agents, codexAgents...)
 		codexNearMisses = codexNM
+		sessionMatched = sessionMatched || codexSessionMatched
+	}
+	// M3 (I047 review): a non-empty --session that matched nothing anywhere
+	// (claude or codex) is silently misleading otherwise — an operator
+	// typo'd id produces an unexplained all-no-transcript audit, and codex
+	// root ids are invisible in filenames (rollout-<ts>-<uuid>.jsonl) so
+	// there's no other way to notice. Fires once, combined across both
+	// flavors, not per-reader.
+	if opts.Session != "" && !sessionMatched {
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("--session %q matched no sessions", opts.Session))
 	}
 
 	evidence := map[string][]evidenceToken{} // ticket id -> flavor-tagged model tokens
@@ -921,13 +942,65 @@ type subagent struct {
 // existing unmatched informational list rather than being silently
 // dropped.
 func repoQualifies(text, cwd, absRepoDir, repoBase string) bool {
-	if absRepoDir != "" && strings.Contains(text, absRepoDir) {
+	if absRepoDir != "" && containsPathToken(text, absRepoDir) {
 		return true
 	}
-	if repoBase != "" && containsToken(text, repoBase) {
+	if repoBase != "" && containsPathToken(text, repoBase) {
 		return true
 	}
 	return cwdInsideRepo(cwd, absRepoDir)
+}
+
+// isPathWordChar extends isAlnum with the characters that routinely appear
+// WITHIN a single path component or repo name — '-', '_', '.' — so a
+// boundary check built on it treats "praxis-web" as one unbroken word
+// rather than "praxis" + a boundary + "-web". Used only by repoQualifies'
+// two text clauses (I047 review C1); containsToken's ticket-id matching
+// stays alnum-only and untouched — ticket ids never carry these
+// characters, and loosening that boundary was never in scope.
+func isPathWordChar(c byte) bool {
+	return isAlnum(c) || c == '-' || c == '_' || c == '.'
+}
+
+// containsPathToken implements repoQualifies' two boundary-aware text
+// clauses (I047 review C1, amended D28): text references path as a whole
+// path-word — the absolute-path clause and the basename clause both use
+// this, since a repo's basename is exactly a one-component path. Without
+// this, `strings.Contains`/`containsToken`'s alnum-only boundary let
+// "praxis" match inside "praxis-web" (a real sibling-repo directory name,
+// hyphen not being alnum) — readmitting the exact I008 cross-repo
+// collision class for any two repos sharing a name prefix. Boundary is
+// checked on BOTH sides: the amended design text only mandates an
+// after-boundary for the path clause, but requiring both is strictly
+// safer (a legitimate reference is never itself preceded by a path-word
+// character in practice — that would mean matching a longer, unrelated
+// path) and keeps one mechanism for both clauses instead of two.
+func containsPathToken(text, path string) bool {
+	return containsTokenWith(text, path, isPathWordChar)
+}
+
+// containsTokenWith generalizes containsToken's word-boundary matching
+// over a caller-supplied word-character predicate — containsToken itself
+// stays pinned to isAlnum (ticket ids), while containsPathToken supplies
+// isPathWordChar (repo path/basename references, I047 review C1).
+func containsTokenWith(text, id string, isWordChar func(byte) bool) bool {
+	if id == "" {
+		return false
+	}
+	for start := 0; ; {
+		i := strings.Index(text[start:], id)
+		if i < 0 {
+			return false
+		}
+		i += start
+		before := i == 0 || !isWordChar(text[i-1])
+		afterIdx := i + len(id)
+		after := afterIdx >= len(text) || !isWordChar(text[afterIdx])
+		if before && after {
+			return true
+		}
+		start = i + 1
+	}
 }
 
 // parseSince implements the --since operator escape hatch (D28, ticket
@@ -940,11 +1013,13 @@ func repoQualifies(text, cwd, absRepoDir, repoBase string) bool {
 // e.g. copied from a session's own timestamp) or a bare YYYY-MM-DD date,
 // read as local midnight (for an operator who thinks in calendar days —
 // "since Monday"). Filtering compares this cutoff against each transcript
-// FILE's own mtime (readTranscripts/readCodexSessions), not an in-JSONL
+// session's own mtime (readTranscripts/readCodexSessions), not an in-JSONL
 // timestamp: both harness formats are undocumented and drift (package
 // doc), but a file's mtime needs no format knowledge at all, and it is
 // exactly the signal the I008 workaround approximated by hand (copying a
-// build's session files to a scratch dir).
+// build's session files to a scratch dir). A value that matches neither
+// format is a usage error at the Run boundary (I047 review ruling 4) —
+// this function only parses, it never decides how its error is handled.
 func parseSince(s string) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t, nil
@@ -955,24 +1030,49 @@ func parseSince(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("not RFC3339 or YYYY-MM-DD: %q", s)
 }
 
-// sessionInScope applies the D28 --since/--session filters (ticket I047) to
-// one top-level claude session name (a "<id>.jsonl" file or an "<id>" dir)
-// or one codex session's rootID, at the granularity readTranscripts and
-// readCodexSessions each discover sessions: file mtime for --since (a
-// transcript with no readable mtime is never excluded by a since filter it
-// can't evaluate — degrade toward inclusion, matching the package's
-// everything-is-a-warning-not-a-loss posture elsewhere), exact id equality
-// for --session.
-func sessionInScope(path string, mtime func(string) (time.Time, bool), since time.Time, id, wantID string) bool {
+// sessionFiles is one claude session's two possible on-disk pieces — its
+// top-level "<id>.jsonl" file and its "<id>/subagents" dir — grouped under
+// one session id so --since/--session scope the WHOLE session as a unit
+// (I047 review I2), never the two pieces independently.
+type sessionFiles struct {
+	filePath string // "<id>.jsonl"; "" if absent
+	dirPath  string // "<id>"; "" if absent
+}
+
+// sessionInScope applies the D28 --since/--session filters (ticket I047,
+// unified per-session at I047 review finding I2) to one claude session id.
+// --session is exact id equality. --since compares the cutoff against the
+// LATER of the file's and dir's mtimes (whichever exist) — deciding scope
+// once per session, not once per on-disk piece: a cutoff falling between
+// the dir's mtime (often stamped near session start, when subagents/ is
+// first created) and the file's mtime (kept moving as the top-level
+// session is appended to) must not silently keep the session's declared
+// dispatch aliases while dropping its subagent actuals — exactly the
+// evidence that catches a worker running a lower model than declared. A
+// session with no readable mtime on either piece is never excluded by a
+// since filter it can't evaluate — degrade toward inclusion, matching the
+// package's everything-is-a-warning-not-a-loss posture elsewhere.
+func sessionInScope(sf sessionFiles, mtime func(string) (time.Time, bool), since time.Time, id, wantID string) bool {
 	if wantID != "" && id != wantID {
 		return false
 	}
-	if !since.IsZero() {
-		if t, ok := mtime(path); ok && t.Before(since) {
-			return false
+	if since.IsZero() {
+		return true
+	}
+	var latest time.Time
+	have := false
+	for _, p := range []string{sf.filePath, sf.dirPath} {
+		if p == "" {
+			continue
+		}
+		if t, ok := mtime(p); ok {
+			if !have || t.After(latest) {
+				latest = t
+			}
+			have = true
 		}
 	}
-	return true
+	return !have || !latest.Before(since)
 }
 
 // readTranscripts collects Task/Agent dispatch records from every session
@@ -980,25 +1080,63 @@ func sessionInScope(path string, mtime func(string) (time.Time, bool), since tim
 // by the sidecar meta.json. Every record it emits is tagged with flavor —
 // the claude source's flavor for every call today, and the seam later
 // readers (codex) tag with their own. since and sessionID implement D28's
-// --since/--session filters (ticket I047), applied per top-level session:
-// a zero since and empty sessionID (every pre-I047 caller) filter nothing,
-// keeping every existing behavior byte-identical. All trouble becomes
-// warnings.
-func readTranscripts(dir, flavor string, since time.Time, sessionID string, warnings *[]string) ([]dispatch, []subagent) {
+// --since/--session filters (ticket I047), applied once per session id
+// (I2 fix — see sessionFiles/sessionInScope): a zero since and empty
+// sessionID (every pre-I047 caller) filter nothing, keeping every existing
+// behavior byte-identical. matchedSession reports whether sessionID (when
+// non-empty) equaled at least one discovered session id — independent of
+// whether --since then excluded it — the diagnostic input for M3's
+// "matched no sessions" warning; always true when sessionID is empty (no
+// filter to fail to match). All trouble becomes warnings.
+func readTranscripts(dir, flavor string, since time.Time, sessionID string, warnings *[]string) ([]dispatch, []subagent, bool) {
 	des, err := os.ReadDir(dir)
 	if err != nil {
 		*warnings = append(*warnings, "transcript dir unreadable — all tickets will report no-transcript: "+err.Error())
-		return nil, nil
+		return nil, nil, sessionID == ""
 	}
-	var dispatches []dispatch
-	var agents []subagent
+	sessions := map[string]*sessionFiles{}
+	var ids []string
+	get := func(id string) *sessionFiles {
+		sf, ok := sessions[id]
+		if !ok {
+			sf = &sessionFiles{}
+			sessions[id] = sf
+			ids = append(ids, id)
+		}
+		return sf
+	}
 	for _, de := range des {
 		name := de.Name()
 		if de.IsDir() {
-			if !sessionInScope(filepath.Join(dir, name), fileMTime, since, name, sessionID) {
-				continue
+			get(name).dirPath = filepath.Join(dir, name)
+			continue
+		}
+		if strings.HasSuffix(name, ".jsonl") {
+			get(strings.TrimSuffix(name, ".jsonl")).filePath = filepath.Join(dir, name)
+		}
+	}
+	sort.Strings(ids)
+
+	matchedSession := sessionID == ""
+	var dispatches []dispatch
+	var agents []subagent
+	for _, id := range ids {
+		sf := *sessions[id]
+		if sessionID != "" && id == sessionID {
+			matchedSession = true
+		}
+		if !sessionInScope(sf, fileMTime, since, id, sessionID) {
+			continue
+		}
+		if sf.filePath != "" {
+			more, _, _ := scanJSONL(sf.filePath, warnings)
+			for i := range more {
+				more[i].flavor = flavor
 			}
-			subDir := filepath.Join(dir, name, "subagents")
+			dispatches = append(dispatches, more...)
+		}
+		if sf.dirPath != "" {
+			subDir := filepath.Join(sf.dirPath, "subagents")
 			subs, _ := filepath.Glob(filepath.Join(subDir, "agent-*.jsonl"))
 			sort.Strings(subs)
 			for _, sub := range subs {
@@ -1021,21 +1159,9 @@ func readTranscripts(dir, flavor string, since time.Time, sessionID string, warn
 				dispatches = append(dispatches, more...)
 				agents = append(agents, a)
 			}
-			continue
-		}
-		if strings.HasSuffix(name, ".jsonl") {
-			path := filepath.Join(dir, name)
-			if !sessionInScope(path, fileMTime, since, strings.TrimSuffix(name, ".jsonl"), sessionID) {
-				continue
-			}
-			more, _, _ := scanJSONL(path, warnings)
-			for i := range more {
-				more[i].flavor = flavor
-			}
-			dispatches = append(dispatches, more...)
 		}
 	}
-	return dispatches, agents
+	return dispatches, agents, matchedSession
 }
 
 // fileMTime is sessionInScope's --since probe (D28, ticket I047): a file or
@@ -1154,23 +1280,7 @@ func parseLine(line []byte) (dispatches []dispatch, model string, cwd string, ok
 // containsToken reports whether text contains id as a whole token (so I20
 // never matches a dispatch for I201).
 func containsToken(text, id string) bool {
-	if id == "" {
-		return false
-	}
-	for start := 0; ; {
-		i := strings.Index(text[start:], id)
-		if i < 0 {
-			return false
-		}
-		i += start
-		before := i == 0 || !isAlnum(text[i-1])
-		afterIdx := i + len(id)
-		after := afterIdx >= len(text) || !isAlnum(text[afterIdx])
-		if before && after {
-			return true
-		}
-		start = i + 1
-	}
+	return containsTokenWith(text, id, isAlnum)
 }
 
 func isAlnum(c byte) bool {

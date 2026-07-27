@@ -649,7 +649,7 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 			wID, t.ID, wTier, dash(t.Tier), wActual, dash(strings.Join(t.Actuals, ",")), wVerdict, string(t.Verdict), t.Detail)
 	}
 	if len(rep.Unmatched) > 0 {
-		fmt.Fprintln(stdout, "unmatched dispatches (no ticket id, not judged):")
+		fmt.Fprintln(stdout, "unmatched dispatches (no ticket id or not repo-qualified; not judged):")
 		for _, d := range rep.Unmatched {
 			fmt.Fprintf(stdout, "  %s  [%s]\n", d.Description, dash(d.Model))
 		}

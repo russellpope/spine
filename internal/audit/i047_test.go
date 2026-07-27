@@ -46,6 +46,31 @@ func writePathReferencingDispatch(t *testing.T, path, repoRef, ticketID, desc, m
 	}
 }
 
+// writeOrphanSubagent writes a subagent transcript + meta.json UNLINKED to
+// any dispatch (its own toolUseId matches no dispatch's own id) under
+// transcriptsDir/sessionID/subagents/agent-<name>.jsonl — isolating the
+// agent-direct-description evidence path (Run's second attribution loop,
+// the audit.go:369-area `use := containsToken(desc, t.id)` branch, gated
+// by repoQualifies since I047 review finding I1) from the toolUseID-linked
+// fallback, so a ticket's evidence can be proven to come from THIS path
+// alone, not smuggled in via dispatch linkage.
+func writeOrphanSubagent(t *testing.T, transcriptsDir, sessionID, name, toolUseID, cwd, description, model string) {
+	t.Helper()
+	subDir := filepath.Join(transcriptsDir, sessionID, "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join(subDir, "agent-"+name)
+	line := fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"model":%q,"role":"assistant","content":[{"type":"text","text":"done"}]}}`+"\n", cwd, model)
+	if err := os.WriteFile(base+".jsonl", []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta := fmt.Sprintf(`{"toolUseId":%q,"description":%q}`, toolUseID, description)
+	if err := os.WriteFile(base+".meta.json", []byte(meta), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func chtime(t *testing.T, path string, when time.Time) {
 	t.Helper()
 	if err := os.Chtimes(path, when, when); err != nil {
@@ -68,7 +93,7 @@ func TestI008ShapedCrossRepoSharedTranscriptDirNoContamination(t *testing.T) {
 	sharedTranscripts := t.TempDir()
 	repoA := t.TempDir()
 	repoB := t.TempDir()
-	writeAuditRepo(t, repoA, gen9DefaultWorkflow, map[string]string{"I003": "routine"})
+	writeAuditRepo(t, repoA, gen9DefaultWorkflow, map[string]string{"I003": "routine", "I005": "routine"})
 	writeAuditRepo(t, repoB, gen9DefaultWorkflow, map[string]string{"I003": "primary"})
 
 	// repoA-shaped: spine's I003, sonnet — correct for its own routine
@@ -79,6 +104,20 @@ func TestI008ShapedCrossRepoSharedTranscriptDirNoContamination(t *testing.T) {
 	// its own primary declaration.
 	writeSingleDispatch(t, filepath.Join(sharedTranscripts, "praxis-build.jsonl"), repoB,
 		"I003", "I003: unrelated praxis ticket", "claude-haiku-4-5")
+
+	// I1 (I047 review fix round): the side door specifically. I005 has NO
+	// dispatch at all — its only possible evidence is an orphan subagent
+	// (unlinked to any dispatch's toolUseID) whose meta.json description
+	// carries the ticket token directly. repoA's own orphan agent is
+	// cwd-qualified and must be admitted; repoB's colliding orphan agent
+	// (same shared dir, same "I005" token in its description, but cwd
+	// outside repoA and a genuinely bad model) must be excluded — proving
+	// the side door both admits its own repo's evidence and excludes the
+	// other's, not just one or the other.
+	writeOrphanSubagent(t, sharedTranscripts, "spine-agents", "a5", "orphan-a-i005", repoA,
+		"I005: repoA-only agent evidence", "claude-sonnet-5")
+	writeOrphanSubagent(t, sharedTranscripts, "praxis-agents", "b5", "orphan-b-i005", repoB,
+		"I005: colliding agent mention from praxis", "claude-haiku-4-5")
 
 	repA, err := Run(Options{RepoDir: repoA, ClaudeTranscriptsDir: sharedTranscripts})
 	if err != nil {
@@ -103,6 +142,16 @@ func TestI008ShapedCrossRepoSharedTranscriptDirNoContamination(t *testing.T) {
 	if !foundPraxis {
 		t.Errorf("repoA's Unmatched must list praxis's excluded dispatch, not silently drop it: %+v", repA.Unmatched)
 	}
+	// I1: I005 has zero dispatch evidence — a match here can ONLY come from
+	// the agent-direct-description side door, proving it admits repoA's own
+	// orphan agent. If it instead pulled in repoB's colliding orphan
+	// agent's haiku evidence too, this would be silent-descent, not match.
+	if r := rowsA["I005"]; r.Verdict != VerdictMatch {
+		t.Errorf("repoA I005 verdict = %s (%s), want match — evidence exists ONLY via the agent-direct-description side door", r.Verdict, r.Detail)
+	}
+	if got := strings.Join(rowsA["I005"].Actuals, ","); got != "claude-sonnet-5" {
+		t.Errorf("repoA I005 actuals = %q, want only claude-sonnet-5 — praxis's colliding orphan agent (haiku) must not leak in via the side door", got)
+	}
 
 	repB, err := Run(Options{RepoDir: repoB, ClaudeTranscriptsDir: sharedTranscripts})
 	if err != nil {
@@ -126,6 +175,88 @@ func TestI008ShapedCrossRepoSharedTranscriptDirNoContamination(t *testing.T) {
 	}
 	if !foundSpine {
 		t.Errorf("repoB's Unmatched must list spine's excluded dispatch, not silently drop it: %+v", repB.Unmatched)
+	}
+}
+
+// --- C1 (I047 review fix round): prefix-sharing sibling repos ---
+
+// Acceptance (C1, I047 review): the I008 class survives naive substring
+// matching for sibling repos whose names share a prefix — "praxis" and
+// "praxis-web" is the review's own repro shape. A dispatch naming
+// "praxis-web" in its prompt must NOT qualify an audit of "praxis": before
+// the boundary fix, `strings.Contains`/the alnum-only `containsToken`
+// treated "praxis-web" as containing "praxis" (hyphen isn't alnum, so it
+// read as a word boundary) — exactly readmitting cross-repo collision for
+// the commonest sibling-naming shape in the estate (base repo + "-docs"/
+// "-web"/"-api" variants).
+func TestD28SiblingRepoPrefixDoesNotQualify(t *testing.T) {
+	base := t.TempDir()
+	praxis := filepath.Join(base, "praxis")
+	praxisWeb := filepath.Join(base, "praxis-web")
+	if err := os.MkdirAll(praxis, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeAuditRepo(t, praxis, gen9DefaultWorkflow, map[string]string{"I003": "routine"})
+	transcripts := t.TempDir()
+
+	// praxis's own legitimate dispatch.
+	writePathReferencingDispatch(t, filepath.Join(transcripts, "praxis-build.jsonl"), praxis,
+		"I003", "I003: praxis own ticket", "claude-sonnet-5")
+	// praxis-web's dispatch — a DIFFERENT repo that merely shares praxis's
+	// name as a prefix. Its haiku evidence would be a real descent if it
+	// were (wrongly) attributed to praxis's routine-declared I003.
+	writePathReferencingDispatch(t, filepath.Join(transcripts, "praxis-web-build.jsonl"), praxisWeb,
+		"I003", "I003: praxis-web unrelated ticket", "claude-haiku-4-5")
+
+	rep, err := Run(Options{RepoDir: praxis, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I003"]
+	if r.Verdict != VerdictMatch {
+		t.Errorf("I003 verdict = %s (%s), want match — praxis-web's dispatch (a different, prefix-sharing repo) must not contaminate it", r.Verdict, r.Detail)
+	}
+	if got := strings.Join(r.Actuals, ","); got != "claude-sonnet-5" {
+		t.Errorf("I003 actuals = %q, want only claude-sonnet-5 (praxis-web's haiku must not leak in)", got)
+	}
+	if rep.Blocking() {
+		t.Error("must not block — praxis-web's dispatch is not evidence for praxis")
+	}
+	foundWeb := false
+	for _, d := range rep.Unmatched {
+		if strings.Contains(d.Description, "praxis-web") {
+			foundWeb = true
+		}
+	}
+	if !foundWeb {
+		t.Errorf("want praxis-web's excluded dispatch visible in Unmatched, got %+v", rep.Unmatched)
+	}
+}
+
+// Acceptance (C1 companion): the same boundary rule applies to the
+// basename clause specifically (no absolute path in the prompt at all,
+// only the bare sibling-repo name) — proving the fix isn't limited to the
+// full-path clause.
+func TestD28SiblingRepoBasenamePrefixDoesNotQualify(t *testing.T) {
+	base := t.TempDir()
+	praxis := filepath.Join(base, "praxis")
+	if err := os.MkdirAll(praxis, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeAuditRepo(t, praxis, gen9DefaultWorkflow, map[string]string{"I004": "routine"})
+	transcripts := t.TempDir()
+
+	// Names only the bare sibling basename "praxis-web", never the audited
+	// repo's own basename "praxis" as a whole token.
+	writePathReferencingDispatch(t, filepath.Join(transcripts, "s1.jsonl"), "praxis-web",
+		"I004", "I004: praxis-web basename only", "claude-haiku-4-5")
+
+	rep, err := Run(Options{RepoDir: praxis, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := rowsByID(t, rep)["I004"]; r.Verdict != VerdictNoTranscript {
+		t.Errorf("I004 verdict = %s (%s), want no-transcript — \"praxis-web\" must not satisfy the \"praxis\" basename clause", r.Verdict, r.Detail)
 	}
 }
 
@@ -294,30 +425,28 @@ func TestSinceAndSessionFiltersComposeWithDefaults(t *testing.T) {
 	})
 }
 
-// Acceptance: an unparseable --since value degrades to a Report warning
-// and the filter is ignored (not applied) — consistent with every other
-// operator-input-trouble path in this package.
-func TestSinceUnparseableWarnsAndIsIgnored(t *testing.T) {
+// Acceptance (I047 review ruling 4): an unparseable --since value is a
+// usage error — Run returns it directly (never a Report), the same class
+// as a missing docs/issues dir. The CLI's existing err != nil handling in
+// cmdAuditRouting already maps any Run error to exit 2, so this is the
+// full behavior with no separate CLI-level test needed. Ruled AGAINST the
+// original warn-and-ignore posture: a malformed operator-typed value has
+// no valid fallback reading, and warning-then-proceeding would have
+// silently readmitted exactly the sessions --since was told to exclude.
+func TestSinceUnparseableIsUsageError(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I971": "routine"})
 	tdir := t.TempDir()
 	writeSingleDispatch(t, filepath.Join(tdir, "s1.jsonl"), dir, "I971", "I971: fixture work", "claude-sonnet-5")
 
-	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir, Since: "not-a-time"})
-	if err != nil {
-		t.Fatal(err)
+	_, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir, Since: "not-a-time"})
+	if err == nil {
+		t.Fatal("want an error for an unparseable --since value, got nil")
 	}
-	if r := rowsByID(t, rep)["I971"]; r.Verdict != VerdictMatch {
-		t.Errorf("verdict = %s (%s), want match — an unparseable --since must not silently exclude everything", r.Verdict, r.Detail)
-	}
-	found := false
-	for _, w := range rep.Warnings {
-		if strings.Contains(w, "--since") && strings.Contains(w, "not-a-time") {
-			found = true
+	for _, want := range []string{"--since", "not-a-time"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should contain %q", err, want)
 		}
-	}
-	if !found {
-		t.Errorf("want a warning naming the unparseable --since value, got %q", rep.Warnings)
 	}
 }
 
@@ -375,6 +504,172 @@ func TestCodexSinceAndSessionFilters(t *testing.T) {
 		got := strings.Join(rowsByID(t, rep)["I972"].Actuals, ",")
 		if got != "gpt-5.6-luna" {
 			t.Errorf("actuals = %q, want only root-old's model", got)
+		}
+	})
+}
+
+// --- I2 (I047 review fix round): --since must scope a session as one unit ---
+
+// Acceptance (I2, I047 review): a claude session's top-level "<id>.jsonl"
+// file and its "<id>/subagents" dir must be scoped by --since TOGETHER, not
+// independently. Fixture mirrors the review's own motivating scenario: the
+// subagents dir's mtime is old (stamped when the subagent was spawned near
+// session start) while the top-level file's mtime is newer (kept moving as
+// the session is appended to). A cutoff falling between them must not keep
+// the session's declared dispatch ALIAS ("sonnet", which resolves clean)
+// while dropping the subagent's real ACTUAL (haiku — a genuine descent) —
+// that combination is exactly the false-clean verdict the split would
+// produce, hiding the evidence that catches an under-model worker.
+func TestSinceScopesSessionFileAndSubagentsDirAsOneUnit(t *testing.T) {
+	dir := t.TempDir()
+	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I980": "routine"})
+	tdir := t.TempDir()
+
+	// The dispatch: declared alias "sonnet" (resolves to the routine tier
+	// cleanly on its own).
+	dispatchLine := fmt.Sprintf(
+		`{"type":"assistant","cwd":%q,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"Task","input":{"description":"I980: fixture work","model":"sonnet","prompt":"You are implementing ticket I980."}}]}}`+"\n",
+		dir)
+	if err := os.WriteFile(filepath.Join(tdir, "s1.jsonl"), []byte(dispatchLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The linked subagent: the REAL actual, haiku — a genuine descent
+	// against the routine declaration once it supersedes the alias.
+	subDir := filepath.Join(tdir, "s1", "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentLine := fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"model":"claude-haiku-4-5","role":"assistant","content":[{"type":"text","text":"done"}]}}`+"\n", dir)
+	if err := os.WriteFile(filepath.Join(subDir, "agent-x.jsonl"), []byte(agentLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "agent-x.meta.json"),
+		[]byte(`{"toolUseId":"tool-1","description":"I980: fixture work"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Straddle mtimes: dir OLD, file NEW.
+	chtime(t, filepath.Join(tdir, "s1"), time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
+	chtime(t, filepath.Join(tdir, "s1.jsonl"), time.Date(2020, 1, 5, 0, 0, 0, 0, time.UTC))
+
+	t.Run("no filter: linked subagent evidence supersedes the alias, real descent shows", func(t *testing.T) {
+		rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := rowsByID(t, rep)["I980"]
+		if r.Verdict != VerdictSilentDescent {
+			t.Errorf("verdict = %s (%s), want silent-descent — the linked subagent's haiku actual is real", r.Verdict, r.Detail)
+		}
+	})
+
+	t.Run("--since between dir's old mtime and file's new mtime keeps the whole session in scope", func(t *testing.T) {
+		rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir, Since: "2020-01-03"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := rowsByID(t, rep)["I980"]
+		if r.Verdict != VerdictSilentDescent {
+			t.Errorf("verdict = %s (%s), want silent-descent — session-unit scoping must keep file+dir together (max mtime), not drop the subagents dir alone and fall back to the clean alias", r.Verdict, r.Detail)
+		}
+		if got := strings.Join(r.Actuals, ","); got != "claude-haiku-4-5" {
+			t.Errorf("actuals = %q, want claude-haiku-4-5 (the linked subagent actual) — a false match here means the split-scoping bug is back", got)
+		}
+	})
+
+	t.Run("--since after both mtimes excludes the whole session", func(t *testing.T) {
+		rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir, Since: "2020-01-10"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r := rowsByID(t, rep)["I980"]; r.Verdict != VerdictNoTranscript {
+			t.Errorf("verdict = %s (%s), want no-transcript — a cutoff after both mtimes must exclude the whole session", r.Verdict, r.Detail)
+		}
+	})
+}
+
+// Acceptance (I2 companion): the mtime ordering reversed from the test
+// above — the subagents DIR is newer, the top-level FILE is older — so a
+// "just use the file's own mtime" implementation (which would still pass
+// the test above, since the file happened to be the newer piece there)
+// gets caught here: it would wrongly exclude the whole session (file's
+// mtime alone is before the cutoff) even though the dir is fresh. The fix
+// must use the LATER of the two, in either direction, not favor one piece.
+func TestSinceScopesSessionByMaxOfFileAndDirMtimeEitherDirection(t *testing.T) {
+	dir := t.TempDir()
+	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I981": "routine"})
+	tdir := t.TempDir()
+
+	dispatchLine := fmt.Sprintf(
+		`{"type":"assistant","cwd":%q,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"tool-2","name":"Task","input":{"description":"I981: fixture work","model":"sonnet","prompt":"You are implementing ticket I981."}}]}}`+"\n",
+		dir)
+	if err := os.WriteFile(filepath.Join(tdir, "s2.jsonl"), []byte(dispatchLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	subDir := filepath.Join(tdir, "s2", "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentLine := fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"model":"claude-haiku-4-5","role":"assistant","content":[{"type":"text","text":"done"}]}}`+"\n", dir)
+	if err := os.WriteFile(filepath.Join(subDir, "agent-y.jsonl"), []byte(agentLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "agent-y.meta.json"),
+		[]byte(`{"toolUseId":"tool-2","description":"I981: fixture work"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reversed from the companion test: dir NEW, file OLD.
+	chtime(t, filepath.Join(tdir, "s2.jsonl"), time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
+	chtime(t, filepath.Join(tdir, "s2"), time.Date(2020, 1, 5, 0, 0, 0, 0, time.UTC))
+
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir, Since: "2020-01-03"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I981"]
+	if r.Verdict != VerdictSilentDescent {
+		t.Errorf("verdict = %s (%s), want silent-descent — the dir's newer mtime must be able to keep the session in scope even though the file alone is older than the cutoff", r.Verdict, r.Detail)
+	}
+}
+
+// --- M3 (I047 review fix round): --session matching nothing warns ---
+
+// Acceptance (M3, I047 review): a non-empty --session that matches no
+// session anywhere (claude or codex) warns, rather than producing an
+// unexplained all-no-transcript audit an operator has no way to diagnose
+// (especially for codex, whose root ids never appear in filenames).
+func TestSessionMatchingNothingWarns(t *testing.T) {
+	dir := t.TempDir()
+	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I990": "routine"})
+	tdir := t.TempDir()
+	writeSingleDispatch(t, filepath.Join(tdir, "s1.jsonl"), dir, "I990", "I990: fixture work", "claude-sonnet-5")
+
+	t.Run("no match anywhere warns", func(t *testing.T) {
+		rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir, Session: "typo-d-session-id"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, w := range rep.Warnings {
+			if strings.Contains(w, `--session "typo-d-session-id" matched no sessions`) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("want a warning naming the unmatched --session value, got %q", rep.Warnings)
+		}
+	})
+
+	t.Run("a real match does not warn", func(t *testing.T) {
+		rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir, Session: "s1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range rep.Warnings {
+			if strings.Contains(w, "matched no sessions") {
+				t.Errorf("a real --session match must not warn, got %q", rep.Warnings)
+			}
 		}
 	})
 }
