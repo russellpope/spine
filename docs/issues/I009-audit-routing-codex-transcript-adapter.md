@@ -2,7 +2,7 @@
 id: I009
 title: audit routing — no Codex transcript adapter; routing gate is toothless on Codex-driven builds
 severity: high
-status: open
+status: closed
 affects: [I008]
 blocked-by: []
 execution-mode:
@@ -153,3 +153,23 @@ posture as the Claude reader. Research the multi_agent recording shape first;
 if subagent model evidence turns out not to be recoverable, the honest
 fallback is a distinct verdict (e.g. `no-subagent-evidence`) rather than a
 generic `no-transcript`.
+
+## Closed 2026-07-27 (codex-audit effort, I048 live acceptance)
+
+The codex reader shipped (I040-I049, feat/codex-audit): discovery with
+CODEX_HOME/default + --codex-sessions override, dispatch records
+(spawn_agent + herdr team spawns), spawned-thread actuals by root id,
+D21 worker scan (first-line, injected-preamble-aware, multi-token-ambiguous),
+guardian exclusion, D22 cwd-or-commit scoping, unattributed-transcript
+verdict with source naming, --since/--session, token-scan pruning.
+Live evidence (real ~/.codex store, 953 files):
+
+    I024    routine  gpt-5.6-terra              match     (herdr dispatch records + worker sessions)
+    I021    primary  gpt-5.6-sol                match
+    I008..I015 (M4a) gpt-5.5                    unmapped-dispatch  (honest history: id never declared)
+
+Guardian threads contribute nothing anywhere (zero codex-auto-review
+strings). Four wire-shape surprises found live and recorded above as dated
+2026-07-27 facts (cmd key; injected preambles; polymorphic source;
+custom_tool_call cmux leads) — the degrade-never-fail posture held for all
+four: every failure direction was missed evidence, never a false blocker.

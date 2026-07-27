@@ -2,7 +2,7 @@
 id: I008
 title: audit routing — cross-build ticket-id collision in shared controller project dirs
 severity: med
-status: open
+status: closed
 affects: []
 blocked-by: []
 execution-mode:
@@ -52,3 +52,23 @@ than via manual transcript grepping.
 Related deferred minors from the gen-6 build: C4 (transcript-slug
 derivation), C5 (last-FALLBACK-reason-wins) — same audit surface, batch if
 convenient.
+
+## Closed 2026-07-27 (codex-audit effort, I048 live acceptance)
+
+Fixed by D28 (claude-side repo qualification, boundary-aware after the I047
+review's sibling-repo hardening) and D22 (codex repo scoping by cwd or known
+commit). The recorded incident class is unreproducible: with the shared
+~/.codex store carrying dense moo-clone I024 evidence, praxis's audit reports
+its own I024 untouched by it —
+
+    I024    -           -              unannotated              no tier annotation — not judged
+
+(zero codex actuals, exit 0, zero "moo-clone" strings in the praxis report),
+while moo-clone's same-token audit judges
+
+    I024    routine  gpt-5.6-terra    match    source: .../rollout-2026-07-24T23-29-12-019f97f6-a862-....jsonl, ...
+
+Silent-descent details now name their source transcript file (D24), the
+I008-shaped regression fixture pins the shared-controller-dir shape on both
+the dispatch and subagent-description paths, and prefix-sharing siblings
+(praxis/praxis-web) are covered by boundary tests.
