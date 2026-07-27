@@ -4,7 +4,7 @@ title: Codex audit — live acceptance against the estate, close I008/I009
 severity: high
 status: open
 affects: [audit, I008, I009]
-blocked-by: [I041, I042, I043, I044, I045, I046, I047]
+blocked-by: [I041, I042, I043, I044, I045, I046, I047, I049]
 execution-mode: inline
 tier: primary
 effort: xhigh

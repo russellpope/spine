@@ -27,6 +27,12 @@ Every judged codex verdict's detail names its source transcript file — the
 I008 requirement (silent-descent names its source) satisfied as a special
 case. Found-but-unusable is not nothing-found.
 
+Note from I041 review (referred-Q3): thread_spawn actuals link by ROOT
+session id only — that granularity is all I009's facts support. When more
+than one dispatch under a single root names distinct tickets and the merged
+actuals differ, the detail line should disclose the coarse linkage so a
+surprising verdict is diagnosable at a glance.
+
 ## Acceptance criteria
 
 - [ ] Guardian-only match yields `unattributed-transcript` with a why-excluded detail naming the file

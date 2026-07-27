@@ -207,7 +207,13 @@ judgment, so mixed builds judge each dispatch within its own flavor's
 resolved table. The audit continues to own no WORKFLOW.md parser; both
 flavors resolve through the shared resolver (D13). Discovery is always on:
 default `$CODEX_HOME/sessions` else `~/.codex/sessions`; missing or
-unreadable degrades to a warning. The audit entry point takes an options
+unreadable degrades to a warning. (Warning rule, ratified at I041 review:
+a missing *explicitly requested* dir warns; a missing un-overridden
+*default* is a silent skip — a codex-less machine is normal, and a
+standing warning on every audit there is exactly the permanent-noise
+failure the problem statement decries. At the library boundary an empty
+codex-sessions option means "no codex discovery", which is what keeps
+claude-only callers byte-identical.) The audit entry point takes an options
 struct (repo dir, claude transcripts dir, codex sessions dir, filters) so
 future inputs don't churn the signature. D14's generation gate applies
 unchanged. Codex ticket-token matching is case-insensitive; the claude

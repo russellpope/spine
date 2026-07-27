@@ -41,6 +41,9 @@ those, not from re-inspection.
 ## Acceptance criteria
 
 - [ ] A herdr-shaped fixture (lead with `-m` spawn records + terra worker thread) judges its routine ticket `match`
+  (ratified at review: the worker thread is present-but-inert until I042's
+  worker-session scan lands — the match comes from the dispatch record; the
+  fixture asserts the worker session does NOT leak into evidence)
 - [ ] A `spawn_agent` fixture with lowercase task-name token claims the right ticket with the declared model
 - [ ] Spawned-thread actuals supersede the dispatch's declared model when both exist
 - [ ] A guardian-only fixture contributes no evidence to any ticket
