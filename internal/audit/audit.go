@@ -32,7 +32,10 @@
 //     files without an id and files starting with "_" (templates) or named
 //     README.md are ignored. Tickets whose tier annotation is not one of
 //     the four known tiers are reported as unannotated (detail names the
-//     unknown value), never judged.
+//     unknown value), never judged. `tier: n/a` (design D27, ticket I046)
+//     is a declared decision to opt out, distinct from that: reported
+//     exempt, never judged, mirroring the review-tier: n/a convention. An
+//     absent tier stays unannotated — absence is a gap, n/a is a decision.
 //   - Model evidence per dispatch: the linked subagent transcript's
 //     assistant model ids when one exists (linked via the meta.json
 //     toolUseId, or its description's ticket token); otherwise the
@@ -122,6 +125,7 @@ const (
 	VerdictUnattributedTranscript Verdict = "unattributed-transcript" // warn (D24, ticket I044)
 	VerdictEscalatedWithReason    Verdict = "escalated-with-reason"   // advisory
 	VerdictMatch                  Verdict = "match"
+	VerdictExempt                 Verdict = "exempt"      // informational (D27, ticket I046): tier: n/a opts out
 	VerdictUnannotated            Verdict = "unannotated" // informational
 )
 
@@ -430,6 +434,13 @@ func coarseLinkageNotes(rootTickets map[string]map[string]bool, dispatches []dis
 func judge(t ticket, tokens []evidenceToken, mappings map[string]map[string]resolvedTier, l ledger) (Verdict, string) {
 	if t.tier == "" {
 		return VerdictUnannotated, "no tier annotation — not judged"
+	}
+	// D27 (ticket I046): tier: n/a is a declared decision to opt out of
+	// routing judgment, mirroring the review-tier: n/a convention — distinct
+	// from an absent annotation, which stays unannotated (a gap, not a
+	// decision).
+	if t.tier == "n/a" {
+		return VerdictExempt, "tier: n/a — exempt from routing judgment"
 	}
 	if _, known := tierRank[t.tier]; !known {
 		return VerdictUnannotated, fmt.Sprintf("unknown tier %q — not judged", t.tier)

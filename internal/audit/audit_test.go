@@ -133,6 +133,23 @@ func TestUnannotatedNeverJudged(t *testing.T) {
 	}
 }
 
+// Acceptance (D27, ticket I046): a ticket declaring tier: n/a opts out of
+// routing judgment entirely — reported exempt, distinct from unannotated,
+// even when its dispatch evidence would otherwise be a silent-descent.
+func TestExemptTierNeverJudged(t *testing.T) {
+	rows := rowsByID(t, runFixture(t, "mixed"))
+	r := rows["I212"]
+	if r.Verdict != VerdictExempt {
+		t.Errorf("I212 verdict = %s (%s), want exempt", r.Verdict, r.Detail)
+	}
+	if r.Verdict == VerdictUnannotated {
+		t.Error("I212 must not be reported as unannotated — n/a is a decision, not an absence")
+	}
+	if got := strings.Join(r.Actuals, ","); got != "haiku" {
+		t.Errorf("I212 actuals = %q, want the evidence still listed even though unjudged", got)
+	}
+}
+
 // Fallback is lateral: covered by a FALLBACK ledger record -> advisory;
 // uncovered -> warn-level unexplained-fallback, never blocking.
 func TestFallbackCoverage(t *testing.T) {
@@ -183,7 +200,7 @@ func TestReasonedDescentStaysAdvisory(t *testing.T) {
 // Template and README files in docs/issues are not tickets.
 func TestNonTicketFilesIgnored(t *testing.T) {
 	rows := rowsByID(t, runFixture(t, "mixed"))
-	want := []string{"I201", "I202", "I203", "I204", "I205", "I206", "I207", "I208", "I209", "I210", "I211"}
+	want := []string{"I201", "I202", "I203", "I204", "I205", "I206", "I207", "I208", "I209", "I210", "I211", "I212"}
 	if len(rows) != len(want) {
 		t.Fatalf("want %d rows, got %v", len(want), rows)
 	}
