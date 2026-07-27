@@ -48,10 +48,12 @@
 //     resolves it within that flavor's table alone (I040). The claude
 //     reader tags every token it produces "claude"; the codex reader (I041,
 //     codex.go) tags every token it produces "codex" — judge/judgeToken
-//     needed no change to pick up the second source. A worker-session scan
-//     (D21) and full git-commit-probe repo scoping (D22) remain unbuilt
-//     (I042/I043); until then codex evidence comes only from dispatch
-//     records and linkable spawned-thread actuals.
+//     needed no change to pick up the second source. The worker-session scan
+//     (D21, ticket I042) and the git-commit-probe repo scoping (D22, ticket
+//     I043) both shipped in codex.go: codex evidence covers dispatch
+//     records, linkable spawned-thread actuals, and top-level orchestrator
+//     sessions attributed via D21's opening-line rule, all repo-scoped by
+//     D22's cwd/commit-hash checks.
 //   - Token -> tier, within the dispatch's flavor: a token maps to a tier
 //     when it equals the resolved id, one of the table entry's explicitly
 //     declared aliases, or an id the entry shipped as a default before the
@@ -749,11 +751,10 @@ func frontmatter(content string) map[string]string {
 // dispatch and subagent record it reads from that source with this value,
 // and it rides along inside evidenceToken all the way into judgeToken
 // (I040), so mixed builds judge each token within its own source's flavor.
-// Exactly one source is parsed today, the claude harness's
-// ~/.claude/projects layout, so every token in play carries the claude
-// flavor. The deferred codex-audit effort plugs in by calling this (or its
-// codex equivalent) once for the codex sessions dir and tagging the records
-// it reads the same way — judge and judgeToken need no further change.
+// It covers the claude harness's ~/.claude/projects layout; the codex-audit
+// effort (I041, codex.go) tags its own records "codex" directly in
+// readCodexSessions rather than calling this — judge and judgeToken needed
+// no further change to pick up that second source.
 func transcriptFlavor(transcriptsDir string) string {
 	return "claude"
 }

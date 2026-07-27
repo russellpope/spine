@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -593,6 +594,141 @@ func TestAuditUsageErrors(t *testing.T) {
 	// a repo that is not scaffolded (no docs/issues) is a usage error
 	if code, _, _ := runCmd(t, "audit", "routing", "--dir", t.TempDir(), "--transcripts", t.TempDir()); code != 2 {
 		t.Fatalf("unscaffolded repo: want exit 2, got %d", code)
+	}
+}
+
+// writeAuditFixtureRepo writes the minimal scaffold `spine audit routing`
+// needs at the CLI layer: a WORKFLOW.md carrying a claude model_routing
+// table, and one docs/issues/<id>.md per ticket with just the id/tier
+// frontmatter fields readTickets actually consumes (see
+// internal/audit/audit.go readTickets).
+func writeAuditFixtureRepo(t *testing.T, dir string, tickets map[string]string) {
+	t.Helper()
+	workflow := "profile: go-service\ntemplate_version: 9\nmodel_routing:\n" +
+		"  primary: claude-fable-5\n  routine: claude-sonnet-5\n" +
+		"  mechanical: claude-haiku-4-5\n  fallback: claude-opus-4-8\n"
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte(workflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "issues"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for id, tier := range tickets {
+		body := fmt.Sprintf("---\nid: %s\ntier: %s\n---\n", id, tier)
+		if err := os.WriteFile(filepath.Join(dir, "docs", "issues", id+".md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// writeAuditDispatch writes one session file (mirroring
+// internal/audit/i047_test.go's writeSingleDispatch) carrying one Task
+// dispatch for ticketID, with an explicit cwd so it repo-qualifies (D28).
+func writeAuditDispatch(t *testing.T, path, repoDir, ticketID, model string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := fmt.Sprintf(
+		`{"type":"assistant","cwd":%q,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Task","input":{"description":%q,"model":%q,"prompt":"You are implementing ticket %s."}}]}}`+"\n",
+		repoDir, ticketID+": fixture work", model, ticketID)
+	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Acceptance (Testing Decisions CLI clause): --since parses at the CLI layer
+// and threads through to audit.Run, observably excluding an older session's
+// evidence — mirroring internal/audit/i047_test.go's
+// TestSinceAndSessionFiltersComposeWithDefaults at the command-runner layer.
+func TestAuditRoutingSinceFlagExcludesOlderSession(t *testing.T) {
+	dir := t.TempDir()
+	writeAuditFixtureRepo(t, dir, map[string]string{"I900": "routine"})
+	tdir := t.TempDir()
+	oldPath := filepath.Join(tdir, "old.jsonl")
+	newPath := filepath.Join(tdir, "new.jsonl")
+	writeAuditDispatch(t, oldPath, dir, "I900", "claude-haiku-4-5") // descent
+	writeAuditDispatch(t, newPath, dir, "I900", "claude-sonnet-5")  // clean
+	if err := os.Chtimes(oldPath, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newPath, time.Date(2020, 1, 5, 0, 0, 0, 0, time.UTC), time.Date(2020, 1, 5, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	noCodex := filepath.Join(t.TempDir(), "no-codex-sessions")
+
+	code, out, _ := runCmd(t, "audit", "routing",
+		"--dir", dir, "--transcripts", tdir, "--codex-sessions", noCodex)
+	if code != 1 || !strings.Contains(out, "silent-descent") {
+		t.Fatalf("no filter: code=%d out=%q, want blocking silent-descent from old.jsonl", code, out)
+	}
+
+	code, out, errs := runCmd(t, "audit", "routing",
+		"--dir", dir, "--transcripts", tdir, "--codex-sessions", noCodex, "--since", "2020-01-03")
+	if code != 0 {
+		t.Fatalf("--since 2020-01-03: code=%d out=%q errs=%q, want exit 0 once old.jsonl is excluded", code, out, errs)
+	}
+	if strings.Contains(out, "silent-descent") {
+		t.Errorf("--since 2020-01-03 should exclude old.jsonl's descent, out=%q", out)
+	}
+	if !strings.Contains(out, "match") {
+		t.Errorf("want new.jsonl's surviving clean evidence to read as a match, out=%q", out)
+	}
+}
+
+// Acceptance (Testing Decisions CLI clause, ratified exit-2 rule): an
+// unparseable --since value is a usage error at the CLI layer, exit 2 with a
+// usage-style message — the load-bearing case, since exit codes are the
+// CLI's contract (mirrors internal/audit/i047_test.go's
+// TestSinceUnparseableIsUsageError one layer up).
+func TestAuditRoutingSinceUnparseableExitsUsageError(t *testing.T) {
+	dir := t.TempDir()
+	writeAuditFixtureRepo(t, dir, map[string]string{"I901": "routine"})
+	tdir := t.TempDir()
+	writeAuditDispatch(t, filepath.Join(tdir, "s1.jsonl"), dir, "I901", "claude-sonnet-5")
+	noCodex := filepath.Join(t.TempDir(), "no-codex-sessions")
+
+	code, _, errs := runCmd(t, "audit", "routing",
+		"--dir", dir, "--transcripts", tdir, "--codex-sessions", noCodex, "--since", "garbage")
+	if code != 2 {
+		t.Fatalf("code=%d errs=%q, want exit 2 (usage error) for an unparseable --since value", code, errs)
+	}
+	if !strings.Contains(errs, "--since") || !strings.Contains(errs, "garbage") {
+		t.Errorf("want a usage-style error naming --since and the bad value, errs=%q", errs)
+	}
+}
+
+// Acceptance (Testing Decisions CLI clause): --session restricts evidence to
+// one session at the CLI layer, and a non-matching id surfaces the
+// matched-no-sessions warning on stderr (mirrors internal/audit/i047_test.go's
+// TestSinceAndSessionFiltersComposeWithDefaults and
+// TestSessionMatchingNothingWarns one layer up).
+func TestAuditRoutingSessionFlagRestrictsAndWarnsOnNoMatch(t *testing.T) {
+	dir := t.TempDir()
+	writeAuditFixtureRepo(t, dir, map[string]string{"I902": "routine"})
+	tdir := t.TempDir()
+	writeAuditDispatch(t, filepath.Join(tdir, "s1.jsonl"), dir, "I902", "claude-sonnet-5")
+	noCodex := filepath.Join(t.TempDir(), "no-codex-sessions")
+
+	code, out, errs := runCmd(t, "audit", "routing",
+		"--dir", dir, "--transcripts", tdir, "--codex-sessions", noCodex, "--session", "s1")
+	if code != 0 {
+		t.Fatalf("code=%d out=%q errs=%q", code, out, errs)
+	}
+	if !strings.Contains(out, "match") {
+		t.Errorf("want I902 to match via the isolated session, out=%q", out)
+	}
+	if strings.Contains(errs, "matched no sessions") {
+		t.Errorf("a real --session match must not warn, errs=%q", errs)
+	}
+
+	code, _, errs = runCmd(t, "audit", "routing",
+		"--dir", dir, "--transcripts", tdir, "--codex-sessions", noCodex, "--session", "typo-session")
+	if code != 0 {
+		t.Fatalf("code=%d errs=%q, want exit 0 (no-transcript warns, does not block)", code, errs)
+	}
+	if !strings.Contains(errs, `--session "typo-session" matched no sessions`) {
+		t.Errorf("want the unmatched --session warning, errs=%q", errs)
 	}
 }
 
