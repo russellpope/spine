@@ -60,15 +60,19 @@
 //     surface as unmapped, not read as a match (Default and Inherited
 //     entries keep both). Substring containment is retired (design D13): it collides as
 //     model names multiply across flavors with unrelated naming schemes.
-//     When a token maps to several ordered tiers — two tiers sharing an id
-//     is legal, e.g. the shipped codex.routine/codex.fallback pair — the
-//     reading closest to a non-verdict wins: declared tier if present, else
-//     the highest — degradation must not manufacture descent. A token
-//     mapping only to fallback is lateral: covered by a FALLBACK record ->
+//     When a token maps to several tiers — two tiers sharing an id is legal,
+//     e.g. the shipped codex.routine/codex.fallback pair — the reading
+//     closest to a non-verdict wins: declared tier if present; else, when
+//     the ticket carries a FALLBACK record and fallback is among the
+//     candidates, fallback (ADR 0012 / D25 — a ledger record decides what an
+//     ambiguous token means, not just how the verdict reads, so a properly
+//     recorded refusal-rerun can never stand as a false silent-descent
+//     blocker); else the highest-ranked ordered candidate — degradation must
+//     not manufacture descent. Without a FALLBACK record the ordered reading
+//     stands, so real descent still judges silent-descent. A token mapping
+//     only to fallback is lateral: covered by a FALLBACK record ->
 //     escalated-with-reason; covered by a `tier: fallback` annotation ->
-//     match; otherwise the warn-level unexplained-fallback. (A fallback id
-//     shared with an ordered tier below the annotation resolves through the
-//     ordered path and can therefore still be silent-descent.)
+//     match; otherwise the warn-level unexplained-fallback.
 //   - A model-tier ESCALATION record excuses exactly its recorded to-tier:
 //     an off-tier token is escalated-with-reason iff some record on that
 //     ticket has a to-tier equal to the token's resolved tier (a reasoned
@@ -486,7 +490,8 @@ func judgeToken(tok evidenceToken, t ticket, mappings map[string]map[string]reso
 	if len(tiers) == 0 {
 		return VerdictUnmappedDispatch, withSource(fmt.Sprintf("%s maps to no %s entry in the model table", tok.value, tok.flavor), tok)
 	}
-	actual := pickTier(tiers, t.tier)
+	_, recordedFallback := l.fallback[t.id]
+	actual := pickTier(tiers, t.tier, recordedFallback)
 	if actual == t.tier {
 		return VerdictMatch, ""
 	}
@@ -527,15 +532,27 @@ func tiersOf(token string, mapping map[string]resolvedTier) []string {
 // several tiers because they share an id or alias, which the table permits
 // (the shipped codex.routine/codex.fallback "terra" pair is the live case;
 // design D15's flavor scoping decides between flavors, this rule decides
-// within one): the declared tier if it is among the candidates, else the
-// highest-ranked ordered candidate, else fallback. Ambiguity must not
-// manufacture a verdict.
-func pickTier(tiers []string, declared string) string {
-	best := ""
+// within one): the declared tier if it is among the candidates; else, when
+// the ticket carries a FALLBACK record and fallback is among the
+// candidates, fallback (ADR 0012 / D25 — a recorded refusal-rerun wins the
+// ambiguity before the ordered reading gets a look, so it never stands as a
+// false silent-descent blocker); else the highest-ranked ordered candidate;
+// else fallback. Ambiguity must not manufacture a verdict.
+func pickTier(tiers []string, declared string, recordedFallback bool) string {
 	for _, tier := range tiers {
 		if tier == declared {
 			return tier
 		}
+	}
+	if recordedFallback {
+		for _, tier := range tiers {
+			if tier == "fallback" {
+				return tier
+			}
+		}
+	}
+	best := ""
+	for _, tier := range tiers {
 		if tier == "fallback" {
 			if best == "" {
 				best = tier

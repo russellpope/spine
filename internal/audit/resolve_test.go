@@ -365,6 +365,63 @@ model_routing:
 	}
 }
 
+// ADR 0012 / D25: a FALLBACK record on the audited ticket moves fallback
+// consultation before tier resolution. Same shared-id fixture as
+// TestOrderedTierBeatsFallbackInSharedIDAmbiguity, but I883 now carries a
+// FALLBACK record — the ordered (routine) reading must lose to the recorded
+// lateral one, so the properly recorded refusal-rerun escalates with its
+// quoted reason instead of standing as a false blocker.
+func TestFallbackRecordWinsSharedIDAmbiguity(t *testing.T) {
+	dir := t.TempDir()
+	wf := `# Workflow — proof
+
+profile: go-service
+template_version: 9
+model_routing:
+  primary: claude-fable-5
+  routine: shared-tier-model
+  mechanical: claude-haiku-4-5
+  fallback: shared-tier-model
+`
+	writeAuditRepo(t, dir, wf, map[string]string{
+		"I881": "routine", "I882": "fallback", "I883": "primary",
+	})
+	if err := os.MkdirAll(filepath.Join(dir, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".superpowers", "sdd", "progress.md"),
+		[]byte("FALLBACK I883 reason: refused on primary, rerun on fallback\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tdir := t.TempDir()
+	writeDispatchTranscript(t, tdir, map[string]string{
+		"I881": "shared-tier-model",
+		"I882": "shared-tier-model",
+		"I883": "shared-tier-model",
+	})
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I881"]; r.Verdict != VerdictMatch {
+		t.Errorf("I881 verdict = %s (%s), want match — declared routine is among the candidates", r.Verdict, r.Detail)
+	}
+	if r := rows["I882"]; r.Verdict != VerdictMatch {
+		t.Errorf("I882 verdict = %s (%s), want match — declared fallback is among the candidates", r.Verdict, r.Detail)
+	}
+	r := rows["I883"]
+	if r.Verdict != VerdictEscalatedWithReason {
+		t.Errorf("I883 verdict = %s (%s), want escalated-with-reason — the FALLBACK record wins the shared-id ambiguity", r.Verdict, r.Detail)
+	}
+	if !strings.Contains(r.Detail, "refused on primary, rerun on fallback") {
+		t.Errorf("I883 detail = %q, want it to quote the FALLBACK record's reason", r.Detail)
+	}
+	if rep.Blocking() {
+		t.Error("I883 must not block — the record excuses the shared-id reading as a lateral fallback")
+	}
+}
+
 // A repo with no WORKFLOW.md still audits: resolution falls back to the
 // embedded defaults — the same answer dispatch-time resolution gives — and
 // the report says so instead of failing or reporting everything unmapped.
