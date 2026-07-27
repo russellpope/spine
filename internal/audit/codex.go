@@ -717,6 +717,29 @@ func codexMayContribute(data []byte, tokens []string) bool {
 	return false
 }
 
+// firstLineTicketMatches returns the distinct audited ticket tokens (D21
+// second narrowing, I048 live acceptance) present in text — normally an
+// opening message's first line — deduplicated so the same id appearing
+// twice still counts once. Matching is case-insensitive and word-bounded,
+// mirroring nearMissDetail's containsToken(strings.ToUpper(...)) convention
+// elsewhere in this file; callers use len() > 1 to detect an ambiguous
+// multi-ticket opening line.
+func firstLineTicketMatches(text string, tokens []string) []string {
+	upper := strings.ToUpper(text)
+	seen := map[string]bool{}
+	var matches []string
+	for _, tok := range tokens {
+		if tok == "" || seen[tok] {
+			continue
+		}
+		if containsToken(upper, strings.ToUpper(tok)) {
+			seen[tok] = true
+			matches = append(matches, tok)
+		}
+	}
+	return matches
+}
+
 // readCodexSessions walks a codex sessions dir — real layout
 // <dir>/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl, though any nesting is
 // accepted — collecting dispatch records and spawned-thread actuals (D20)
@@ -953,24 +976,44 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 					})
 				}
 			} else if len(res.turnModels) > 0 {
-				agents = append(agents, subagent{
-					description: firstLine(res.openingUserMessage),
-					models:      res.turnModels,
-					flavor:      "codex",
-					sourceFile:  path,
-				})
-				// D24: the same file's FULLER text (opening message beyond
-				// its first line, plus any later user messages) is a
-				// near-miss surface for any OTHER ticket mentioned there —
-				// the mid-transcript-only-match case. A ticket that IS
-				// named in the first line already has real evidence above
-				// and never consults this.
-				if text := res.searchText(); strings.TrimSpace(text) != "" {
-					nearMisses = append(nearMisses, codexNearMiss{
-						text:   text,
-						file:   path,
-						reason: "ticket token absent from the opening message's first line — a later mention does not attribute (D21)",
+				// D21 second narrowing (ratified at I048 live acceptance):
+				// live estate briefs are often ONE long line, so "first
+				// line" is the whole brief — a routine worker's brief
+				// naming a primary neighbor in that same line must not
+				// hand the neighbor its turns (the maipipe I043/I044
+				// live shape). An opening line matching more than one
+				// distinct audited ticket token is ambiguous: it
+				// attributes to NONE of them, degrading to a near miss
+				// for each matched ticket instead of guessing which one
+				// the session actually served.
+				if matches := firstLineTicketMatches(firstLine(res.openingUserMessage), tokens); len(matches) > 1 {
+					if text := res.searchText(); strings.TrimSpace(text) != "" {
+						nearMisses = append(nearMisses, codexNearMiss{
+							text:   text,
+							file:   path,
+							reason: "opening line names multiple tickets — ambiguous worker attribution (D21)",
+						})
+					}
+				} else {
+					agents = append(agents, subagent{
+						description: firstLine(res.openingUserMessage),
+						models:      res.turnModels,
+						flavor:      "codex",
+						sourceFile:  path,
 					})
+					// D24: the same file's FULLER text (opening message beyond
+					// its first line, plus any later user messages) is a
+					// near-miss surface for any OTHER ticket mentioned there —
+					// the mid-transcript-only-match case. A ticket that IS
+					// named in the first line already has real evidence above
+					// and never consults this.
+					if text := res.searchText(); strings.TrimSpace(text) != "" {
+						nearMisses = append(nearMisses, codexNearMiss{
+							text:   text,
+							file:   path,
+							reason: "ticket token absent from the opening message's first line — a later mention does not attribute (D21)",
+						})
+					}
 				}
 			}
 		}

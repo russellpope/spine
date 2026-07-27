@@ -1011,6 +1011,46 @@ func TestCodexOpeningMessageContextSentenceDoesNotAttributeToNeighbor(t *testing
 	}
 }
 
+// Regression (D21 second narrowing, ratified at I048 live acceptance): the
+// live estate's briefs are often ONE long line, so "first line" is the
+// WHOLE brief — a real maipipe worker's opening line named its own routine
+// ticket (I900) AND a primary neighbor (I901) together, and the
+// routine-terra worker's turns wrongly attributed to the neighbor,
+// manufacturing a silent-descent blocking verdict on a correctly-routed
+// ticket purely because its token shared the worker's one-line brief. An
+// opening line naming more than one distinct audited ticket must attribute
+// its own turns to NEITHER — both tickets surface as unattributed-transcript
+// (found, not attributable) rather than one of them silently blocking.
+// Red against pre-fix code: the old containsToken(desc, id) check matches
+// both tokens in the single-line description and attributes the terra
+// turns to both, blocking I901.
+func TestCodexMultiTokenOpeningLineAttributesToNeither(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I900": "routine", "I901": "primary"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-900", "worker-900", "", sessRepo, "user", topLevelSource),
+		codexUserMessageLine("I900 TASKS 2+3 INTEGRATED DELIVERY — model gpt-5.6-terra, tier routine, stacks on I901's reader work"),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I900"]; r.Verdict != VerdictUnattributedTranscript || len(r.Actuals) != 0 {
+		t.Errorf("I900 verdict = %s actuals=%v, want unattributed-transcript/none — a multi-token opening line must not attribute even to the worker's own ticket (D21 second narrowing)", r.Verdict, r.Actuals)
+	}
+	if r := rows["I901"]; r.Verdict != VerdictUnattributedTranscript || len(r.Actuals) != 0 {
+		t.Errorf("I901 verdict = %s actuals=%v, want unattributed-transcript/none — the neighbor named in the same line must not gain the routine worker's turns", r.Verdict, r.Actuals)
+	}
+	if rep.Blocking() {
+		t.Error("an ambiguous multi-token opening line must never manufacture a blocking verdict on either named ticket")
+	}
+}
+
 // Regression (review finding I1, Important). The audit.go codex case-fold
 // (Run's agent-correlation loop, ToUpper for a.flavor=="codex") was
 // previously untested — every prior fixture's opening-message title
