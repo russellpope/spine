@@ -12,6 +12,9 @@ risk-triggers: []
 review-tier:
 ---
 
+> Design: `docs/specs/2026-07-26-codex-audit-design.md` (grilled 2026-07-25/26;
+> D20–D28, ADR 0012). Verified format facts below, dated 2026-07-25.
+
 ## Problem
 
 Codex became a first-class harness on 2026-07-10 (gen 7: spine emits AGENTS.md,
@@ -39,6 +42,56 @@ Known facts about the Codex side (verified 2026-07-10 on Codex 0.144.1):
 - maipipe's `WORKFLOW.md` `model_routing` is remapped to
   sol/terra/luna + claude-opus-4-8 fallback, so mapped-id matching must handle
   a mixed-provider map (the alias/substring rule in audit.go should already).
+
+Verified 2026-07-25 (codex cli_version 0.145.0, against moo-clone M4b I024
+ground truth — lead `gpt-5.6-sol` session 019f97f6-a862-7302-9488-d564f82c43f1,
+workers `gpt-5.6-terra`, expected verdict: match):
+
+- Line kinds via top-level `type`: `session_meta` (1), `turn_context` (N),
+  `event_msg`, `response_item`, `world_state`. The per-turn model lives in
+  `turn_context.payload.model`; `session_meta.payload.model` is present but
+  NULL — never read tier from session_meta.
+- Threads form a tree, but no walking is needed to find a tree's members:
+  `session_meta.payload.id` is the thread's own id, `payload.session_id` is
+  the ROOT thread's id (shared by every file in the tree), and
+  `payload.parent_thread_id` is the immediate parent. Filter on session_id.
+- Guardian auto-review threads report a FAKE model: `thread_source:
+  "subagent"`, `source: {"subagent":{"other":"guardian"}}`, and
+  `turn_context.payload.model: "codex-auto-review"` on every turn. Naively
+  read, a ticket scores as routed to a review model — confident wrong answers,
+  worse than no-transcript. Exclude by source/thread_source.
+- Real codex-native subagents are distinguishable from guardians:
+  `source: {"subagent":{"thread_spawn":{parent_thread_id, depth, agent_path,
+  agent_nickname, ...}}}` and carry true models.
+- herdr/cmux team workers are NOT codex-native subagents: each is a separate
+  top-level session (`thread_source: "user"`, parent null). The lead's
+  transcript records the dispatch as `response_item`/`function_call`
+  (`exec_command`) whose arguments carry the explicit model —
+  `herdr agent start moo-clone-worker1 --kind codex --pane wM:p2 -- -m
+  gpt-5.6-terra` — followed by `herdr agent prompt <name>
+  "$(<.superpowers/sdd/<date>-<milestone>-i024-codex/dispatch-task-*.md)"`.
+  This is the Claude Task-dispatch analog (explicit model + ticket-token
+  linkage), if a dispatch-record path is wanted alongside session evidence.
+- Lead sessions are orchestration-tier (`sol`) and mention the ticket token
+  heavily (96× in the I024 lead); counting the lead's model as ticket evidence
+  would misjudge every ticket. Same rule as the Claude reader: orchestrator
+  models are never ticket evidence — but leads and workers are BOTH top-level
+  `thread_source: "user"` sessions, so the reader needs another discriminator
+  (dispatch-record linkage, or the worker's opening user message being the
+  dispatch brief).
+- Ticket-token matching MUST be repo-scoped: praxis and maipipe carry their
+  own I024 tickets, and 24+ sessions outside moo-clone matched the I024 token
+  on the same days (their own builds plus quoted transcript history in
+  guardian threads — the literal string `gpt-5.6-terra` also appears inside
+  quoted `response_item` text). But cwd == repo is too narrow: cmux codex-team
+  workers run in worktree cwds like `/private/tmp/maipipe-codex-team-i083`.
+  `session_meta.payload.git` carries only `{commit_hash, branch}` — no remote
+  URL — so repo identity needs cwd + worktree heuristics or git correlation.
+- M4a's transcripts survive: I008/I012/I015/I020/I022 tokens hit 48–74
+  moo-clone-cwd session files each across 2026-07-17..24, so the fix is
+  testable against cmux-run history, not just herdr's.
+- Scale: 951 session files total (2026-07-02..25); 63 reference moo-clone
+  since 07-24 alone. Discovery needs date/token pruning, not a full-dir parse.
 
 ## Fix
 

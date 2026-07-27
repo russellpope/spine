@@ -12,6 +12,9 @@ risk-triggers: []
 review-tier:
 ---
 
+> Design: `docs/specs/2026-07-26-codex-audit-design.md` (D22 repo scoping,
+> D24 source-file naming, D28 claude-side qualification + --since/--session).
+
 ## Problem
 
 Found live during the praxis I001 build (2026-07-10) — the gen-6 acceptance

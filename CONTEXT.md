@@ -95,3 +95,34 @@ declares exactly one.
   declared tier annotations vs actual models in the transcript, per task
   (`spine audit routing`). Required at the verify stage: reasoned
   escalations advisory, silent descent blocking.
+
+## Audit evidence (decided 2026-07-26, codex-audit grill)
+
+- **dispatch record** — an entry in an orchestrator's transcript declaring a
+  worker dispatch and, where present, its model: a Claude Task/Agent
+  tool-use, a codex `spawn_agent` call, or a team spawn command naming a
+  model. Declared evidence; superseded by the dispatched agent's own actuals
+  when linkable.
+- **orchestrator session** — any session containing dispatch records. Its
+  own models are never ticket evidence, in any flavor; only what it
+  dispatches counts. Generalizes the Claude reader's main-session rule.
+  _Avoid_: lead session (herdr/cmux role name, narrower than this concept).
+- **worker session** — a top-level codex session attributed to a ticket
+  because the ticket's token appears in its opening user message (the
+  dispatch brief) and it is not an orchestrator session. Its per-turn models
+  are actual evidence.
+- **thread tree** — codex sessions form trees: each rollout file's
+  session_meta carries its own thread id, its immediate parent, and the
+  root's id (shared tree-wide). Membership is decided by root id, not by
+  walking.
+- **guardian thread** — a codex auto-review subagent thread; reports a
+  synthetic review model, never a routed one. Structurally excluded from
+  evidence, never judged.
+- **attribution** — the rules deciding which observed models belong to which
+  ticket (repo scoping, opening-message rule, orchestrator exclusion,
+  guardian exclusion). Evidence that matches a ticket's token but fails
+  attribution yields the unattributed-transcript verdict, distinct from
+  no-transcript: found-but-unusable is not nothing-found.
+- **tier: n/a** — explicit per-ticket exemption from routing judgment, for
+  tickets predating the tier convention (mirrors `review-tier: n/a`). An
+  empty tier stays loud: absence is a gap, n/a is a decision.
