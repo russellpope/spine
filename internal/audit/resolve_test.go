@@ -370,7 +370,11 @@ model_routing:
 // TestOrderedTierBeatsFallbackInSharedIDAmbiguity, but I883 now carries a
 // FALLBACK record — the ordered (routine) reading must lose to the recorded
 // lateral one, so the properly recorded refusal-rerun escalates with its
-// quoted reason instead of standing as a false blocker.
+// quoted reason instead of standing as a false blocker. I881 also carries a
+// FALLBACK record, even though its declared tier (routine) is itself among
+// the candidates: an exact declared-tier match is never reinterpreted by a
+// record — there is no ambiguity to resolve — so I881 must stay a plain
+// match, not get bumped to escalated-with-reason noise.
 func TestFallbackRecordWinsSharedIDAmbiguity(t *testing.T) {
 	dir := t.TempDir()
 	wf := `# Workflow — proof
@@ -389,8 +393,9 @@ model_routing:
 	if err := os.MkdirAll(filepath.Join(dir, ".superpowers", "sdd"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".superpowers", "sdd", "progress.md"),
-		[]byte("FALLBACK I883 reason: refused on primary, rerun on fallback\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".superpowers", "sdd", "progress.md"), []byte(
+		"FALLBACK I881 reason: declared tier is itself the candidate, record must not override it\n"+
+			"FALLBACK I883 reason: refused on primary, rerun on fallback\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tdir := t.TempDir()
@@ -405,7 +410,7 @@ model_routing:
 	}
 	rows := rowsByID(t, rep)
 	if r := rows["I881"]; r.Verdict != VerdictMatch {
-		t.Errorf("I881 verdict = %s (%s), want match — declared routine is among the candidates", r.Verdict, r.Detail)
+		t.Errorf("I881 verdict = %s (%s), want match — declared routine is among the candidates and a FALLBACK record must not reinterpret an exact match", r.Verdict, r.Detail)
 	}
 	if r := rows["I882"]; r.Verdict != VerdictMatch {
 		t.Errorf("I882 verdict = %s (%s), want match — declared fallback is among the candidates", r.Verdict, r.Detail)
