@@ -188,7 +188,10 @@ orchestrator-only mentions). The detail names what was found, why it was
 excluded, and the source file. `no-transcript` narrows to mean literally
 nothing found. Judged codex verdicts name their source transcript file in the
 detail line; the I008 requirement (silent-descent names its source) is
-satisfied as a special case.
+satisfied as a special case. (Population wording tracks D21 as amended:
+"token absent from the opening message" means absent from its FIRST LINE —
+a token in a later line of the opening message is a near miss, not
+evidence.)
 
 **D25 — Record-wins fallback reading (ADR 0012).** FALLBACK-record
 consultation moves before tier resolution: when a ticket carries a FALLBACK
@@ -196,6 +199,10 @@ record and an observed token's candidate tiers include fallback, the token
 resolves as fallback and judges escalated-with-reason. Without a record the
 ordered reading stands and real descent still blocks. Trusts
 operator-authored records, consistent with ESCALATION-record semantics.
+(Completeness note from final review: an exact declared-tier match wins
+BEFORE the record is consulted — a record resolves ambiguity, and a token
+whose candidates include the declared tier is not ambiguous. Priority chain:
+declared > recorded-fallback > highest-ordered > fallback-last-resort.)
 
 **D26 — Cluster up-tiering records at source.** The cmux team skill appends
 a model-tier ESCALATION record per up-tiered ticket at cluster spawn (the
