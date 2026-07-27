@@ -26,20 +26,24 @@ func writeAuditRepo(t *testing.T, dir, workflow string, tickets map[string]strin
 	}
 }
 
-// writeDispatchTranscript writes a single-session transcript into dir with
-// one Task dispatch per (ticket id -> model token), issued by a fable
-// controller session (main-session models are never ticket evidence).
-func writeDispatchTranscript(t *testing.T, dir string, dispatches map[string]string) {
+// writeDispatchTranscript writes a single-session transcript into
+// transcriptsDir with one Task dispatch per (ticket id -> model token),
+// issued by a fable controller session (main-session models are never
+// ticket evidence). Each event line carries "cwd": repoDir (D28, ticket
+// I047: real transcript lines always carry their session's cwd) so these
+// dispatches keep qualifying under the D28 repo-qualification gate — every
+// caller already has its fixture repoDir on hand.
+func writeDispatchTranscript(t *testing.T, repoDir, transcriptsDir string, dispatches map[string]string) {
 	t.Helper()
 	var b strings.Builder
 	i := 0
 	for id, token := range dispatches {
 		i++
 		fmt.Fprintf(&b,
-			`{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_%d","name":"Task","input":{"description":"%s: fixture work","model":"%s","prompt":"You are implementing ticket %s."}}]}}`+"\n",
-			i, id, token, id)
+			`{"type":"assistant","cwd":%q,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_%d","name":"Task","input":{"description":"%s: fixture work","model":"%s","prompt":"You are implementing ticket %s."}}]}}`+"\n",
+			repoDir, i, id, token, id)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "s1.jsonl"), []byte(b.String()), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(transcriptsDir, "s1.jsonl"), []byte(b.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -90,7 +94,7 @@ func TestSubstringTokenNoLongerMaps(t *testing.T) {
 	writeAuditRepo(t, dir, gen9DefaultWorkflow,
 		map[string]string{"I811": "routine", "I812": "routine"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{
+	writeDispatchTranscript(t, dir, tdir, map[string]string{
 		"I811": "claude-sonnet", // substring of claude-sonnet-5, not an alias
 		"I812": "sonnet",        // declared alias
 	})
@@ -123,7 +127,7 @@ func TestHistoricalIDMatchesByExactID(t *testing.T) {
 	writeAuditRepo(t, dir, "# Workflow — proof\n\nprofile: go-service\ntemplate_version: 9\n",
 		map[string]string{"I821": "fallback", "I822": "primary"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{
+	writeDispatchTranscript(t, dir, tdir, map[string]string{
 		"I821": "claude-opus-4-8",
 		"I822": "claude-opus-4-8",
 	})
@@ -151,7 +155,7 @@ func TestCodexIDInvisibleWithinClaudeFlavor(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I831": "primary"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{"I831": "gpt-5.6-sol"})
+	writeDispatchTranscript(t, dir, tdir, map[string]string{"I831": "gpt-5.6-sol"})
 	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +219,7 @@ model_routing:
 `
 	writeAuditRepo(t, dir, wf, map[string]string{"I841": "routine", "I842": "primary"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{
+	writeDispatchTranscript(t, dir, tdir, map[string]string{
 		"I841": "claude-sonnet-5",
 		"I842": "claude-sonnet-5",
 	})
@@ -245,7 +249,7 @@ func TestMissingRoutingBlockWarnsOnGen6Plus(t *testing.T) {
 	writeAuditRepo(t, dir, "# Workflow — proof\n\nprofile: go-service\ntemplate_version: 10\n",
 		map[string]string{"I861": "primary"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{"I861": "fable"})
+	writeDispatchTranscript(t, dir, tdir, map[string]string{"I861": "fable"})
 	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
@@ -296,7 +300,7 @@ model_routing:
 		"I871": "primary", "I872": "primary", "I873": "primary", "I874": "fallback",
 	})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{
+	writeDispatchTranscript(t, dir, tdir, map[string]string{
 		"I871": "bespoke-x",       // the pinned id itself
 		"I872": "fable",           // displaced default's alias
 		"I873": "claude-fable-5",  // displaced default's full id
@@ -341,7 +345,7 @@ model_routing:
 		"I881": "routine", "I882": "fallback", "I883": "primary",
 	})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{
+	writeDispatchTranscript(t, dir, tdir, map[string]string{
 		"I881": "shared-tier-model",
 		"I882": "shared-tier-model",
 		"I883": "shared-tier-model",
@@ -399,7 +403,7 @@ model_routing:
 		t.Fatal(err)
 	}
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{
+	writeDispatchTranscript(t, dir, tdir, map[string]string{
 		"I881": "shared-tier-model",
 		"I882": "shared-tier-model",
 		"I883": "shared-tier-model",
@@ -434,7 +438,7 @@ func TestMissingWorkflowResolvesEmbeddedDefaultsWithWarning(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, "", map[string]string{"I851": "primary"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{"I851": "fable"})
+	writeDispatchTranscript(t, dir, tdir, map[string]string{"I851": "fable"})
 	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)

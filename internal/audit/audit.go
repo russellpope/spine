@@ -106,6 +106,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/tmpl"
@@ -194,17 +195,31 @@ func tokenValues(tokens []evidenceToken) []string {
 	return values
 }
 
-// Options configures one Run. RepoDir and ClaudeTranscriptsDir are the only
-// fields read today; CodexSessionsDir and the time/session filters are
-// declared for the codex-audit tickets that follow I040 (D20-D28) and are
-// not yet consumed — reserving them here means those tickets add inputs
-// without churning this signature again.
+// Options configures one Run.
 type Options struct {
 	RepoDir              string
 	ClaudeTranscriptsDir string
 	CodexSessionsDir     string // unread until the codex reader lands
-	Since                string // --since operator filter (D28); unread
-	Session              string // --session operator filter (D28); unread
+	// Since scopes the transcript set to sessions active at/after a cutoff
+	// (D28, ticket I047): an operator escape hatch, never an automatic
+	// build-start anchor (rejected at grill — see parseSince). Accepts
+	// RFC3339 or a bare YYYY-MM-DD date; empty means no filter. Applied to
+	// both flavors by comparing each transcript FILE's mtime against the
+	// cutoff (see parseSince's doc for why mtime, not an in-JSONL
+	// timestamp). An unparseable value degrades to a Report warning and is
+	// ignored, matching every other operator-input-trouble path in this
+	// package.
+	Since string
+	// Session restricts the transcript set to one session (D28, ticket
+	// I047): an operator escape hatch. Empty means no filter. For claude,
+	// matches the top-level session file's base name (<id>.jsonl) and its
+	// sibling <id>/subagents dir — a session's own spawned subagents stay
+	// in scope, exactly as they do unfiltered. For codex, matches
+	// session_meta.payload.session_id (the thread tree's ROOT id, shared by
+	// every file in the tree; see codexSessionMeta.rootID) — restricting to
+	// one codex "session" means one thread tree, the same granularity a
+	// claude session-plus-its-subagents represents.
+	Session string
 }
 
 // Run audits opts.RepoDir's declared routing against the transcript records
@@ -217,6 +232,28 @@ func Run(opts Options) (Report, error) {
 	tickets, err := readTickets(filepath.Join(repoDir, "docs", "issues"))
 	if err != nil {
 		return Report{}, err
+	}
+	// D28 (ticket I047) repo-qualification inputs: the audited repo's
+	// absolute path (for a dispatch's literal-path self-reference and for
+	// cwd-inside-repo evidence) and its basename (for a shorter token
+	// reference). Best-effort on Abs failure — repoQualifies then falls
+	// back to comparing the raw repoDir, never a hard error over a
+	// qualification input.
+	absRepoDir, err := filepath.Abs(repoDir)
+	if err != nil {
+		absRepoDir = repoDir
+	}
+	repoBase := filepath.Base(absRepoDir)
+	var since time.Time
+	if opts.Since != "" {
+		t, err := parseSince(opts.Since)
+		if err != nil {
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf(
+				"--since %q unparseable (%v) — ignoring the filter; accepted formats: RFC3339 (2026-07-20T00:00:00Z) or a bare date (2026-07-20, local midnight)",
+				opts.Since, err))
+		} else {
+			since = t
+		}
 	}
 	if err := gateTemplateVersion(repoDir, &rep.Warnings); err != nil {
 		return Report{}, err
@@ -240,7 +277,7 @@ func Run(opts Options) (Report, error) {
 	// gated on that.
 	mappings := map[string]map[string]resolvedTier{flavor: mapping, "codex": codexMapping}
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
-	dispatches, agents := readTranscripts(transcriptsDir, flavor, &rep.Warnings)
+	dispatches, agents := readTranscripts(transcriptsDir, flavor, since, opts.Session, &rep.Warnings)
 	// Codex discovery only runs when CodexSessionsDir is set (the CLI always
 	// sets it — design D-doc, "discovery is always on"; leaving it empty is
 	// how every pre-I041 caller and every existing test opts out, and must
@@ -250,7 +287,7 @@ func Run(opts Options) (Report, error) {
 	// byte-identical.
 	var codexNearMisses []codexNearMiss
 	if opts.CodexSessionsDir != "" {
-		codexDispatches, codexAgents, codexNM := readCodexSessions(opts.CodexSessionsDir, repoDir, &rep.Warnings)
+		codexDispatches, codexAgents, codexNM := readCodexSessions(opts.CodexSessionsDir, repoDir, since, opts.Session, &rep.Warnings)
 		dispatches = append(dispatches, codexDispatches...)
 		agents = append(agents, codexAgents...)
 		codexNearMisses = codexNM
@@ -274,7 +311,19 @@ func Run(opts Options) (Report, error) {
 		if d.flavor == "codex" {
 			desc, prompt = strings.ToUpper(desc), strings.ToUpper(prompt)
 		}
-		return containsToken(desc, id) || containsToken(prompt, id)
+		if !(containsToken(desc, id) || containsToken(prompt, id)) {
+			return false
+		}
+		// D28 (ticket I047): a claude dispatch claims the ticket only if it
+		// ALSO references the audited repo or its own session shows cwd
+		// evidence inside it — see repoQualifies. Codex evidence is already
+		// hard-scoped to the repo before it reaches Run (D22,
+		// readCodexSessions' cwdInsideRepo/gitCommitProber gate), so gating
+		// it again here would be redundant, not stricter.
+		if d.flavor == "claude" && !repoQualifies(d.description+"\n"+d.prompt, d.cwd, absRepoDir, repoBase) {
+			return false
+		}
+		return true
 	}
 	// rootTickets tracks, per codex dispatch root (toolUseID), every distinct
 	// ticket claimed under it — the coarse-linkage disclosure input (I041
@@ -310,6 +359,16 @@ func Run(opts Options) (Report, error) {
 				desc = strings.ToUpper(desc)
 			}
 			use := containsToken(desc, t.id)
+			// D28: the same repo qualification a dispatch needs applies to a
+			// subagent's own description carrying the ticket token directly
+			// (meta.json's description typically mirrors its parent
+			// dispatch's) — otherwise this path would readmit exactly the
+			// cross-repo collision the dispatch-side gate above closes, on a
+			// shared transcript dir where both repos' subagent files carry
+			// the same ticket id in their descriptions.
+			if use && a.flavor == "claude" && !repoQualifies(a.description, a.cwd, absRepoDir, repoBase) {
+				use = false
+			}
 			for _, d := range dispatches {
 				if use {
 					break
@@ -836,6 +895,7 @@ type dispatch struct {
 	model       string
 	flavor      string // the transcript source's flavor (I040 per-token seam)
 	sourceFile  string // source transcript file (D24, codex only); "" for claude
+	cwd         string // D28 (I047): the event line's own cwd, claude only; "" for codex (D22 scopes it separately)
 }
 
 type subagent struct {
@@ -844,14 +904,87 @@ type subagent struct {
 	models      []string
 	flavor      string // the transcript source's flavor (I040 per-token seam)
 	sourceFile  string // source transcript file (D24, codex only); "" for claude
+	cwd         string // D28 (I047): the subagent transcript's own session cwd, claude only
+}
+
+// repoQualifies implements D28's claude-side repo-qualification rule
+// (ticket I047, the I008 incident's fix): text — a dispatch's own
+// description+prompt, or a subagent's own description — claims the audited
+// repo iff it names the repo's absolute path, names the repo's basename as
+// a whole token, or cwd (the claiming record's own session cwd) resolves
+// inside the repo. Any one of the three suffices; none of them is
+// privileged over the others, matching the ticket's "OR" phrasing.
+// Basename matching is skipped when repoBase is empty (Base of a failed
+// Abs can't be trusted). A dispatch/subagent that fails all three does not
+// vanish — its caller (matches, or the agent direct-match branch) simply
+// declines to attribute it to this ticket, and it surfaces in the report's
+// existing unmatched informational list rather than being silently
+// dropped.
+func repoQualifies(text, cwd, absRepoDir, repoBase string) bool {
+	if absRepoDir != "" && strings.Contains(text, absRepoDir) {
+		return true
+	}
+	if repoBase != "" && containsToken(text, repoBase) {
+		return true
+	}
+	return cwdInsideRepo(cwd, absRepoDir)
+}
+
+// parseSince implements the --since operator escape hatch (D28, ticket
+// I047): a fixed cutoff, never a relative duration or an automatic
+// build-start anchor (design D-doc: "No started-date anchoring... the
+// wrong default for the estate"). Two formats, both unambiguous and
+// deterministic to parse — no reliance on the audit's own wall-clock at
+// run time, so the same --since string always scopes the same way: full
+// RFC3339 (2026-07-20T15:04:05Z, for an operator with a precise cutoff —
+// e.g. copied from a session's own timestamp) or a bare YYYY-MM-DD date,
+// read as local midnight (for an operator who thinks in calendar days —
+// "since Monday"). Filtering compares this cutoff against each transcript
+// FILE's own mtime (readTranscripts/readCodexSessions), not an in-JSONL
+// timestamp: both harness formats are undocumented and drift (package
+// doc), but a file's mtime needs no format knowledge at all, and it is
+// exactly the signal the I008 workaround approximated by hand (copying a
+// build's session files to a scratch dir).
+func parseSince(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.ParseInLocation("2006-01-02", s, time.Local); err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("not RFC3339 or YYYY-MM-DD: %q", s)
+}
+
+// sessionInScope applies the D28 --since/--session filters (ticket I047) to
+// one top-level claude session name (a "<id>.jsonl" file or an "<id>" dir)
+// or one codex session's rootID, at the granularity readTranscripts and
+// readCodexSessions each discover sessions: file mtime for --since (a
+// transcript with no readable mtime is never excluded by a since filter it
+// can't evaluate — degrade toward inclusion, matching the package's
+// everything-is-a-warning-not-a-loss posture elsewhere), exact id equality
+// for --session.
+func sessionInScope(path string, mtime func(string) (time.Time, bool), since time.Time, id, wantID string) bool {
+	if wantID != "" && id != wantID {
+		return false
+	}
+	if !since.IsZero() {
+		if t, ok := mtime(path); ok && t.Before(since) {
+			return false
+		}
+	}
+	return true
 }
 
 // readTranscripts collects Task/Agent dispatch records from every session
 // *.jsonl and actual models from <session>/subagents/agent-*.jsonl, linked
 // by the sidecar meta.json. Every record it emits is tagged with flavor —
 // the claude source's flavor for every call today, and the seam later
-// readers (codex) tag with their own. All trouble becomes warnings.
-func readTranscripts(dir, flavor string, warnings *[]string) ([]dispatch, []subagent) {
+// readers (codex) tag with their own. since and sessionID implement D28's
+// --since/--session filters (ticket I047), applied per top-level session:
+// a zero since and empty sessionID (every pre-I047 caller) filter nothing,
+// keeping every existing behavior byte-identical. All trouble becomes
+// warnings.
+func readTranscripts(dir, flavor string, since time.Time, sessionID string, warnings *[]string) ([]dispatch, []subagent) {
 	des, err := os.ReadDir(dir)
 	if err != nil {
 		*warnings = append(*warnings, "transcript dir unreadable — all tickets will report no-transcript: "+err.Error())
@@ -862,6 +995,9 @@ func readTranscripts(dir, flavor string, warnings *[]string) ([]dispatch, []suba
 	for _, de := range des {
 		name := de.Name()
 		if de.IsDir() {
+			if !sessionInScope(filepath.Join(dir, name), fileMTime, since, name, sessionID) {
+				continue
+			}
 			subDir := filepath.Join(dir, name, "subagents")
 			subs, _ := filepath.Glob(filepath.Join(subDir, "agent-*.jsonl"))
 			sort.Strings(subs)
@@ -876,18 +1012,23 @@ func readTranscripts(dir, flavor string, warnings *[]string) ([]dispatch, []suba
 						a.toolUseID, a.description = meta.ToolUseID, meta.Description
 					}
 				}
-				more, models := scanJSONL(sub, warnings)
+				more, models, cwd := scanJSONL(sub, warnings)
 				for i := range more {
 					more[i].flavor = flavor
 				}
 				a.models = models
+				a.cwd = cwd
 				dispatches = append(dispatches, more...)
 				agents = append(agents, a)
 			}
 			continue
 		}
 		if strings.HasSuffix(name, ".jsonl") {
-			more, _ := scanJSONL(filepath.Join(dir, name), warnings)
+			path := filepath.Join(dir, name)
+			if !sessionInScope(path, fileMTime, since, strings.TrimSuffix(name, ".jsonl"), sessionID) {
+				continue
+			}
+			more, _, _ := scanJSONL(path, warnings)
 			for i := range more {
 				more[i].flavor = flavor
 			}
@@ -897,25 +1038,41 @@ func readTranscripts(dir, flavor string, warnings *[]string) ([]dispatch, []suba
 	return dispatches, agents
 }
 
-// scanJSONL extracts dispatch tool_use records and distinct assistant model
-// ids from one transcript file. Malformed lines are counted into a single
-// per-file warning; they never fail the audit.
-func scanJSONL(path string, warnings *[]string) ([]dispatch, []string) {
+// fileMTime is sessionInScope's --since probe (D28, ticket I047): a file or
+// dir whose mtime can't be read (permission trouble, a race with deletion)
+// is reported as unknown, never a false cutoff match — sessionInScope then
+// includes it, matching the package's degrade-toward-inclusion posture for
+// operator-filter mechanics that fail closed would silently under-report.
+func fileMTime(path string) (time.Time, bool) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return fi.ModTime(), true
+}
+
+// scanJSONL extracts dispatch tool_use records, distinct assistant model
+// ids, and the session's own cwd (D28, ticket I047 — the first non-empty
+// "cwd" seen on any line; real transcripts carry it on every line, so the
+// first is as good as any) from one transcript file. Malformed lines are
+// counted into a single per-file warning; they never fail the audit.
+func scanJSONL(path string, warnings *[]string) ([]dispatch, []string, string) {
 	f, err := os.Open(path)
 	if err != nil {
 		*warnings = append(*warnings, path+": unreadable: "+err.Error())
-		return nil, nil
+		return nil, nil, ""
 	}
 	defer f.Close()
 	var dispatches []dispatch
 	var models []string
+	var cwd string
 	seen := map[string]bool{}
 	malformed := 0
 	r := bufio.NewReader(f)
 	for {
 		line, err := r.ReadBytes('\n')
 		if len(strings.TrimSpace(string(line))) > 0 {
-			d, m, ok := parseLine(line)
+			d, m, lineCwd, ok := parseLine(line)
 			if !ok {
 				malformed++
 			} else {
@@ -923,6 +1080,9 @@ func scanJSONL(path string, warnings *[]string) ([]dispatch, []string) {
 				if m != "" && !seen[m] {
 					seen[m] = true
 					models = append(models, m)
+				}
+				if cwd == "" && lineCwd != "" {
+					cwd = lineCwd
 				}
 			}
 		}
@@ -937,25 +1097,30 @@ func scanJSONL(path string, warnings *[]string) ([]dispatch, []string) {
 	if malformed > 0 {
 		*warnings = append(*warnings, fmt.Sprintf("%s: %d malformed line(s) skipped", path, malformed))
 	}
-	return dispatches, models
+	return dispatches, models, cwd
 }
 
 // parseLine reads one transcript event. Only assistant events matter: their
 // message.model is the actual, and Task/Agent tool_use blocks are dispatch
-// records. Unrecognized JSON shapes report as malformed (ok=false).
-func parseLine(line []byte) (dispatches []dispatch, model string, ok bool) {
+// records — each stamped with this line's own top-level "cwd" (D28, ticket
+// I047: verified present on both user and assistant lines in real
+// ~/.claude session and subagent transcripts). Unrecognized JSON shapes
+// report as malformed (ok=false).
+func parseLine(line []byte) (dispatches []dispatch, model string, cwd string, ok bool) {
 	var ev struct {
 		Type    string `json:"type"`
+		Cwd     string `json:"cwd"`
 		Message struct {
 			Model   string          `json:"model"`
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
 	if json.Unmarshal(line, &ev) != nil {
-		return nil, "", false
+		return nil, "", "", false
 	}
+	cwd = ev.Cwd
 	if ev.Type != "assistant" {
-		return nil, "", true
+		return nil, "", cwd, true
 	}
 	var blocks []struct {
 		Type  string `json:"type"`
@@ -968,7 +1133,7 @@ func parseLine(line []byte) (dispatches []dispatch, model string, ok bool) {
 		} `json:"input"`
 	}
 	if len(ev.Message.Content) > 0 && json.Unmarshal(ev.Message.Content, &blocks) != nil {
-		return nil, ev.Message.Model, false // assistant event of unrecognized shape
+		return nil, ev.Message.Model, cwd, false // assistant event of unrecognized shape
 	}
 	for _, b := range blocks {
 		if b.Type == "tool_use" && (b.Name == "Task" || b.Name == "Agent") {
@@ -977,10 +1142,11 @@ func parseLine(line []byte) (dispatches []dispatch, model string, ok bool) {
 				description: b.Input.Description,
 				prompt:      b.Input.Prompt,
 				model:       b.Input.Model,
+				cwd:         cwd,
 			})
 		}
 	}
-	return dispatches, ev.Message.Model, true
+	return dispatches, ev.Message.Model, cwd, true
 }
 
 // --- helpers ---

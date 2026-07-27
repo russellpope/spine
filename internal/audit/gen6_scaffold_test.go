@@ -34,7 +34,7 @@ model_routing:
 		"I501": "primary", "I502": "routine", "I503": "mechanical", "I504": "fallback",
 	})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{
+	writeDispatchTranscript(t, dir, tdir, map[string]string{
 		"I501": "claude-fable-5",
 		"I502": "my-team-tuned-model",
 		"I503": "claude-haiku-4-5",
@@ -97,7 +97,7 @@ func TestGen10ScaffoldMirrorResolvesThroughAudit(t *testing.T) {
 		gen6ProofTicket(t, dir, id, tier)
 	}
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{
+	writeDispatchTranscript(t, dir, tdir, map[string]string{
 		"I601": "fable",
 		"I602": "my-pinned-routine-model",
 		"I603": "claude-haiku-4-5",

@@ -58,6 +58,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // codexTeamSpawnStartRe matches a team spawn "start" command — herdr agent
@@ -550,7 +551,19 @@ func (p *gitCommitProber) knows(hash string) bool {
 // trouble degrades to a warning, never an error — an undocumented, drifting
 // format must never break the verify stage (design D-doc, "spine
 // maintainer" story).
-func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []subagent, []codexNearMiss) {
+//
+// since and sessionID implement D28's --since/--session operator filters
+// (ticket I047), layered on top of D22's hard repo scoping rather than
+// replacing it: --since compares each rollout FILE's own mtime against the
+// cutoff (parseSince's doc — the format is undocumented, a file's mtime
+// needs no parsing of it at all), skipped before the file is even opened;
+// --session matches session_meta.payload.session_id, the thread tree's
+// ROOT id (codexSessionMeta.rootID) — the same id every file in one lead+
+// workers tree shares, so restricting to one session id keeps that whole
+// tree together, mirroring what --session does for a claude session and
+// its subagents. A zero since and empty sessionID (every pre-I047 caller)
+// filter nothing.
+func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, warnings *[]string) ([]dispatch, []subagent, []codexNearMiss) {
 	absRepo, err := filepath.Abs(repoDir)
 	if err != nil {
 		absRepo = repoDir
@@ -563,9 +576,15 @@ func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []s
 			}
 			return nil // a deeper entry failed to stat; skip it, keep walking
 		}
-		if !de.IsDir() && strings.HasSuffix(de.Name(), ".jsonl") {
-			files = append(files, path)
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".jsonl") {
+			return nil
 		}
+		if !since.IsZero() {
+			if info, err := de.Info(); err == nil && info.ModTime().Before(since) {
+				return nil // --since: older than the cutoff, skipped before it's even opened
+			}
+		}
+		files = append(files, path)
 		return nil
 	})
 	if walkErr != nil {
@@ -582,6 +601,9 @@ func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []s
 		res, ok := scanCodexFile(path, warnings)
 		if !ok {
 			continue
+		}
+		if sessionID != "" && res.meta.rootID() != sessionID {
+			continue // --session: restrict to one thread tree
 		}
 		// D22: in scope iff cwd resolves inside the repo (clause 1) or the
 		// session's git commit hash is known to the repo (clause 2). The

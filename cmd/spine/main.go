@@ -567,7 +567,7 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 
 func cmdAudit(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, `usage: spine audit <routing|stages> [flags]  (audit routing [--dir D] [--transcripts DIR] [--codex-sessions DIR]; audit stages [--dir D])`)
+		fmt.Fprintln(stderr, `usage: spine audit <routing|stages> [flags]  (audit routing [--dir D] [--transcripts DIR] [--codex-sessions DIR] [--since TIME] [--session ID]; audit stages [--dir D])`)
 		return 2
 	}
 	switch args[0] {
@@ -589,6 +589,8 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 	dir := fs.String("dir", ".", "repo root")
 	transcripts := fs.String("transcripts", "", "harness transcript dir (default: derived from repo path under ~/.claude/projects)")
 	codexSessions := fs.String("codex-sessions", "", "codex session dir (default: $CODEX_HOME/sessions, else ~/.codex/sessions)")
+	since := fs.String("since", "", "scope to sessions at/after this cutoff (RFC3339, or YYYY-MM-DD for local midnight); operator escape hatch, default: unscoped")
+	session := fs.String("session", "", "scope to one session id (claude: the session's file/dir base name; codex: session_meta's root session_id); default: unscoped")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -620,7 +622,7 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 			cdir = derived
 		}
 	}
-	rep, err := audit.Run(audit.Options{RepoDir: *dir, ClaudeTranscriptsDir: tdir, CodexSessionsDir: cdir})
+	rep, err := audit.Run(audit.Options{RepoDir: *dir, ClaudeTranscriptsDir: tdir, CodexSessionsDir: cdir, Since: *since, Session: *session})
 	if err != nil {
 		fmt.Fprintln(stderr, "audit routing:", err)
 		return 2

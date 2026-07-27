@@ -502,7 +502,7 @@ func TestCodexMissingSessionsDirDegradesToWarning(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I046": "primary"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{"I046": "fable"})
+	writeDispatchTranscript(t, dir, tdir, map[string]string{"I046": "fable"})
 
 	rep, err := Run(Options{
 		RepoDir:              dir,
@@ -548,7 +548,7 @@ func TestCodexMixedClaudeAndCodexEvidenceJudgedPerFlavor(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I048": "routine"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, tdir, map[string]string{"I048": "sonnet"})
+	writeDispatchTranscript(t, dir, tdir, map[string]string{"I048": "sonnet"})
 	codexDir := t.TempDir()
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
 		codexSessionMetaLine("root-8", "root-8", "", dir, "user", "{}"),
