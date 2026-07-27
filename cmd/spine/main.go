@@ -601,6 +601,14 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 		}
 		tdir = derived
 	}
+	// Warning rule (ratified at I041 review, design D-doc "Flavor
+	// threading"): a missing EXPLICITLY-requested sessions dir warns; a
+	// missing un-overridden default is a silent skip — a codex-less machine
+	// is normal, and a standing warning on every audit there is exactly the
+	// permanent-noise failure the design's problem statement decries. So
+	// only the derived default is stat-checked here; an explicit
+	// --codex-sessions always reaches Run and gets its warning from
+	// readCodexSessions same as before.
 	cdir := *codexSessions
 	if cdir == "" {
 		derived, err := audit.DefaultCodexSessionsDir()
@@ -608,7 +616,9 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "audit routing:", err)
 			return 2
 		}
-		cdir = derived
+		if _, statErr := os.Stat(derived); statErr == nil {
+			cdir = derived
+		}
 	}
 	rep, err := audit.Run(audit.Options{RepoDir: *dir, ClaudeTranscriptsDir: tdir, CodexSessionsDir: cdir})
 	if err != nil {

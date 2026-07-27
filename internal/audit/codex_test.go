@@ -192,6 +192,16 @@ func TestCodexSpawnedThreadActualSupersedesDeclared(t *testing.T) {
 // are structurally excluded (D23) — even with no competing legitimate
 // evidence, the ticket must land on no-transcript, never pick up the
 // synthetic token.
+//
+// Review finding I1: a fixture whose only content is the turn_context
+// model has zero discriminating power — the isSubagent() gate (no
+// thread_spawn on a guardian) already drops that content regardless of
+// isGuardian(), so mutating isGuardian() to unconditionally return false
+// left this test green. Per I009, guardian threads carry quoted transcript
+// history that can include a replayed spawn_agent call; a dispatch-shaped
+// record is added here so the D23 exclusion is what the test actually
+// exercises — gutting isGuardian() must turn this red (verified in the fix
+// report).
 func TestCodexGuardianContributesNoEvidence(t *testing.T) {
 	codexDir := t.TempDir()
 	sessRepo := t.TempDir()
@@ -200,6 +210,14 @@ func TestCodexGuardianContributesNoEvidence(t *testing.T) {
 	writeCodexFile(t, filepath.Join(codexDir, "guardian.jsonl"),
 		codexSessionMetaLine("guard-4", "root-4", "root-4", sessRepo, "subagent", guardianSource),
 		codexTurnContextLine("codex-auto-review"),
+		// Quoted/replayed transcript history inside the guardian's own
+		// review, structurally identical to a real dispatch record. If the
+		// D23 exclusion did not gate the whole file, this alone would claim
+		// I044 with a matching model.
+		codexFunctionCallLine("spawn_agent", map[string]string{
+			"model":     "gpt-5.6-terra",
+			"task_name": "i044 quoted replay inside guardian review",
+		}),
 	)
 
 	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
@@ -249,6 +267,119 @@ func TestCodexModelSwitchingSessionContributesEachTurn(t *testing.T) {
 	if r.Verdict != VerdictSilentDescent {
 		t.Errorf("I045 verdict = %s (%s), want silent-descent — the mechanical turn must reach judgment", r.Verdict, r.Detail)
 	}
+}
+
+// Regression (review finding C1, Critical): an exec_command carrying an
+// unrelated -m flag must never become dispatch evidence. Leads commit
+// routinely; before the fix, ANY -m flag in ANY exec command was
+// accumulated (codexModelFlagRe matched indiscriminately), so
+// `git commit -m "feat: work done"` judged the ticket unmapped-dispatch
+// with actuals `["feat:` — the commit message fragment became the "model".
+// Only commands structurally shaped like a team spawn (herdr/cmux agent
+// start|prompt) may contribute.
+func TestCodexGitCommitNoiseNotMistakenForDispatch(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I903": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+		codexSessionMetaLine("root-903", "root-903", "", sessRepo, "user", "{}"),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"command": "herdr agent start w1 --kind codex --pane wA:p1 -- -m gpt-5.6-terra",
+		}),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"command": `herdr agent prompt w1 "$(<.superpowers/sdd/2026-07-26-i903/dispatch-task-I903.md)"`,
+		}),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"command": `git commit -m "feat: work done"`,
+		}),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I903"]
+	if r.Verdict != VerdictMatch {
+		t.Fatalf("I903 verdict = %s (%s), want match — the commit-message -m must not poison the dispatch", r.Verdict, r.Detail)
+	}
+	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra" {
+		t.Errorf(`I903 actuals = %q, want gpt-5.6-terra only (not a "feat:" fragment from the commit)`, got)
+	}
+}
+
+// Regression (review finding C2, Critical): two team spawns in one lead
+// session must not collapse into a single last-wins dispatch record. Before
+// the fix, the accumulator was session-scoped (not per worker), so a
+// second, unrelated spawn's -m flag silently overwrote the first — two
+// correctly-tiered dispatches (w1 terra -> I903 routine, w2 luna -> I904
+// mechanical) judged I903 silent-descent (BLOCKING) with actuals
+// [gpt-5.6-luna]: a manufactured false blocking verdict from a fully
+// correct build, exactly the confident-wrong-answer class the design
+// forbids. I009's verified example shows the worker name in both the start
+// and prompt commands — the accumulator now keys on it.
+func TestCodexTwoTeamSpawnsKeyedPerWorker(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I903": "routine", "I904": "mechanical"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+		codexSessionMetaLine("root-904", "root-904", "", sessRepo, "user", "{}"),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"command": "herdr agent start w1 --kind codex --pane wA:p1 -- -m gpt-5.6-terra",
+		}),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"command": `herdr agent prompt w1 "$(<.superpowers/sdd/2026-07-26-i903/dispatch-task-I903.md)"`,
+		}),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"command": "herdr agent start w2 --kind codex --pane wB:p1 -- -m gpt-5.6-luna",
+		}),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"command": `herdr agent prompt w2 "$(<.superpowers/sdd/2026-07-26-i904/dispatch-task-I904.md)"`,
+		}),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I903"]; r.Verdict != VerdictMatch || strings.Join(r.Actuals, ",") != "gpt-5.6-terra" {
+		t.Errorf("I903 = %s actuals=%v, want match/gpt-5.6-terra — w2's luna must not bleed into w1's ticket", r.Verdict, r.Actuals)
+	}
+	if r := rows["I904"]; r.Verdict != VerdictMatch || strings.Join(r.Actuals, ",") != "gpt-5.6-luna" {
+		t.Errorf("I904 = %s actuals=%v, want match/gpt-5.6-luna — w1's terra must not bleed into w2's ticket", r.Verdict, r.Actuals)
+	}
+	if rep.Blocking() {
+		t.Error("two correctly-tiered spawns must never manufacture a blocking verdict")
+	}
+}
+
+// Acceptance (Testing Decisions' CLI clause; review finding I3):
+// DefaultCodexSessionsDir's default-derivation branches — $CODEX_HOME set,
+// and the ~/.codex/sessions fallback when it is not.
+func TestDefaultCodexSessionsDir(t *testing.T) {
+	t.Run("CODEX_HOME set", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("CODEX_HOME", home)
+		got, err := DefaultCodexSessionsDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(home, "sessions"); got != want {
+			t.Errorf("DefaultCodexSessionsDir() = %q, want %q", got, want)
+		}
+	})
+	t.Run("CODEX_HOME unset falls back to home dir", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "")
+		got, err := DefaultCodexSessionsDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(got, filepath.Join(".codex", "sessions")) {
+			t.Errorf("DefaultCodexSessionsDir() = %q, want suffix .codex/sessions", got)
+		}
+	})
 }
 
 // Acceptance: a missing/unreadable codex sessions dir degrades to a

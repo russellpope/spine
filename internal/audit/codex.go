@@ -38,10 +38,19 @@ import (
 	"strings"
 )
 
-// codexModelFlagRe pulls the explicit model out of a team spawn command's
-// `-m <model>` flag (herdr agent start … -- -m gpt-5.6-terra and the cmux
-// equivalent, I009).
-var codexModelFlagRe = regexp.MustCompile(`-m\s+(\S+)`)
+// codexTeamSpawnStartRe matches a team spawn "start" command — herdr agent
+// start <worker> … -- -m <model> (I009's verified example) or the cmux
+// equivalent — capturing the worker name and the explicit model. Only
+// commands structurally shaped like this may become dispatch evidence
+// (fix, C1): an arbitrary exec_command carrying an unrelated `-m` flag
+// (e.g. `git commit -m "..."`, which leads run routinely) must not.
+var codexTeamSpawnStartRe = regexp.MustCompile(`^\s*(?:herdr|cmux)\s+agent\s+start\s+(\S+).*-m\s+(\S+)`)
+
+// codexTeamSpawnPromptRe matches a team spawn "prompt" command — herdr
+// agent prompt <worker> "…" or the cmux equivalent — capturing the worker
+// name the prompt text (typically carrying the ticket token via a
+// dispatch-task file path, I009) belongs to.
+var codexTeamSpawnPromptRe = regexp.MustCompile(`^\s*(?:herdr|cmux)\s+agent\s+prompt\s+(\S+)`)
 
 // codexSessionMeta is the payload of a codex rollout's session_meta line —
 // the one line kind carrying thread identity and the guardian marker
@@ -129,6 +138,27 @@ type codexFileResult struct {
 	turnModels []string
 }
 
+// codexExecWorker accumulates one team-spawned worker's evidence across its
+// (possibly several) exec_command calls within one file: the "start" call
+// binds the worker name to its explicit model, and the "prompt" call's text
+// (which typically carries the ticket token, I009) attaches to that same
+// worker (fix, C2). Keying per worker name — rather than one session-wide
+// accumulator — is what stops two correctly-tiered spawns for two different
+// tickets from colliding into a single, wrong dispatch record.
+type codexExecWorker struct {
+	model string
+	text  strings.Builder
+}
+
+// codexScanState is scanCodexFile's mutable per-file accumulator, threaded
+// through scanCodexLine one line at a time.
+type codexScanState struct {
+	res         codexFileResult
+	haveMeta    bool
+	seenModel   map[string]bool
+	execWorkers map[string]*codexExecWorker
+}
+
 // scanCodexFile reads one rollout JSONL file. ok is false when no
 // session_meta line was found or parsed — without thread identity the file
 // cannot be linked or repo-scoped, so it is unusable (a warning, not an
@@ -142,17 +172,13 @@ func scanCodexFile(path string, warnings *[]string) (codexFileResult, bool) {
 	}
 	defer f.Close()
 
-	var res codexFileResult
-	haveMeta := false
-	var execModel string
-	var execText strings.Builder
-	seenModel := map[string]bool{}
+	st := &codexScanState{seenModel: map[string]bool{}, execWorkers: map[string]*codexExecWorker{}}
 	malformed := 0
 	r := bufio.NewReader(f)
 	for {
 		line, err := r.ReadBytes('\n')
 		if strings.TrimSpace(string(line)) != "" {
-			if !scanCodexLine(line, &res, &haveMeta, &execModel, &execText, seenModel) {
+			if !scanCodexLine(line, st) {
 				malformed++
 			}
 		}
@@ -167,23 +193,31 @@ func scanCodexFile(path string, warnings *[]string) (codexFileResult, bool) {
 	if malformed > 0 {
 		*warnings = append(*warnings, fmt.Sprintf("%s: %d malformed line(s) skipped", path, malformed))
 	}
-	if execModel != "" {
-		res.dispatches = append(res.dispatches, dispatch{model: execModel, description: execText.String()})
+	// One dispatch per worker with an explicit declared model (D20: a
+	// dispatch needs an explicit model to be evidence). Sorted by name for
+	// deterministic output — map iteration order is not.
+	names := make([]string, 0, len(st.execWorkers))
+	for name := range st.execWorkers {
+		names = append(names, name)
 	}
-	if !haveMeta {
+	sort.Strings(names)
+	for _, name := range names {
+		w := st.execWorkers[name]
+		if w.model != "" {
+			st.res.dispatches = append(st.res.dispatches, dispatch{model: w.model, description: w.text.String()})
+		}
+	}
+	if !st.haveMeta {
 		*warnings = append(*warnings, path+": no session_meta line — skipped")
 		return codexFileResult{}, false
 	}
-	return res, true
+	return st.res, true
 }
 
-// scanCodexLine handles one JSONL line, folding its evidence into res or the
-// exec-command accumulator (execModel/execText, session-scoped — team spawn
-// commands split the model and the ticket-token-bearing prompt across
-// separate herdr/cmux invocations, I009, so this reader aggregates every
-// function_call in the file rather than correlating individual calls).
-// Returns false only for a line whose recognized shape failed to parse.
-func scanCodexLine(line []byte, res *codexFileResult, haveMeta *bool, execModel *string, execText *strings.Builder, seenModel map[string]bool) bool {
+// scanCodexLine handles one JSONL line, folding its evidence into st.res or
+// st.execWorkers. Returns false only for a line whose recognized shape
+// failed to parse.
+func scanCodexLine(line []byte, st *codexScanState) bool {
 	var ev struct {
 		Type    string          `json:"type"`
 		Payload json.RawMessage `json:"payload"`
@@ -193,10 +227,10 @@ func scanCodexLine(line []byte, res *codexFileResult, haveMeta *bool, execModel 
 	}
 	switch ev.Type {
 	case "session_meta":
-		if json.Unmarshal(ev.Payload, &res.meta) != nil {
+		if json.Unmarshal(ev.Payload, &st.res.meta) != nil {
 			return false
 		}
-		*haveMeta = true
+		st.haveMeta = true
 	case "turn_context":
 		var tc struct {
 			Model string `json:"model"`
@@ -204,9 +238,9 @@ func scanCodexLine(line []byte, res *codexFileResult, haveMeta *bool, execModel 
 		if json.Unmarshal(ev.Payload, &tc) != nil {
 			return false
 		}
-		if tc.Model != "" && !seenModel[tc.Model] {
-			seenModel[tc.Model] = true
-			res.turnModels = append(res.turnModels, tc.Model)
+		if tc.Model != "" && !st.seenModel[tc.Model] {
+			st.seenModel[tc.Model] = true
+			st.res.turnModels = append(st.res.turnModels, tc.Model)
 		}
 	case "response_item":
 		var fc codexFunctionCall
@@ -219,28 +253,49 @@ func scanCodexLine(line []byte, res *codexFileResult, haveMeta *bool, execModel 
 		args := codexFunctionArgs(fc.Arguments)
 		if fc.Name == "spawn_agent" {
 			if m := args["model"]; m != "" {
-				res.dispatches = append(res.dispatches, dispatch{
+				st.res.dispatches = append(st.res.dispatches, dispatch{
 					model:       m,
 					description: args["task_name"],
 				})
 			}
-		} else if cmd := args["command"]; cmd != "" {
-			// Team spawn commands split the model (the `start … -m X` call)
-			// from the ticket-token-bearing prompt (a separate `prompt`
-			// call whose argument names a dispatch-task file, I009) across
-			// two exec_command calls in the same session — aggregate every
-			// such call's text so both halves land in one dispatch record.
-			execText.WriteString(cmd)
-			execText.WriteByte(' ')
-			if match := codexModelFlagRe.FindStringSubmatch(cmd); match != nil {
-				*execModel = match[1]
-			}
+			return true
+		}
+		cmd := args["command"]
+		if cmd == "" {
+			return true
+		}
+		// Only commands structurally shaped like a team spawn (herdr/cmux
+		// agent start|prompt) may become dispatch evidence (fix, C1) — an
+		// arbitrary exec_command carrying an unrelated -m flag (a lead
+		// committing routinely, `git commit -m "..."`) is not a dispatch
+		// record and must contribute nothing.
+		if match := codexTeamSpawnStartRe.FindStringSubmatch(cmd); match != nil {
+			w := st.execWorker(match[1])
+			w.model = match[2]
+			w.text.WriteString(cmd)
+			w.text.WriteByte(' ')
+		} else if match := codexTeamSpawnPromptRe.FindStringSubmatch(cmd); match != nil {
+			w := st.execWorker(match[1])
+			w.text.WriteString(cmd)
+			w.text.WriteByte(' ')
 		}
 	}
 	// event_msg / world_state and any other recognized-but-irrelevant line
 	// kinds carry no dispatch evidence and are silently skipped, not
 	// malformed — mirroring parseLine's treatment of non-assistant events.
 	return true
+}
+
+// execWorker returns the accumulator for a team-spawned worker name,
+// creating it on first reference. Order of start/prompt calls does not
+// matter — both branches key into the same map.
+func (st *codexScanState) execWorker(name string) *codexExecWorker {
+	w, ok := st.execWorkers[name]
+	if !ok {
+		w = &codexExecWorker{}
+		st.execWorkers[name] = w
+	}
+	return w
 }
 
 // cwdInsideRepo reports whether cwd resolves inside absRepo. This is the

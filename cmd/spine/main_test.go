@@ -560,6 +560,29 @@ func TestAuditRoutingCodexSessionsFlag(t *testing.T) {
 	}
 }
 
+// Acceptance (RA1/M1, ratified at I041 review — design D-doc "Flavor
+// threading"): a missing EXPLICITLY-requested --codex-sessions dir warns
+// (proven above); a missing UN-OVERRIDDEN default must be a silent skip —
+// otherwise every audit on a codex-less machine gets a standing warning,
+// the exact permanent-noise failure the design's problem statement decries.
+// CODEX_HOME is pointed at a fresh, sessions-less temp dir so the derived
+// default is deterministically absent, independent of this machine's real
+// ~/.codex state.
+func TestAuditRoutingSilentlySkipsMissingDefaultCodexSessionsDir(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	fixture := func(parts ...string) string {
+		return filepath.Join(append([]string{"..", "..", "internal", "audit", "testdata"}, parts...)...)
+	}
+	code, out, errs := runCmd(t, "audit", "routing",
+		"--dir", fixture("clean", "repo"), "--transcripts", fixture("clean", "transcripts"))
+	if code != 0 {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+	if strings.Contains(errs, "codex sessions dir unreadable") {
+		t.Errorf("a missing un-overridden default must not warn, got errs=%q", errs)
+	}
+}
+
 func TestAuditUsageErrors(t *testing.T) {
 	if code, _, errs := runCmd(t, "audit"); code != 2 || !strings.Contains(errs, "usage: spine audit") {
 		t.Fatalf("bare audit: code=%d errs=%q", code, errs)
