@@ -93,6 +93,29 @@ workers `gpt-5.6-terra`, expected verdict: match):
 - Scale: 951 session files total (2026-07-02..25); 63 reference moo-clone
   since 07-24 alone. Discovery needs date/token pruning, not a full-dir parse.
 
+Verified 2026-07-27 (I048 live acceptance — surprises the synthetic fixtures
+missed, found by running the finished reader against the real store):
+
+- `exec_command` function_call arguments are a JSON-string-encoded object
+  whose command text lives under key **`cmd`** (NOT `command`); sibling keys
+  observed: `workdir`, `yield_time_ms`, `max_output_tokens`,
+  `sandbox_permissions`, `justification`, `prefix_rule`.
+- The FIRST user-role message of a session is an INJECTED preamble, not the
+  operator's prompt: `# AGENTS.md instructions for <cwd>` (96 of the 120
+  most recent sessions) or `<recommended_plugins>` (19/120). Hook prompts
+  (`<hook_prompt hook_run_id=…>`) are also injected as user-role messages
+  later in the stream. The dispatch brief is the first user message NOT
+  shaped as an injected preamble — discriminator: first line starts with
+  `# AGENTS.md instructions` or matches an angle-bracket tag opener
+  (`^<[a-z_]+[ >]`). If every user message is injected-shaped, there is no
+  opening brief (degrade: contributes nothing).
+- Real M4b worker briefs DO carry the ticket token in their first line
+  ("You are the fresh PRIMARY-tier I035 finisher…") — the D21 first-line
+  rule holds on real dispatch data.
+- `thread_source` is serialized compact (`:"subagent"`, no space) in
+  619/953 files with zero spaced variants (recorded at I049 review; the
+  pruning exemption's marker relies on this external serializer behavior).
+
 ## Fix
 
 Add a Codex transcript reader alongside the Claude Code one: discover the
