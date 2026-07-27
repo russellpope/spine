@@ -33,6 +33,14 @@ than one dispatch under a single root names distinct tickets and the merged
 actuals differ, the detail line should disclose the coarse linkage so a
 surprising verdict is diagnosable at a glance.
 
+Ratified at I044 review: "merged actuals differ" is implemented as "the
+shared root's linked actual superseded the individually declared alias"
+(linked[root] true with ≥2 distinct tickets under the root). A literal
+cross-ticket differ check is near-dead code — root-keyed linking gives
+tickets sharing a root identical merged actual sets by construction. The
+implemented gate fires exactly on the operator-surprise case the note
+exists for (declared luna/sol, actual terra visible to both).
+
 ## Acceptance criteria
 
 - [ ] Guardian-only match yields `unattributed-transcript` with a why-excluded detail naming the file
