@@ -443,14 +443,28 @@ func newGitCommitProber(repoDir string, warnings *[]string) *gitCommitProber {
 	return &gitCommitProber{repoDir: repoDir, warnings: warnings, cache: map[string]bool{}}
 }
 
+// gitObjectIDRe matches a plausible raw git object id: lowercase hex,
+// abbreviated (4 chars) up to full-length (40 chars, sha1) or longer
+// (sha256 repos use 64). Guards knows against ref-ish inputs (I043 review
+// finding I1): `git cat-file -e <rev>^{commit}` resolves ANY valid revision
+// expression, not just a raw object id — "main^{commit}" or "HEAD^{commit}"
+// both exit 0 in a repo with commits, so a non-SHA commit_hash (branch
+// name, HEAD, a future format's ref-ish field) would false-positive into
+// nearly every repo, exactly the cross-repo false-positive class D22 exists
+// to prevent. Today's verified wire format always sends a real SHA (I009);
+// this guards against format drift, not today's known shape.
+var gitObjectIDRe = regexp.MustCompile(`^[0-9a-f]{4,64}$`)
+
 // knows reports whether hash names a commit in p.repoDir's object store. A
-// missing/empty hash trivially contributes no probe (D22). Degrade-never-
-// fail: if the probe mechanism itself doesn't work — repoDir is not a git
-// checkout, or the git binary is unavailable — knows reports false (cwd-only
-// behavior) and records exactly one report warning naming the degradation,
-// no matter how many hashes are asked about.
+// missing/empty hash, or one that doesn't look like a raw object id
+// (gitObjectIDRe), trivially contributes no probe (D22) — treated
+// identically to the empty-hash case, never shelled out to git. Degrade-
+// never-fail: if the probe mechanism itself doesn't work — repoDir is not a
+// git checkout, or the git binary is unavailable — knows reports false
+// (cwd-only behavior) and records exactly one report warning naming the
+// degradation, no matter how many hashes are asked about.
 func (p *gitCommitProber) knows(hash string) bool {
-	if hash == "" {
+	if hash == "" || !gitObjectIDRe.MatchString(hash) {
 		return false
 	}
 	if !p.checked {

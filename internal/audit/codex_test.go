@@ -987,3 +987,53 @@ func TestCodexCrossRepoCollisionSameTicketEachAuditsOwnEvidence(t *testing.T) {
 		t.Errorf("repo B I024 actuals = %q, want gpt-5.6-luna only — repo A's session must not leak in", got)
 	}
 }
+
+// Regression (I043 review finding I1, Important). `git cat-file -e
+// <rev>^{commit}` resolves ANY valid revision expression, not just a raw
+// object id — confirmed directly: in a repo with a `main` branch, both
+// "main^{commit}" and "HEAD^{commit}" exit 0. Before the fix, a ref-ish
+// commit_hash value (branch name, HEAD, a future format's drifted field)
+// would false-positive knows() into nearly every repo that happens to have
+// a same-named ref — exactly the cross-repo false-positive class D22 exists
+// to prevent, worse than a missed session by the design's own ranking. Both
+// sessions here have cwd outside the repo and a ref-like (not SHA-like)
+// commit_hash; both must stay out of scope, same as an empty/unknown hash.
+func TestCodexRefLikeCommitHashNotTreatedAsObjectID(t *testing.T) {
+	codexDir := t.TempDir()
+	repoDir := t.TempDir()
+	makeTestGitRepo(t, repoDir)
+	writeAuditRepo(t, repoDir, gen9DefaultWorkflow, map[string]string{"I915": "routine", "I916": "routine"})
+	// Guarantee a ref literally named "main" exists at HEAD regardless of
+	// this host's git init.defaultBranch setting (checkout -B creates or
+	// resets it, so it succeeds whether or not "main" already exists).
+	if out, err := exec.Command("git", "-C", repoDir, "checkout", "-q", "-B", "main").CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -B main: %v\n%s", err, out)
+	}
+	worktreeCwd := t.TempDir()
+
+	writeCodexFile(t, filepath.Join(codexDir, "main-ref.jsonl"),
+		codexSessionMetaLineWithGit("worker-915", "worker-915", "", worktreeCwd, "user", "{}", "main"),
+		codexUserMessageLine("# Task I915 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-sol"), // decoy: must never surface — "main" is a ref, not an object id
+	)
+	writeCodexFile(t, filepath.Join(codexDir, "head-ref.jsonl"),
+		codexSessionMetaLineWithGit("worker-916", "worker-916", "", worktreeCwd, "user", "{}", "HEAD"),
+		codexUserMessageLine("# Task I916 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-luna"), // decoy: must never surface — "HEAD" is a ref, not an object id
+	)
+
+	rep, err := Run(Options{RepoDir: repoDir, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I915"]; r.Verdict != VerdictNoTranscript || len(r.Actuals) != 0 {
+		t.Errorf(`I915 verdict = %s actuals=%v, want no-transcript/none — "main" must not resolve via cat-file`, r.Verdict, r.Actuals)
+	}
+	if r := rows["I916"]; r.Verdict != VerdictNoTranscript || len(r.Actuals) != 0 {
+		t.Errorf(`I916 verdict = %s actuals=%v, want no-transcript/none — "HEAD" must not resolve via cat-file`, r.Verdict, r.Actuals)
+	}
+	if rep.Blocking() {
+		t.Error("a ref-like commit_hash value must never manufacture a blocking verdict via cross-repo false-positive")
+	}
+}
