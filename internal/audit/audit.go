@@ -19,10 +19,13 @@
 //     is refused (design D14), matching spine update's gate — an
 //     un-upgraded binary must not emit confident verdicts from a misparse.
 //   - .superpowers/sdd/progress.md: one-line ESCALATION / FALLBACK records.
-//   - The harness transcript dir: <dir>/*.jsonl session records plus
-//     <dir>/<session>/subagents/agent-*.jsonl (+ sibling .meta.json). This
-//     format is undocumented and may shift: any parse failure, missing dir,
-//     or unrecognized shape degrades to a Report warning, never an error.
+//   - The claude harness transcript dir: <dir>/*.jsonl session records plus
+//     <dir>/<session>/subagents/agent-*.jsonl (+ sibling .meta.json).
+//   - The codex sessions dir (design D20/D23, I041, see codex.go): rollout
+//     JSONL trees under CodexSessionsDir, read only when that option is
+//     non-empty. Both transcript formats are undocumented and may shift:
+//     any parse failure, missing dir, or unrecognized shape degrades to a
+//     Report warning, never an error.
 //
 // Design-latitude choices (the ticket leaves these open; pinned here):
 //   - Every ticket file in docs/issues with a frontmatter id gets a row;
@@ -37,14 +40,15 @@
 //     Main-session assistant models are never ticket evidence — inline
 //     execution is out of the audit's scope by design.
 //   - Flavor of a dispatch is derived from its transcript source (design
-//     D15; see transcriptFlavor) and travels with the token itself
-//     (evidenceToken) all the way into judgeToken, which resolves it within
-//     that flavor's table alone (I040). Only the claude harness's
-//     transcripts are parsed today, so every token in play carries the
-//     claude flavor; ids declared under other flavors are deliberately
-//     invisible to it. Later readers (the deferred codex-audit effort) plug
-//     in by tagging the tokens they produce with their own flavor — no
-//     change to judge/judgeToken required.
+//     D15; see transcriptFlavor and readCodexSessions) and travels with the
+//     token itself (evidenceToken) all the way into judgeToken, which
+//     resolves it within that flavor's table alone (I040). The claude
+//     reader tags every token it produces "claude"; the codex reader (I041,
+//     codex.go) tags every token it produces "codex" — judge/judgeToken
+//     needed no change to pick up the second source. A worker-session scan
+//     (D21) and full git-commit-probe repo scoping (D22) remain unbuilt
+//     (I042/I043); until then codex evidence comes only from dispatch
+//     records and linkable spawned-thread actuals.
 //   - Token -> tier, within the dispatch's flavor: a token maps to a tier
 //     when it equals the resolved id, one of the table entry's explicitly
 //     declared aliases, or an id the entry shipped as a default before the
@@ -215,12 +219,27 @@ func Run(opts Options) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	codexMapping, err := resolveFlavorTiers(repoDir, "codex")
+	if err != nil {
+		return Report{}, err
+	}
 	// mappings is keyed by flavor so judgeToken can resolve each token
-	// within its own flavor's table (I040); only the claude reader is wired
-	// today, so this holds exactly one entry.
-	mappings := map[string]map[string]resolvedTier{flavor: mapping}
+	// within its own flavor's table (I040). The codex entry resolves
+	// unconditionally (cheap, always defined via embedded defaults) even
+	// when no codex sessions dir is configured — only the reader below is
+	// gated on that.
+	mappings := map[string]map[string]resolvedTier{flavor: mapping, "codex": codexMapping}
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
 	dispatches, agents := readTranscripts(transcriptsDir, flavor, &rep.Warnings)
+	// Codex discovery only runs when CodexSessionsDir is set (the CLI always
+	// sets it — design D-doc, "discovery is always on"; leaving it empty is
+	// how every pre-I041 caller and every existing test opts out, and must
+	// audit exactly as before — no attempt, no warning, I041).
+	if opts.CodexSessionsDir != "" {
+		codexDispatches, codexAgents := readCodexSessions(opts.CodexSessionsDir, repoDir, &rep.Warnings)
+		dispatches = append(dispatches, codexDispatches...)
+		agents = append(agents, codexAgents...)
+	}
 
 	evidence := map[string][]evidenceToken{} // ticket id -> flavor-tagged model tokens
 	claimed := map[int]bool{}                // dispatch index -> matched a ticket
@@ -230,8 +249,17 @@ func Run(opts Options) (Report, error) {
 			linked[a.toolUseID] = true
 		}
 	}
+	// codex ticket-token matching is case-insensitive (D20's "Flavor
+	// threading" closing paragraph); the claude reader's matching is
+	// untouched. codex dispatch descriptions/prompts are folded to upper
+	// case here rather than at parse time, so Unmatched's display text
+	// keeps its natural case.
 	matches := func(d dispatch, id string) bool {
-		return containsToken(d.description, id) || containsToken(firstLine(d.prompt), id)
+		desc, prompt := d.description, firstLine(d.prompt)
+		if d.flavor == "codex" {
+			desc, prompt = strings.ToUpper(desc), strings.ToUpper(prompt)
+		}
+		return containsToken(desc, id) || containsToken(prompt, id)
 	}
 	for _, t := range tickets {
 		for i, d := range dispatches {

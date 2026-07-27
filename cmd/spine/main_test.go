@@ -502,9 +502,15 @@ func TestAuditRoutingEndToEnd(t *testing.T) {
 	fixture := func(parts ...string) string {
 		return filepath.Join(append([]string{"..", "..", "internal", "audit", "testdata"}, parts...)...)
 	}
+	// --codex-sessions is pinned to a controlled, absent dir throughout:
+	// otherwise the un-overridden default (I041) would resolve to this
+	// machine's real ~/.codex/sessions and scan it on every call, exactly
+	// the kind of non-hermetic, environment-dependent slowdown --transcripts
+	// is already pinned everywhere below to avoid.
+	noCodex := filepath.Join(t.TempDir(), "no-codex-sessions")
 	// clean fixture: all match, exit 0
 	code, out, errs := runCmd(t, "audit", "routing",
-		"--dir", fixture("clean", "repo"), "--transcripts", fixture("clean", "transcripts"))
+		"--dir", fixture("clean", "repo"), "--transcripts", fixture("clean", "transcripts"), "--codex-sessions", noCodex)
 	if code != 0 {
 		t.Fatalf("clean: code=%d out=%q err=%q", code, out, errs)
 	}
@@ -518,7 +524,7 @@ func TestAuditRoutingEndToEnd(t *testing.T) {
 	}
 	// mixed fixture: contains a silent-descent, exit 1
 	code, out, _ = runCmd(t, "audit", "routing",
-		"--dir", fixture("mixed", "repo"), "--transcripts", fixture("mixed", "transcripts"))
+		"--dir", fixture("mixed", "repo"), "--transcripts", fixture("mixed", "transcripts"), "--codex-sessions", noCodex)
 	if code != 1 || !strings.Contains(out, "silent-descent") {
 		t.Fatalf("mixed: code=%d (want 1) out=%q", code, out)
 	}
@@ -527,9 +533,30 @@ func TestAuditRoutingEndToEnd(t *testing.T) {
 	}
 	// degraded fixture: warnings on stderr, exit 0
 	code, _, errs = runCmd(t, "audit", "routing",
-		"--dir", fixture("degraded", "repo"), "--transcripts", fixture("degraded", "transcripts"))
+		"--dir", fixture("degraded", "repo"), "--transcripts", fixture("degraded", "transcripts"), "--codex-sessions", noCodex)
 	if code != 0 || !strings.Contains(errs, "warning:") || !strings.Contains(errs, "bad.jsonl") {
 		t.Fatalf("degraded: code=%d errs=%q", code, errs)
+	}
+}
+
+// Acceptance (I041): --codex-sessions overrides discovery, mirroring
+// --transcripts. A missing/nonexistent dir degrades to a warning, never an
+// error, and never changes the exit code driven by claude-side evidence.
+func TestAuditRoutingCodexSessionsFlag(t *testing.T) {
+	fixture := func(parts ...string) string {
+		return filepath.Join(append([]string{"..", "..", "internal", "audit", "testdata"}, parts...)...)
+	}
+	code, out, errs := runCmd(t, "audit", "routing",
+		"--dir", fixture("clean", "repo"), "--transcripts", fixture("clean", "transcripts"),
+		"--codex-sessions", filepath.Join(t.TempDir(), "no-such-codex-dir"))
+	if code != 0 {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+	if !strings.Contains(errs, "codex sessions dir unreadable") {
+		t.Errorf("want a codex-sessions warning, got errs=%q", errs)
+	}
+	if !strings.Contains(out, "I101") || !strings.Contains(out, "match") {
+		t.Errorf("claude-side evidence must still judge normally: out=%q", out)
 	}
 }
 

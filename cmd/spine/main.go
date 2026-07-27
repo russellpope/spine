@@ -567,7 +567,7 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 
 func cmdAudit(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, `usage: spine audit <routing|stages> [flags]  (audit routing [--dir D] [--transcripts DIR]; audit stages [--dir D])`)
+		fmt.Fprintln(stderr, `usage: spine audit <routing|stages> [flags]  (audit routing [--dir D] [--transcripts DIR] [--codex-sessions DIR]; audit stages [--dir D])`)
 		return 2
 	}
 	switch args[0] {
@@ -588,6 +588,7 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	transcripts := fs.String("transcripts", "", "harness transcript dir (default: derived from repo path under ~/.claude/projects)")
+	codexSessions := fs.String("codex-sessions", "", "codex session dir (default: $CODEX_HOME/sessions, else ~/.codex/sessions)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -600,7 +601,16 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 		}
 		tdir = derived
 	}
-	rep, err := audit.Run(audit.Options{RepoDir: *dir, ClaudeTranscriptsDir: tdir})
+	cdir := *codexSessions
+	if cdir == "" {
+		derived, err := audit.DefaultCodexSessionsDir()
+		if err != nil {
+			fmt.Fprintln(stderr, "audit routing:", err)
+			return 2
+		}
+		cdir = derived
+	}
+	rep, err := audit.Run(audit.Options{RepoDir: *dir, ClaudeTranscriptsDir: tdir, CodexSessionsDir: cdir})
 	if err != nil {
 		fmt.Fprintln(stderr, "audit routing:", err)
 		return 2
