@@ -115,6 +115,15 @@ missed, found by running the finished reader against the real store):
 - `thread_source` is serialized compact (`:"subagent"`, no space) in
   619/953 files with zero spaced variants (recorded at I049 review; the
   pruning exemption's marker relies on this external serializer behavior).
+- **`session_meta.payload.source` is POLYMORPHIC**: a plain JSON string
+  (`"cli"`) on top-level user sessions, an object
+  (`{"subagent":{"other":"guardian"}}` / `{"subagent":{"thread_spawn":{…}}}`)
+  only on subagent threads. A reader that types it as an object fails to
+  unmarshal every top-level session's meta line (observed live: 410
+  malformed-meta warnings across the 953-file store — every lead and worker
+  invisible). Parse it polymorphically; a string source means a plain
+  top-level session. Other payload fields observed with non-string types:
+  `base_instructions` (object), `context_window` (object), `git` (object).
 
 ## Fix
 
