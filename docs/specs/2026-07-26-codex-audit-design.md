@@ -218,6 +218,26 @@ evidence inside the repo. New `--since <time>` and `--session <id>` filters
 scope the transcript set as operator escape hatches. No started-date
 anchoring: time-anchoring to the current build would blind multi-milestone
 repos to earlier builds' transcripts (M4a), the wrong default for the estate.
+(Amendments ratified at I047 review: (1) Reference matching is
+boundary-aware — the path clause requires a separator/end after the matched
+path and the basename clause treats `-`/`_`/`.` as word characters, so a
+`praxis-web` dispatch can never qualify a `praxis` audit; prefix-sharing
+sibling repos are the I008 class too. (2) The subagent-direct-description
+evidence path is gated by the same rule — a front-door-only gate is theater
+on a shared transcripts dir. (3) Worktree limitation, documented posture:
+a claude dispatch run from a worktree checkout whose prompt never names the
+primary repo fails both clauses and degrades to honest
+no-transcript/unmatched-visible. D28 deliberately gains NO third clause —
+claude transcripts carry no commit hash to probe (verified against live
+session data; the D22 analog has no input here), and the durable signals
+that do exist (branch names, dir-name affinity) would readmit cross-repo
+collision. The gap closes AT SOURCE, D26-style: estate dispatch templates
+(claude-team worker spawns, SDD briefs) must name the primary repo's
+absolute path in prompt text — deepthought-side follow-up, not audit-side
+guessing. (4) An unparseable `--since` is a usage error (exit 2), not a
+degrade path: operator-typed values have no valid fallback reading, and
+warn-and-proceed silently readmits exactly the sessions the operator tried
+to exclude.)
 
 **Flavor threading (per D15's named seam).** Flavor derives per transcript
 source — claude layout vs codex sessions — and travels beside each token into
