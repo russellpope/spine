@@ -298,7 +298,14 @@ func Run(opts Options) (Report, error) {
 	// byte-identical.
 	var codexNearMisses []codexNearMiss
 	if opts.CodexSessionsDir != "" {
-		codexDispatches, codexAgents, codexNM, codexSessionMatched := readCodexSessions(opts.CodexSessionsDir, repoDir, since, opts.Session, &rep.Warnings)
+		// I049: the discovery pre-filter's token set is every audited
+		// ticket's id, already read above (line 238) — well before this
+		// call, so no extra pass over docs/issues is needed.
+		ticketTokens := make([]string, len(tickets))
+		for i, t := range tickets {
+			ticketTokens[i] = t.id
+		}
+		codexDispatches, codexAgents, codexNM, codexSessionMatched := readCodexSessions(opts.CodexSessionsDir, repoDir, since, opts.Session, ticketTokens, &rep.Warnings)
 		dispatches = append(dispatches, codexDispatches...)
 		agents = append(agents, codexAgents...)
 		codexNearMisses = codexNM

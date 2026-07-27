@@ -48,10 +48,9 @@
 package audit
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -269,35 +268,29 @@ type codexScanState struct {
 	execWorkers map[string]*codexExecWorker
 }
 
-// scanCodexFile reads one rollout JSONL file. ok is false when no
-// session_meta line was found or parsed — without thread identity the file
-// cannot be linked or repo-scoped, so it is unusable (a warning, not an
-// evidence source). All other trouble degrades to a per-file warning,
-// mirroring scanJSONL's posture for the claude reader.
-func scanCodexFile(path string, warnings *[]string) (codexFileResult, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		*warnings = append(*warnings, path+": unreadable: "+err.Error())
-		return codexFileResult{}, false
-	}
-	defer f.Close()
-
+// parseCodexBytes parses one rollout JSONL file's already-read bytes. ok is
+// false when no session_meta line was found or parsed — without thread
+// identity the file cannot be linked or repo-scoped, so it is unusable (a
+// warning, not an evidence source). All other trouble degrades to a
+// per-file warning, mirroring scanJSONL's posture for the claude reader.
+//
+// Takes data rather than reading path itself (I049): readCodexSessions
+// already reads the file once for the discovery pre-filter's token scan
+// and passes those SAME bytes on here — reading path a second time would
+// double the I/O for every file that survives the pre-filter, which
+// live-measured cost more than pruning saved (most codex stores mention
+// audited ticket ids often enough in ordinary prose that few files actually
+// prune, so avoiding the redundant read is where I049's real win comes
+// from, not the prune count alone).
+func parseCodexBytes(path string, data []byte, warnings *[]string) (codexFileResult, bool) {
 	st := &codexScanState{seenModel: map[string]bool{}, execWorkers: map[string]*codexExecWorker{}}
 	malformed := 0
-	r := bufio.NewReader(f)
-	for {
-		line, err := r.ReadBytes('\n')
-		if strings.TrimSpace(string(line)) != "" {
-			if !scanCodexLine(line, st) {
-				malformed++
-			}
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
 		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			*warnings = append(*warnings, path+": read error: "+err.Error())
-			break
+		if !scanCodexLine(line, st) {
+			malformed++
 		}
 	}
 	if malformed > 0 {
@@ -533,6 +526,68 @@ func (p *gitCommitProber) knows(hash string) bool {
 	return known
 }
 
+// codexMayContribute is the I049 pre-filter predicate: a cheap raw-bytes
+// check of whether data COULD contribute evidence to any of tokens (audited
+// ticket ids), run before the full JSONL parse. Two ways to survive it:
+//
+//  1. the JSON string-value shape `:"subagent"` (compact JSON, no space
+//     after ':' — guaranteed by the JSONL format itself: a rollout line is
+//     one JSON object per line, so codex cannot be emitting embedded
+//     newlines inside a value either, meaning every standard encoder's
+//     compact form applies here). D20 clause 2 (spawned-thread actuals)
+//     links a codex-native subagent's turn_context evidence to its
+//     dispatching session PURELY by shared root id
+//     (session_meta.payload.session_id) — never by ticket-token text in the
+//     subagent file's own bytes (TestCodexSpawnedThreadActualSupersedesDeclared's
+//     sub.jsonl carries no ticket token at all). A subagent-shaped file
+//     (thread_source "subagent" — real subagent or guardian, codexSessionMeta.
+//     Source.Subagent) can therefore never be soundly proven irrelevant by
+//     token absence alone, so it is always let through — codex's own
+//     session_meta encodes it as `"thread_source":"subagent"` (codexSessionMetaLine/
+//     threadSpawnSource/guardianSource in codex_test.go show the exact
+//     shapes; a plain top-level user session's source is "{}" and never
+//     contains this string), which `:"subagent"` matches without assuming
+//     the specific key name "thread_source" — a placement this package
+//     elsewhere calls "undocumented, version-drifting" (I009). Bare
+//     "subagent" (no colon/quote, case-folded) was measured live against
+//     this repo's own ~/.codex/sessions store to match ~97% of it: this
+//     project's subject matter IS subagent auditing, so plain-English
+//     prose mentions of the word are common here specifically, and a
+//     marker that can't tell code from prose prunes almost nothing on this
+//     particular repo.
+//  2. tokens: a ticket id appears anywhere in data as a literal byte
+//     string, either upper (a doc/ticket reference) or lower (D20: codex's
+//     task_name convention lowercases ids) — the only two case forms a
+//     ticket id (one uppercase letter, digits only otherwise,
+//     docs/issues/README.md convention) ever appears in. This covers every
+//     evidence path except clause 1 above: spawn_agent task_name, a
+//     team-spawn command's text (which carries the token via a
+//     dispatch-task file path, I009), and the opening-user-message carrier
+//     (D21) all place the token in the file's own bytes.
+//
+// Both checks are over-inclusive by construction (a false "yes" only costs
+// a wasted full parse); under-inclusion is what would break soundness, so
+// neither check ever narrows past what's proven safe. Neither case-folds
+// its ENTIRE input: bytes.ToUpper(data) (an O(n) allocation and copy per
+// file) was measured live to cost more than pruning saved, on top of
+// catching even more incidental prose.
+func codexMayContribute(data []byte, tokens []string) bool {
+	if bytes.Contains(data, []byte(`:"subagent"`)) {
+		return true
+	}
+	for _, tok := range tokens {
+		if tok == "" {
+			continue
+		}
+		upper := strings.ToUpper(tok)
+		lower := strings.ToLower(tok)
+		if bytes.Contains(data, []byte(upper)) || bytes.Contains(data, []byte(lower)) {
+			return true
+		}
+	}
+	return false
+}
+
 // readCodexSessions walks a codex sessions dir — real layout
 // <dir>/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl, though any nesting is
 // accepted — collecting dispatch records and spawned-thread actuals (D20)
@@ -563,7 +618,25 @@ func (p *gitCommitProber) knows(hash string) bool {
 // tree together, mirroring what --session does for a claude session and
 // its subagents. A zero since and empty sessionID (every pre-I047 caller)
 // filter nothing.
-func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, warnings *[]string) ([]dispatch, []subagent, []codexNearMiss, bool) {
+//
+// tokens implements I049's discovery pre-filter: after the mtime skip above
+// (cheapest — no file open) each surviving file is read ONCE into memory;
+// codexMayContribute checks those bytes for the pre-filter (cheap — a
+// handful of substring scans) before parseCodexBytes decodes the same bytes
+// line by line (expensive — ~12-14s live over 953 real files, the ticket's
+// own measurement, dominated by per-line JSON unmarshaling). A file proven
+// unable to contribute (see codexMayContribute's doc) is dropped without
+// ever reaching parseCodexBytes. The pre-filter itself is skipped whenever
+// sessionID is set: --session's matchedSession diagnostic (M3, I047 review)
+// needs every candidate file's rootID parsed to know whether the requested
+// id exists in the store at all, even for a file that turns out to carry no
+// ticket token — pruning it first would silently flip "matched" to "matched
+// no sessions" and violate AC2's byte-identical-Reports requirement, for a
+// query that isn't the whole-store sweep the pre-filter targets anyway. A
+// read failure degrades exactly as it always has — a per-file "unreadable"
+// warning, never an error — and is never treated as pre-filter proof of
+// anything.
+func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, tokens []string, warnings *[]string) ([]dispatch, []subagent, []codexNearMiss, bool) {
 	absRepo, err := filepath.Abs(repoDir)
 	if err != nil {
 		absRepo = repoDir
@@ -611,7 +684,21 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, w
 	// has that id), just not "the id exists nowhere in the store".
 	matchedSession := sessionID == ""
 	for _, path := range files {
-		res, ok := scanCodexFile(path, warnings)
+		// I049: read once, reuse the same bytes for both the pre-filter and
+		// the parse below — reading path a second time inside the parse
+		// step would double the I/O for every file that survives, which
+		// live-measured cost more than pruning saved. A read failure here
+		// degrades exactly as it always has (a warning, never an error) and
+		// is never treated as pre-filter proof of anything.
+		data, err := os.ReadFile(path)
+		if err != nil {
+			*warnings = append(*warnings, path+": unreadable: "+err.Error())
+			continue
+		}
+		if sessionID == "" && !codexMayContribute(data, tokens) {
+			continue // no ticket token, not subagent-shaped; cannot contribute
+		}
+		res, ok := parseCodexBytes(path, data, warnings)
 		if !ok {
 			continue
 		}
