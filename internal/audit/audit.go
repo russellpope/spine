@@ -110,14 +110,15 @@ type Verdict string
 
 // Verdict values, worst first.
 const (
-	VerdictSilentDescent       Verdict = "silent-descent"        // blocking
-	VerdictUnmappedDispatch    Verdict = "unmapped-dispatch"     // warn
-	VerdictUnexplainedFallback Verdict = "unexplained-fallback"  // warn
-	VerdictEscalatedNoReason   Verdict = "escalated-no-reason"   // warn
-	VerdictNoTranscript        Verdict = "no-transcript"         // warn
-	VerdictEscalatedWithReason Verdict = "escalated-with-reason" // advisory
-	VerdictMatch               Verdict = "match"
-	VerdictUnannotated         Verdict = "unannotated" // informational
+	VerdictSilentDescent          Verdict = "silent-descent"          // blocking
+	VerdictUnmappedDispatch       Verdict = "unmapped-dispatch"       // warn
+	VerdictUnexplainedFallback    Verdict = "unexplained-fallback"    // warn
+	VerdictEscalatedNoReason      Verdict = "escalated-no-reason"     // warn
+	VerdictNoTranscript           Verdict = "no-transcript"           // warn
+	VerdictUnattributedTranscript Verdict = "unattributed-transcript" // warn (D24, ticket I044)
+	VerdictEscalatedWithReason    Verdict = "escalated-with-reason"   // advisory
+	VerdictMatch                  Verdict = "match"
+	VerdictUnannotated            Verdict = "unannotated" // informational
 )
 
 // severity orders verdicts for worst-token aggregation; higher is worse.
@@ -170,8 +171,9 @@ var tierRank = map[string]int{"mechanical": 1, "routine": 2, "primary": 3, "fall
 // I040). judgeToken resolves value within flavor's table alone; nothing
 // upstream of it needs to know which flavor a token carries.
 type evidenceToken struct {
-	value  string
-	flavor string
+	value      string
+	flavor     string
+	sourceFile string // source transcript file (D24, codex only); "" for claude, keeping claude details byte-identical
 }
 
 // tokenValues extracts the raw model strings from a slice of evidence
@@ -234,11 +236,16 @@ func Run(opts Options) (Report, error) {
 	// Codex discovery only runs when CodexSessionsDir is set (the CLI always
 	// sets it — design D-doc, "discovery is always on"; leaving it empty is
 	// how every pre-I041 caller and every existing test opts out, and must
-	// audit exactly as before — no attempt, no warning, I041).
+	// audit exactly as before — no attempt, no warning, I041). codexNearMisses
+	// stays nil in that case, so the D24 near-miss override below never fires
+	// for a claude-only caller — one more guarantee claude paths stay
+	// byte-identical.
+	var codexNearMisses []codexNearMiss
 	if opts.CodexSessionsDir != "" {
-		codexDispatches, codexAgents := readCodexSessions(opts.CodexSessionsDir, repoDir, &rep.Warnings)
+		codexDispatches, codexAgents, codexNM := readCodexSessions(opts.CodexSessionsDir, repoDir, &rep.Warnings)
 		dispatches = append(dispatches, codexDispatches...)
 		agents = append(agents, codexAgents...)
+		codexNearMisses = codexNM
 	}
 
 	evidence := map[string][]evidenceToken{} // ticket id -> flavor-tagged model tokens
@@ -261,17 +268,32 @@ func Run(opts Options) (Report, error) {
 		}
 		return containsToken(desc, id) || containsToken(prompt, id)
 	}
+	// rootTickets tracks, per codex dispatch root (toolUseID), every distinct
+	// ticket claimed under it — the coarse-linkage disclosure input (I041
+	// review referred-Q3, ticket I044): thread_spawn actuals link by ROOT
+	// session id only, so two dispatches for two different tickets sharing
+	// one root also share whatever actual evidence that root's subagent(s)
+	// contribute. Populated for every flavor but only ever non-trivial for
+	// codex, since claude's toolUseID is the tool_use block's own id — unique
+	// per dispatch call, never shared across tickets.
+	rootTickets := map[string]map[string]bool{}
 	for _, t := range tickets {
 		for i, d := range dispatches {
 			if !matches(d, t.id) {
 				continue
 			}
 			claimed[i] = true
+			if d.toolUseID != "" {
+				if rootTickets[d.toolUseID] == nil {
+					rootTickets[d.toolUseID] = map[string]bool{}
+				}
+				rootTickets[d.toolUseID][t.id] = true
+			}
 			if linked[d.toolUseID] {
 				continue // the subagent transcript below is the actual
 			}
 			if d.model != "" {
-				evidence[t.id] = append(evidence[t.id], evidenceToken{value: d.model, flavor: d.flavor})
+				evidence[t.id] = append(evidence[t.id], evidenceToken{value: d.model, flavor: d.flavor, sourceFile: d.sourceFile})
 			}
 		}
 		for _, a := range agents {
@@ -288,7 +310,7 @@ func Run(opts Options) (Report, error) {
 			}
 			if use {
 				for _, m := range a.models {
-					evidence[t.id] = append(evidence[t.id], evidenceToken{value: m, flavor: a.flavor})
+					evidence[t.id] = append(evidence[t.id], evidenceToken{value: m, flavor: a.flavor, sourceFile: a.sourceFile})
 				}
 			}
 		}
@@ -299,14 +321,103 @@ func Run(opts Options) (Report, error) {
 		}
 	}
 
+	coarseNotes := coarseLinkageNotes(rootTickets, dispatches, linked)
 	for _, t := range tickets {
 		tokens := evidence[t.id]
 		row := TicketRow{ID: t.id, Tier: t.tier, Actuals: dedupSorted(tokenValues(tokens))}
 		row.Verdict, row.Detail = judge(t, tokens, mappings, ledger)
+		// D24 (ticket I044): a ticket that landed on no-transcript — zero
+		// attributed evidence — upgrades to unattributed-transcript when
+		// repo-scoped codex material mentioned it but failed attribution
+		// (guardian-only, mid-transcript-only, orchestrator-only). Any
+		// ticket with real evidence already judged above never consults
+		// this: found-but-unusable never downgrades found-and-usable.
+		if row.Verdict == VerdictNoTranscript {
+			if detail, ok := nearMissDetail(codexNearMisses, t.id); ok {
+				row.Verdict, row.Detail = VerdictUnattributedTranscript, detail
+			}
+		}
+		if note, ok := coarseNotes[t.id]; ok {
+			if row.Detail == "" {
+				row.Detail = note
+			} else {
+				row.Detail += "; " + note
+			}
+		}
 		rep.Tickets = append(rep.Tickets, row)
 	}
 	sort.Slice(rep.Tickets, func(i, j int) bool { return rep.Tickets[i].ID < rep.Tickets[j].ID })
 	return rep, nil
+}
+
+// nearMissDetail matches a ticket's token against every accumulated codex
+// near miss (D24, ticket I044), reporting every distinct (reason, file)
+// combination found — what was found, why it was excluded, and its source
+// file, so a surprising unattributed-transcript verdict is diagnosable at a
+// glance. Matching is case-insensitive (every near miss is codex-sourced,
+// and codex ticket-token matching is case-insensitive per D20).
+func nearMissDetail(nms []codexNearMiss, id string) (string, bool) {
+	var parts []string
+	seen := map[string]bool{}
+	for _, nm := range nms {
+		if !containsToken(strings.ToUpper(nm.text), id) {
+			continue
+		}
+		key := nm.reason + "|" + nm.file
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		parts = append(parts, fmt.Sprintf("%s (source: %s)", nm.reason, nm.file))
+	}
+	if len(parts) == 0 {
+		return "", false
+	}
+	return "found but unattributed: " + strings.Join(parts, "; "), true
+}
+
+// coarseLinkageNotes builds the I041-review-referred-Q3 disclosure (ticket
+// I044): for every codex dispatch root shared by two or more distinct
+// tickets where that root's declared aliases were superseded by real linked
+// actuals (linked[root]), each of those tickets' detail should disclose that
+// its actuals are only root-linked (D20 clause 2), not per-dispatch-linked,
+// and so may be shared with the other ticket(s) named. A root claimed by
+// only one ticket, or one with no linked actual evidence at all (nothing to
+// merge), gets no note — this is a diagnostic aid for a real ambiguity, not
+// standing noise.
+func coarseLinkageNotes(rootTickets map[string]map[string]bool, dispatches []dispatch, linked map[string]bool) map[string]string {
+	notes := map[string]string{}
+	for root, ids := range rootTickets {
+		if len(ids) < 2 || !linked[root] {
+			continue
+		}
+		idList := make([]string, 0, len(ids))
+		for id := range ids {
+			idList = append(idList, id)
+		}
+		sort.Strings(idList)
+		file := ""
+		for _, d := range dispatches {
+			if d.toolUseID == root && d.sourceFile != "" {
+				file = d.sourceFile
+				break
+			}
+		}
+		for _, id := range idList {
+			var others []string
+			for _, o := range idList {
+				if o != id {
+					others = append(others, o)
+				}
+			}
+			note := fmt.Sprintf("coarse linkage: codex session root also dispatches %s — thread actuals link by root id only (D20) and may be shared across these tickets", strings.Join(others, ", "))
+			if file != "" {
+				note += " (source: " + file + ")"
+			}
+			notes[id] = note
+		}
+	}
+	return notes
 }
 
 // judge decides one ticket's verdict from its declared tier, its observed
@@ -328,11 +439,39 @@ func judge(t ticket, tokens []evidenceToken, mappings map[string]map[string]reso
 			verdict, detail = v, d
 		}
 	}
+	// matchSources collects the source files of codex tokens that
+	// individually judged match (D24 AC: every judged codex verdict,
+	// including match, names its source file). judge()'s worst-token
+	// aggregation has no detail to carry for a plain match — a matching
+	// token's own judgeToken detail is "" — so matched codex sources are
+	// gathered separately and only surface here when the ticket's final,
+	// aggregate verdict is itself Match (i.e. every token matched: any
+	// worse per-token verdict would already have won via worse() above).
+	var matchSources []string
 	for _, tok := range tokens {
 		v, d := judgeToken(tok, t, mappings, l)
 		worse(v, d)
+		if v == VerdictMatch && tok.flavor == "codex" && tok.sourceFile != "" {
+			matchSources = append(matchSources, tok.sourceFile)
+		}
+	}
+	if verdict == VerdictMatch && len(matchSources) > 0 {
+		detail = "source: " + strings.Join(dedupSorted(matchSources), ", ")
 	}
 	return verdict, detail
+}
+
+// withSource appends a codex evidence token's source transcript file to a
+// judged detail line (D24: every judged codex verdict names its source, the
+// I008 silent-descent requirement satisfied as a special case). Claude
+// tokens never carry a sourceFile (readTranscripts/scanJSONL/parseLine never
+// set one), so this is a no-op for every claude-flavor call — the guarantee
+// that claude verdict details stay byte-identical.
+func withSource(detail string, tok evidenceToken) string {
+	if tok.flavor != "codex" || tok.sourceFile == "" {
+		return detail
+	}
+	return detail + " (source: " + tok.sourceFile + ")"
 }
 
 // judgeToken classifies a single observed evidence token against the
@@ -345,7 +484,7 @@ func judgeToken(tok evidenceToken, t ticket, mappings map[string]map[string]reso
 	mapping := mappings[tok.flavor]
 	tiers := tiersOf(tok.value, mapping)
 	if len(tiers) == 0 {
-		return VerdictUnmappedDispatch, fmt.Sprintf("%s maps to no %s entry in the model table", tok.value, tok.flavor)
+		return VerdictUnmappedDispatch, withSource(fmt.Sprintf("%s maps to no %s entry in the model table", tok.value, tok.flavor), tok)
 	}
 	actual := pickTier(tiers, t.tier)
 	if actual == t.tier {
@@ -353,19 +492,19 @@ func judgeToken(tok evidenceToken, t ticket, mappings map[string]map[string]reso
 	}
 	if actual == "fallback" { // lateral, never descent (see package doc)
 		if reason, ok := l.fallback[t.id]; ok {
-			return VerdictEscalatedWithReason, fmt.Sprintf("%s (fallback) — FALLBACK reason: %s", tok.value, reason)
+			return VerdictEscalatedWithReason, withSource(fmt.Sprintf("%s (fallback) — FALLBACK reason: %s", tok.value, reason), tok)
 		}
-		return VerdictUnexplainedFallback, fmt.Sprintf("%s (fallback) without a FALLBACK record or fallback annotation", tok.value)
+		return VerdictUnexplainedFallback, withSource(fmt.Sprintf("%s (fallback) without a FALLBACK record or fallback annotation", tok.value), tok)
 	}
 	for _, rec := range l.escalation[t.id] {
 		if rec.to == actual { // a record excuses exactly its to-tier
-			return VerdictEscalatedWithReason, fmt.Sprintf("%s (%s) vs declared %s — ESCALATION reason: %s", tok.value, actual, t.tier, rec.reason)
+			return VerdictEscalatedWithReason, withSource(fmt.Sprintf("%s (%s) vs declared %s — ESCALATION reason: %s", tok.value, actual, t.tier, rec.reason), tok)
 		}
 	}
 	if t.tier != "fallback" && tierRank[actual] < tierRank[t.tier] {
-		return VerdictSilentDescent, fmt.Sprintf("%s (%s) below declared %s with no ESCALATION record", tok.value, actual, t.tier)
+		return VerdictSilentDescent, withSource(fmt.Sprintf("%s (%s) below declared %s with no ESCALATION record", tok.value, actual, t.tier), tok)
 	}
-	return VerdictEscalatedNoReason, fmt.Sprintf("%s (%s) above declared %s with no ESCALATION record", tok.value, actual, t.tier)
+	return VerdictEscalatedNoReason, withSource(fmt.Sprintf("%s (%s) above declared %s with no ESCALATION record", tok.value, actual, t.tier), tok)
 }
 
 // tiersOf resolves a model token to every tier it could mean within one
@@ -668,6 +807,7 @@ type dispatch struct {
 	prompt      string
 	model       string
 	flavor      string // the transcript source's flavor (I040 per-token seam)
+	sourceFile  string // source transcript file (D24, codex only); "" for claude
 }
 
 type subagent struct {
@@ -675,6 +815,7 @@ type subagent struct {
 	description string
 	models      []string
 	flavor      string // the transcript source's flavor (I040 per-token seam)
+	sourceFile  string // source transcript file (D24, codex only); "" for claude
 }
 
 // readTranscripts collects Task/Agent dispatch records from every session

@@ -247,21 +247,29 @@ func TestCodexSpawnedThreadActualSupersedesDeclared(t *testing.T) {
 	}
 }
 
-// Acceptance: a guardian-only fixture contributes no evidence to any
-// ticket. Guardian threads report a synthetic model (codex-auto-review) and
-// are structurally excluded (D23) — even with no competing legitimate
-// evidence, the ticket must land on no-transcript, never pick up the
-// synthetic token.
+// Acceptance: a guardian-only fixture contributes no EVIDENCE to any
+// ticket — guardian threads report a synthetic model (codex-auto-review) and
+// are structurally excluded (D23), so the ticket must never pick up the
+// synthetic token or judge match/descent from it.
 //
-// Review finding I1: a fixture whose only content is the turn_context
-// model has zero discriminating power — the isSubagent() gate (no
-// thread_spawn on a guardian) already drops that content regardless of
+// Verdict updated at I044 (D24): this is the textbook guardian-only-match
+// near miss the design names explicitly ("guardian-only matches" is one of
+// D24's three unattributed-transcript populations) — the guardian's quoted
+// spawn_agent task_name names I044 case-insensitively, so once repo-scoped
+// codex material mentioning the ticket exists but fails attribution, the
+// honest verdict is unattributed-transcript, not the "nothing at all"
+// no-transcript reading this test asserted pre-I044. Found-but-unusable is
+// not nothing-found.
+//
+// Review finding I1 (I041): a fixture whose only content is the
+// turn_context model has zero discriminating power — the isSubagent() gate
+// (no thread_spawn on a guardian) already drops that content regardless of
 // isGuardian(), so mutating isGuardian() to unconditionally return false
 // left this test green. Per I009, guardian threads carry quoted transcript
 // history that can include a replayed spawn_agent call; a dispatch-shaped
 // record is added here so the D23 exclusion is what the test actually
-// exercises — gutting isGuardian() must turn this red (verified in the fix
-// report).
+// exercises — gutting isGuardian() must still turn this red (it would then
+// judge match/gpt-5.6-terra instead of unattributed-transcript).
 func TestCodexGuardianContributesNoEvidence(t *testing.T) {
 	codexDir := t.TempDir()
 	sessRepo := t.TempDir()
@@ -285,8 +293,8 @@ func TestCodexGuardianContributesNoEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := rowsByID(t, rep)["I044"]
-	if r.Verdict != VerdictNoTranscript {
-		t.Fatalf("I044 verdict = %s (%s), want no-transcript — guardian threads must contribute nothing", r.Verdict, r.Detail)
+	if r.Verdict != VerdictUnattributedTranscript {
+		t.Fatalf("I044 verdict = %s (%s), want unattributed-transcript — a guardian-only match (D24) is found-but-unusable, not nothing-found", r.Verdict, r.Detail)
 	}
 	if len(r.Actuals) != 0 {
 		t.Errorf("I044 actuals = %v, want none", r.Actuals)
@@ -554,9 +562,15 @@ func TestCodexWorkerOpeningMessageAttributesOwnTurns(t *testing.T) {
 // Acceptance (D21 clause 2): a ticket token appearing only in a LATER user
 // message — never the opening one — must not attribute. This is the
 // neighboring-ticket bleed the design calls out: opening message dispatches
-// I900; a later message mentions I901 in passing. I901 must stay unjudged
-// (no-transcript), and I900 must still attribute correctly from the true
-// opening message.
+// I900; a later message mentions I901 in passing. I900 must still attribute
+// correctly from the true opening message.
+//
+// Verdict updated at I044 (D24, pre-justified at I042 review): I901's
+// mid-transcript-only mention is exactly the "token absent from the opening
+// message" near miss D24 names — found (a real session mentions it) but not
+// attributable (not the opening line), so the honest verdict is
+// unattributed-transcript, not no-transcript. Recorded at I042 review
+// (0bd554a) as a genuine premise change this ticket exists to make.
 func TestCodexLaterMessageTokenDoesNotAttribute(t *testing.T) {
 	codexDir := t.TempDir()
 	sessRepo := t.TempDir()
@@ -577,18 +591,24 @@ func TestCodexLaterMessageTokenDoesNotAttribute(t *testing.T) {
 	if r := rows["I900"]; r.Verdict != VerdictMatch {
 		t.Errorf("I900 verdict = %s (%s), want match from the true opening message", r.Verdict, r.Detail)
 	}
-	if r := rows["I901"]; r.Verdict != VerdictNoTranscript {
-		t.Errorf("I901 verdict = %s (%s), want no-transcript — a later-message mention must not attribute (neighboring-ticket bleed)", r.Verdict, r.Detail)
+	if r := rows["I901"]; r.Verdict != VerdictUnattributedTranscript {
+		t.Errorf("I901 verdict = %s (%s), want unattributed-transcript — a later-message mention must not attribute (neighboring-ticket bleed), but D24 reports it honestly rather than as no-transcript", r.Verdict, r.Detail)
 	}
 }
 
 // Acceptance (D21 clause 3): an orchestrator fixture whose opening message
 // names the ticket but which itself carries a dispatch record (spawn_agent,
 // unrelated task) contributes no own-turn evidence. Any session that
-// dispatches is an orchestrator; its own models are never ticket evidence.
-// With no other evidence source, I902 lands on no-transcript — proof the
-// orchestrator's own turn_context model (a decoy, wrong-looking on purpose)
-// never leaked in.
+// dispatches is an orchestrator; its own models are never ticket evidence —
+// proof the orchestrator's own turn_context model (a decoy, wrong-looking on
+// purpose) never leaked in as I902's actual.
+//
+// Verdict updated at I044 (D24): this is exactly the "orchestrator-only
+// mentions" near miss D24 names by name — the opening message's title line
+// names I902 in a session that turns out to be an orchestrator, so the
+// mention is found but structurally unusable, not simply absent. The honest
+// verdict is unattributed-transcript, not no-transcript; the point this test
+// exists to prove (own-turn evidence never leaks in) is unchanged.
 func TestCodexOrchestratorOpeningMessageContributesNoOwnTurnEvidence(t *testing.T) {
 	codexDir := t.TempDir()
 	sessRepo := t.TempDir()
@@ -609,8 +629,8 @@ func TestCodexOrchestratorOpeningMessageContributesNoOwnTurnEvidence(t *testing.
 		t.Fatal(err)
 	}
 	r := rowsByID(t, rep)["I902"]
-	if r.Verdict != VerdictNoTranscript {
-		t.Fatalf("I902 verdict = %s (%s), want no-transcript — the orchestrator's own turn model must not attribute", r.Verdict, r.Detail)
+	if r.Verdict != VerdictUnattributedTranscript {
+		t.Fatalf("I902 verdict = %s (%s), want unattributed-transcript — the orchestrator's own turn model must not attribute, but D24 reports the opening-message mention honestly", r.Verdict, r.Detail)
 	}
 	if len(r.Actuals) != 0 {
 		t.Errorf("I902 actuals = %v, want none (the decoy gpt-5.6-sol own-turn model must not leak in)", r.Actuals)
@@ -691,7 +711,14 @@ func TestCodexM4aUndeclaredModelJudgesUnmappedDispatch(t *testing.T) {
 // a worker: its own decoy turn model attributed and manufactured a
 // blocking silent-descent (probe P1). After the fix, the lead contributes
 // nothing at all — no own-turn evidence, no dispatch evidence (there was
-// none to give) — and the ticket lands on no-transcript, never blocking.
+// none to give) — and the ticket lands honestly, never blocking.
+//
+// Verdict updated at I044 (D24): the lead's opening message names I905 in
+// its title line, and the lead turns out to be an orchestrator — another
+// instance of the "orchestrator-only mentions" near miss D24 names. The
+// regression's real point (own-turn evidence never leaks in, never blocks)
+// is unaffected; only the honest label for "found but excluded" changes
+// from no-transcript to unattributed-transcript.
 func TestCodexModelLessSpawnStillExcludesOwnTurns(t *testing.T) {
 	codexDir := t.TempDir()
 	sessRepo := t.TempDir()
@@ -714,8 +741,8 @@ func TestCodexModelLessSpawnStillExcludesOwnTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := rowsByID(t, rep)["I905"]
-	if r.Verdict != VerdictNoTranscript {
-		t.Fatalf("I905 verdict = %s (%s), want no-transcript — a model-less spawn is still an orchestrator; its own turn must not attribute", r.Verdict, r.Detail)
+	if r.Verdict != VerdictUnattributedTranscript {
+		t.Fatalf("I905 verdict = %s (%s), want unattributed-transcript — a model-less spawn is still an orchestrator; its own turn must not attribute, but D24 reports the opening-message mention honestly", r.Verdict, r.Detail)
 	}
 	if len(r.Actuals) != 0 {
 		t.Errorf("I905 actuals = %v, want none (the decoy gpt-5.6-luna own-turn model must not leak in)", r.Actuals)
@@ -736,6 +763,13 @@ func TestCodexModelLessSpawnStillExcludesOwnTurns(t *testing.T) {
 // the fix: I906 (named in the title line) attributes; I907 (named only in
 // a later line of the SAME opening message) gets no evidence from this
 // session at all, and nothing blocks.
+//
+// Verdict updated at I044 (D24): I907's context-sentence mention is exactly
+// the "token absent from the opening message['s first line]" near miss D24
+// names — found (this same session's fuller text names it) but not
+// attributable, so the honest verdict is unattributed-transcript, not
+// no-transcript. The regression's real point (no evidence, no blocking) is
+// unaffected.
 func TestCodexOpeningMessageContextSentenceDoesNotAttributeToNeighbor(t *testing.T) {
 	codexDir := t.TempDir()
 	sessRepo := t.TempDir()
@@ -755,8 +789,8 @@ func TestCodexOpeningMessageContextSentenceDoesNotAttributeToNeighbor(t *testing
 	if r := rows["I906"]; r.Verdict != VerdictMatch {
 		t.Errorf("I906 verdict = %s (%s), want match — its token is in the opening message's title line", r.Verdict, r.Detail)
 	}
-	if r := rows["I907"]; r.Verdict != VerdictNoTranscript || len(r.Actuals) != 0 {
-		t.Errorf("I907 verdict = %s actuals=%v, want no-transcript/none — a context-sentence mention (not the title line) must not attribute", r.Verdict, r.Actuals)
+	if r := rows["I907"]; r.Verdict != VerdictUnattributedTranscript || len(r.Actuals) != 0 {
+		t.Errorf("I907 verdict = %s actuals=%v, want unattributed-transcript/none — a context-sentence mention (not the title line) must not attribute, but D24 reports it honestly", r.Verdict, r.Actuals)
 	}
 	if rep.Blocking() {
 		t.Error("a brief's context-sentence mention of a higher-tier neighbor must never manufacture a blocking verdict")
@@ -1036,4 +1070,226 @@ func TestCodexRefLikeCommitHashNotTreatedAsObjectID(t *testing.T) {
 	if rep.Blocking() {
 		t.Error("a ref-like commit_hash value must never manufacture a blocking verdict via cross-repo false-positive")
 	}
+}
+
+// --- D24 unattributed-transcript verdict + source-file naming (I044) ---
+
+// Acceptance (D24 AC): a ticket with truly ZERO scoped codex material —
+// never mentioned anywhere in the sessions dir, not even a near miss — must
+// still yield no-transcript. Proves the D24 near-miss override in Run only
+// fires when repo-scoped material actually named the ticket; a codex
+// sessions dir being configured at all must not, by itself, change a
+// genuinely-nothing-found verdict.
+func TestCodexZeroScopedMaterialStaysNoTranscript(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I960": "routine", "I961": "routine"})
+
+	// I960 is attributed normally; I961 is never named anywhere in the
+	// codex sessions dir — not the opening line, not later text, not a
+	// guardian, not an orchestrator mention. Nothing at all.
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-960", "worker-960", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I960 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I960"]; r.Verdict != VerdictMatch {
+		t.Errorf("I960 verdict = %s (%s), want match", r.Verdict, r.Detail)
+	}
+	if r := rows["I961"]; r.Verdict != VerdictNoTranscript {
+		t.Errorf("I961 verdict = %s (%s), want no-transcript — zero scoped material anywhere, not unattributed-transcript", r.Verdict, r.Detail)
+	}
+}
+
+// Acceptance (D24 AC/I044): every JUDGED codex verdict — match, descent,
+// escalation (with and without a ledger reason), and unmapped — names its
+// source transcript file in the detail line, the I008 silent-descent
+// requirement (name the source) satisfied here as a special case of the
+// broader D24 rule. Each ticket's dispatch lives in its own lead file (a
+// distinct codex session root) so the D24 coarse-linkage disclosure — a
+// separate feature, tested below — never fires here.
+func TestCodexJudgedVerdictsNameSourceFile(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{
+		"I950": "routine", "I951": "mechanical", "I952": "primary", "I953": "routine", "I954": "mechanical",
+	})
+	if err := os.MkdirAll(filepath.Join(sessRepo, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessRepo, ".superpowers", "sdd", "progress.md"),
+		[]byte("ESCALATION I954 mechanical->routine reason: deliberate up-tier for reader work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	matchFile := filepath.Join(codexDir, "i950.jsonl")
+	writeCodexFile(t, matchFile,
+		codexSessionMetaLine("root-950", "root-950", "", sessRepo, "user", "{}"),
+		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-terra", "task_name": "i950 match dispatch"}),
+	)
+	escNoReasonFile := filepath.Join(codexDir, "i951.jsonl")
+	writeCodexFile(t, escNoReasonFile,
+		codexSessionMetaLine("root-951", "root-951", "", sessRepo, "user", "{}"),
+		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-terra", "task_name": "i951 escalate dispatch"}),
+	)
+	descentFile := filepath.Join(codexDir, "i952.jsonl")
+	writeCodexFile(t, descentFile,
+		codexSessionMetaLine("root-952", "root-952", "", sessRepo, "user", "{}"),
+		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-luna", "task_name": "i952 descent dispatch"}),
+	)
+	unmappedFile := filepath.Join(codexDir, "i953.jsonl")
+	writeCodexFile(t, unmappedFile,
+		codexSessionMetaLine("root-953", "root-953", "", sessRepo, "user", "{}"),
+		codexFunctionCallLine("spawn_agent", map[string]string{"model": "totally-unknown-model", "task_name": "i953 unmapped dispatch"}),
+	)
+	escWithReasonFile := filepath.Join(codexDir, "i954.jsonl")
+	writeCodexFile(t, escWithReasonFile,
+		codexSessionMetaLine("root-954", "root-954", "", sessRepo, "user", "{}"),
+		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-terra", "task_name": "i954 escalated with reason dispatch"}),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+
+	if r := rows["I950"]; r.Verdict != VerdictMatch || !strings.Contains(r.Detail, "source: "+matchFile) {
+		t.Errorf("I950 = %s (%q), want match naming source %s", r.Verdict, r.Detail, matchFile)
+	}
+	if r := rows["I951"]; r.Verdict != VerdictEscalatedNoReason || !strings.Contains(r.Detail, "source: "+escNoReasonFile) {
+		t.Errorf("I951 = %s (%q), want escalated-no-reason naming source %s", r.Verdict, r.Detail, escNoReasonFile)
+	}
+	if r := rows["I952"]; r.Verdict != VerdictSilentDescent || !strings.Contains(r.Detail, "source: "+descentFile) {
+		t.Errorf("I952 = %s (%q), want silent-descent naming source %s", r.Verdict, r.Detail, descentFile)
+	}
+	if r := rows["I953"]; r.Verdict != VerdictUnmappedDispatch || !strings.Contains(r.Detail, "source: "+unmappedFile) {
+		t.Errorf("I953 = %s (%q), want unmapped-dispatch naming source %s", r.Verdict, r.Detail, unmappedFile)
+	}
+	if r := rows["I954"]; r.Verdict != VerdictEscalatedWithReason || !strings.Contains(r.Detail, "source: "+escWithReasonFile) || !strings.Contains(r.Detail, "deliberate up-tier") {
+		t.Errorf("I954 = %s (%q), want escalated-with-reason naming source %s and carrying the ledger reason", r.Verdict, r.Detail, escWithReasonFile)
+	}
+	if !rep.Blocking() {
+		t.Error("I952's silent-descent must still block — the new source-naming must not soften an existing blocking verdict")
+	}
+}
+
+// Acceptance (I041-review-referred-Q3, ticket I044's coarse-linkage
+// disclosure note): thread_spawn actuals link by ROOT session id only (D20
+// clause 2) — that granularity is all I009's facts support. When a single
+// root dispatches two DISTINCT tickets and a linked subagent's actual
+// supersedes both dispatches' declared aliases, the shared merged actual is
+// coarse — it cannot be proven to belong to one dispatch over the other —
+// so both tickets' details must disclose the coarse linkage, naming the
+// other ticket sharing the root and the root's source file.
+//
+// I972 (mechanical) and I973 (primary) are deliberately chosen so the SAME
+// merged actual (gpt-5.6-terra, routine) drives a different verdict for
+// each — above I972's declared tier, below I973's — making the disclosure
+// something an operator would actually need: without it, two surprising,
+// unrelated-looking verdicts; with it, a one-line pointer to the shared
+// root that produced them both.
+func TestCodexCoarseLinkageDisclosedWhenRootSharesDistinctTickets(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I972": "mechanical", "I973": "primary"})
+
+	leadFile := filepath.Join(codexDir, "lead.jsonl")
+	writeCodexFile(t, leadFile,
+		codexSessionMetaLine("root-lc", "root-lc", "", sessRepo, "user", "{}"),
+		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-luna", "task_name": "i972 coarse dispatch"}),
+		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-sol", "task_name": "i973 coarse dispatch"}),
+	)
+	subFile := filepath.Join(codexDir, "sub.jsonl")
+	writeCodexFile(t, subFile,
+		codexSessionMetaLine("sub-lc", "root-lc", "root-lc", sessRepo, "subagent", threadSpawnSource("root-lc")),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+
+	r972 := rows["I972"]
+	if r972.Verdict != VerdictEscalatedNoReason {
+		t.Errorf("I972 verdict = %s (%s), want escalated-no-reason (the shared routine actual is above its mechanical declaration)", r972.Verdict, r972.Detail)
+	}
+	if !strings.Contains(r972.Detail, "coarse linkage") || !strings.Contains(r972.Detail, "I973") || !strings.Contains(r972.Detail, leadFile) {
+		t.Errorf("I972 detail = %q, want a coarse-linkage note naming I973 and the shared root's file %s", r972.Detail, leadFile)
+	}
+
+	r973 := rows["I973"]
+	if r973.Verdict != VerdictSilentDescent {
+		t.Errorf("I973 verdict = %s (%s), want silent-descent (the shared routine actual is below its primary declaration)", r973.Verdict, r973.Detail)
+	}
+	if !strings.Contains(r973.Detail, "coarse linkage") || !strings.Contains(r973.Detail, "I972") || !strings.Contains(r973.Detail, leadFile) {
+		t.Errorf("I973 detail = %q, want a coarse-linkage note naming I972 and the shared root's file %s", r973.Detail, leadFile)
+	}
+}
+
+// Acceptance (D24 AC): unattributed-transcript never blocks and never
+// changes exit-code-driving Blocking() — proven across every near-miss
+// scenario at once (guardian-only, mid-transcript-only, orchestrator-only)
+// alongside a genuine silent-descent, so Blocking() reflects only the real
+// descent.
+func TestCodexUnattributedTranscriptNeverBlocks(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{
+		"I980": "routine", // guardian-only match
+		"I981": "routine", // mid-transcript-only match
+		"I982": "routine", // orchestrator-only mention
+		"I983": "primary", // genuine silent-descent, must still block
+	})
+
+	writeCodexFile(t, filepath.Join(codexDir, "guardian.jsonl"),
+		codexSessionMetaLine("guard-980", "root-980", "root-980", sessRepo, "subagent", guardianSource),
+		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-terra", "task_name": "i980 quoted replay"}),
+	)
+	writeCodexFile(t, filepath.Join(codexDir, "worker981.jsonl"),
+		codexSessionMetaLine("worker-981", "worker-981", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I900-placeholder — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+		codexUserMessageLine("also take a look at I981 while you're there"),
+	)
+	writeCodexFile(t, filepath.Join(codexDir, "lead982.jsonl"),
+		codexSessionMetaLine("lead-982", "lead-982", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I982 — orchestrator dispatch\n\nCoordinate the build."),
+		codexTurnContextLine("gpt-5.6-sol"),
+		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-terra", "task_name": "unrelated review pass"}),
+	)
+	writeCodexFile(t, filepath.Join(codexDir, "worker983.jsonl"),
+		codexSessionMetaLine("worker-983", "worker-983", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I983 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-luna"), // mechanical, below primary — real descent
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	for _, id := range []string{"I980", "I981", "I982"} {
+		if r := rows[id]; r.Verdict != VerdictUnattributedTranscript {
+			t.Errorf("%s verdict = %s (%s), want unattributed-transcript", id, r.Verdict, r.Detail)
+		}
+	}
+	if r := rows["I983"]; r.Verdict != VerdictSilentDescent {
+		t.Errorf("I983 verdict = %s (%s), want silent-descent", r.Verdict, r.Detail)
+	}
+	if !rep.Blocking() {
+		t.Error("I983's genuine silent-descent must still block")
+	}
+	// Blocking() only inspects VerdictSilentDescent (audit.go); this asserts
+	// the behavioral guarantee end to end: three unattributed-transcript
+	// tickets sitting alongside the real descent must not suppress or add to
+	// what blocks.
 }

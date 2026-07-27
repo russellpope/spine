@@ -209,6 +209,41 @@ type codexFileResult struct {
 	dispatched         bool // I042 review fix (C1): ANY spawn-shaped record seen, model or not — see dispatches' doc
 	turnModels         []string
 	openingUserMessage string // D21/I042: first role="user" message in file order
+	laterUserText      string // D24/I044: role="user" message text AFTER the opening one, concatenated — near-miss detection only, never attribution (D21's opening-line rule is unchanged)
+}
+
+// searchText is the near-miss detection surface (D24, ticket I044): every
+// piece of this file's text that could name a ticket, regardless of whether
+// it went on to become real evidence — the opening message (full, not just
+// its first line), any later user messages, and every dispatch record's
+// description (spawn_agent task_name or team-spawn command text, which
+// typically carries the ticket token via a dispatch-task file path, I009).
+// Used only to detect "material exists but failed attribution"; it plays no
+// part in attribution itself.
+func (r codexFileResult) searchText() string {
+	var b strings.Builder
+	b.WriteString(r.openingUserMessage)
+	b.WriteByte('\n')
+	b.WriteString(r.laterUserText)
+	for _, d := range r.dispatches {
+		b.WriteByte('\n')
+		b.WriteString(d.description)
+	}
+	return b.String()
+}
+
+// codexNearMiss records repo-scoped, codex material that mentioned a ticket
+// but failed attribution (D24): a guardian-excluded file, a worker session
+// whose opening-message first line lacked the token, or an orchestrator
+// session whose own turns are excluded. Matched against ticket tokens in
+// readCodexSessions' caller exactly like dispatches/agents are, but
+// contributes no evidence — only the unattributed-transcript verdict, and
+// only when a ticket has no attributed evidence at all (Run never lets a
+// near miss downgrade real evidence).
+type codexNearMiss struct {
+	text   string // searchable text (searchText()) to match ticket tokens against
+	file   string // source transcript file
+	reason string // human-readable why-excluded phrase
 }
 
 // codexExecWorker accumulates one team-spawned worker's evidence across its
@@ -368,14 +403,24 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 			}
 		case "message":
 			// Opening message = the first role="user" response_item/message
-			// in file order (D21). Only the first is captured — a later
-			// message naming a different ticket (neighboring-ticket bleed,
-			// I009) must never overwrite it, and non-user messages (e.g. an
-			// assistant turn preceding the first real user line, if any) are
-			// skipped without latching haveOpening.
-			if !st.haveOpening && item.Role == "user" {
-				st.res.openingUserMessage = codexMessageText(item.Content)
-				st.haveOpening = true
+			// in file order (D21). Only the first is captured for
+			// attribution — a later message naming a different ticket
+			// (neighboring-ticket bleed, I009) must never overwrite it or
+			// attribute, and non-user messages (e.g. an assistant turn
+			// preceding the first real user line, if any) are skipped
+			// without latching haveOpening. Later user messages are still
+			// captured into laterUserText (D24/I044) — near-miss detection
+			// only, so a later mention reports unattributed-transcript
+			// rather than vanishing as no-transcript; attribution itself is
+			// unchanged.
+			if item.Role == "user" {
+				text := codexMessageText(item.Content)
+				if !st.haveOpening {
+					st.res.openingUserMessage = text
+					st.haveOpening = true
+				} else {
+					st.res.laterUserText += "\n" + text
+				}
 			}
 		}
 	}
@@ -491,14 +536,19 @@ func (p *gitCommitProber) knows(hash string) bool {
 // <dir>/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl, though any nesting is
 // accepted — collecting dispatch records and spawned-thread actuals (D20)
 // as the same dispatch/subagent structures readTranscripts produces,
-// tagged with the codex flavor. Guardian threads (D23) and out-of-repo
-// sessions (D22: neither cwdInsideRepo nor a known commit hash,
-// gitCommitProber) are structurally excluded before their content is ever
-// folded into evidence — excluded sessions are invisible to this audit, not
-// "unattributed" (D22). All trouble degrades to a warning, never an
-// error — an undocumented, drifting format must never break the verify
-// stage (design D-doc, "spine maintainer" story).
-func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []subagent) {
+// tagged with the codex flavor, plus near-miss records (D24, ticket I044)
+// for repo-scoped material that mentioned a ticket but failed attribution.
+// Out-of-repo sessions (D22: neither cwdInsideRepo nor a known commit hash,
+// gitCommitProber) are excluded before anything else — including near-miss
+// detection — so out-of-scope material stays invisible to this audit, never
+// "unattributed" (D22, ticket I044 interfaces note). Guardian threads (D23)
+// are structurally excluded from evidence but, once in scope, DO produce a
+// near miss: their content still gets searched for ticket mentions so a
+// guardian-only match reports honestly rather than as no-transcript. All
+// trouble degrades to a warning, never an error — an undocumented, drifting
+// format must never break the verify stage (design D-doc, "spine
+// maintainer" story).
+func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []subagent, []codexNearMiss) {
 	absRepo, err := filepath.Abs(repoDir)
 	if err != nil {
 		absRepo = repoDir
@@ -518,26 +568,26 @@ func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []s
 	})
 	if walkErr != nil {
 		*warnings = append(*warnings, "codex sessions dir unreadable — codex tickets will report no-transcript: "+walkErr.Error())
-		return nil, nil
+		return nil, nil, nil
 	}
 	sort.Strings(files)
 
 	prober := newGitCommitProber(absRepo, warnings)
 	var dispatches []dispatch
 	var agents []subagent
+	var nearMisses []codexNearMiss
 	for _, path := range files {
 		res, ok := scanCodexFile(path, warnings)
 		if !ok {
 			continue
 		}
-		if res.meta.isGuardian() {
-			continue // D23: never evidence, in any path
-		}
 		// D22: in scope iff cwd resolves inside the repo (clause 1) or the
 		// session's git commit hash is known to the repo (clause 2). The
 		// short-circuit means a fully cwd-scoped session never asks the
 		// prober anything, keeping probe count and probe-failure warnings
-		// bounded to builds that actually use worktree cwds.
+		// bounded to builds that actually use worktree cwds. Checked BEFORE
+		// the guardian exclusion below (D24 fix note: an out-of-scope
+		// guardian file must stay invisible, not surface as a near miss).
 		if !cwdInsideRepo(res.meta.Cwd, absRepo) && !prober.knows(res.meta.Git.CommitHash) {
 			continue
 		}
@@ -545,10 +595,25 @@ func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []s
 		for i := range res.dispatches {
 			res.dispatches[i].toolUseID = "codex:" + root
 			res.dispatches[i].flavor = "codex"
+			res.dispatches[i].sourceFile = path
+		}
+		if res.meta.isGuardian() {
+			// D23: never evidence, in any path — but its content (e.g. a
+			// quoted/replayed spawn_agent call, D23's own regression
+			// fixture) can still name a ticket. That's a guardian-only
+			// match (D24): found, but structurally unusable.
+			if text := res.searchText(); strings.TrimSpace(text) != "" {
+				nearMisses = append(nearMisses, codexNearMiss{
+					text:   text,
+					file:   path,
+					reason: "guardian auto-review thread — structurally excluded from evidence (D23)",
+				})
+			}
+			continue
 		}
 		dispatches = append(dispatches, res.dispatches...)
 		if res.meta.isSubagent() && len(res.turnModels) > 0 {
-			agents = append(agents, subagent{toolUseID: "codex:" + root, models: res.turnModels, flavor: "codex"})
+			agents = append(agents, subagent{toolUseID: "codex:" + root, models: res.turnModels, flavor: "codex", sourceFile: path})
 		}
 		// D21 worker-session scan (I042): a top-level session with no
 		// dispatch records of its own (clause 3, orchestrator exclusion —
@@ -562,15 +627,45 @@ func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []s
 		// firstLine(d.prompt)) — the same description+containsToken seam
 		// claude subagents already use, so Run needs no codex-specific
 		// worker-scan logic.
-		if res.meta.isTopLevelUser() && !res.dispatched && len(res.turnModels) > 0 {
-			agents = append(agents, subagent{
-				description: firstLine(res.openingUserMessage),
-				models:      res.turnModels,
-				flavor:      "codex",
-			})
+		if res.meta.isTopLevelUser() {
+			if res.dispatched {
+				// D24: an orchestrator's own turns never attribute (D21
+				// clause 3), but its opening message can still name a
+				// ticket — an orchestrator-only mention, found but
+				// structurally unusable as own-turn evidence. Its dispatch
+				// records, if any, are separate legitimate evidence handled
+				// via the normal dispatches path above.
+				if text := res.searchText(); strings.TrimSpace(text) != "" {
+					nearMisses = append(nearMisses, codexNearMiss{
+						text:   text,
+						file:   path,
+						reason: "orchestrator session — its own turns are excluded from ticket evidence (D21); only its dispatch records count separately",
+					})
+				}
+			} else if len(res.turnModels) > 0 {
+				agents = append(agents, subagent{
+					description: firstLine(res.openingUserMessage),
+					models:      res.turnModels,
+					flavor:      "codex",
+					sourceFile:  path,
+				})
+				// D24: the same file's FULLER text (opening message beyond
+				// its first line, plus any later user messages) is a
+				// near-miss surface for any OTHER ticket mentioned there —
+				// the mid-transcript-only-match case. A ticket that IS
+				// named in the first line already has real evidence above
+				// and never consults this.
+				if text := res.searchText(); strings.TrimSpace(text) != "" {
+					nearMisses = append(nearMisses, codexNearMiss{
+						text:   text,
+						file:   path,
+						reason: "ticket token absent from the opening message's first line — a later mention does not attribute (D21)",
+					})
+				}
+			}
 		}
 	}
-	return dispatches, agents
+	return dispatches, agents, nearMisses
 }
 
 // DefaultCodexSessionsDir derives the discovery default for codex's session
