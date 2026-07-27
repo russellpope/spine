@@ -152,8 +152,12 @@ func TestCodexHerdrDispatchRecordJudgesMatch(t *testing.T) {
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
 		codexSessionMetaLine("root-1", "root-1", "", sessRepo, "user", "{}"),
 		codexFunctionCallLine("exec_command", map[string]string{
-			"command": "herdr agent start moo-clone-worker1 --kind codex --pane wM:p2 -- -m gpt-5.6-terra",
+			"cmd": "herdr agent start moo-clone-worker1 --kind codex --pane wM:p2 -- -m gpt-5.6-terra",
 		}),
+		// This leg deliberately keeps the pre-I048 "command" key (rather than
+		// the real "cmd", I009 Verified 2026-07-27) to pin the tolerated
+		// fallback: a mixed-shape fixture — one call real, one call the old
+		// guess — must still dispatch correctly.
 		codexFunctionCallLine("exec_command", map[string]string{
 			"command": `herdr agent prompt moo-clone-worker1 "$(<.superpowers/sdd/2026-07-26-i041/dispatch-task-I041.md)"`,
 		}),
@@ -398,13 +402,13 @@ func TestCodexGitCommitNoiseNotMistakenForDispatch(t *testing.T) {
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
 		codexSessionMetaLine("root-903", "root-903", "", sessRepo, "user", "{}"),
 		codexFunctionCallLine("exec_command", map[string]string{
-			"command": "herdr agent start w1 --kind codex --pane wA:p1 -- -m gpt-5.6-terra",
+			"cmd": "herdr agent start w1 --kind codex --pane wA:p1 -- -m gpt-5.6-terra",
 		}),
 		codexFunctionCallLine("exec_command", map[string]string{
-			"command": `herdr agent prompt w1 "$(<.superpowers/sdd/2026-07-26-i903/dispatch-task-I903.md)"`,
+			"cmd": `herdr agent prompt w1 "$(<.superpowers/sdd/2026-07-26-i903/dispatch-task-I903.md)"`,
 		}),
 		codexFunctionCallLine("exec_command", map[string]string{
-			"command": `git commit -m "feat: work done"`,
+			"cmd": `git commit -m "feat: work done"`,
 		}),
 	)
 
@@ -439,16 +443,16 @@ func TestCodexTwoTeamSpawnsKeyedPerWorker(t *testing.T) {
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
 		codexSessionMetaLine("root-904", "root-904", "", sessRepo, "user", "{}"),
 		codexFunctionCallLine("exec_command", map[string]string{
-			"command": "herdr agent start w1 --kind codex --pane wA:p1 -- -m gpt-5.6-terra",
+			"cmd": "herdr agent start w1 --kind codex --pane wA:p1 -- -m gpt-5.6-terra",
 		}),
 		codexFunctionCallLine("exec_command", map[string]string{
-			"command": `herdr agent prompt w1 "$(<.superpowers/sdd/2026-07-26-i903/dispatch-task-I903.md)"`,
+			"cmd": `herdr agent prompt w1 "$(<.superpowers/sdd/2026-07-26-i903/dispatch-task-I903.md)"`,
 		}),
 		codexFunctionCallLine("exec_command", map[string]string{
-			"command": "herdr agent start w2 --kind codex --pane wB:p1 -- -m gpt-5.6-luna",
+			"cmd": "herdr agent start w2 --kind codex --pane wB:p1 -- -m gpt-5.6-luna",
 		}),
 		codexFunctionCallLine("exec_command", map[string]string{
-			"command": `herdr agent prompt w2 "$(<.superpowers/sdd/2026-07-26-i904/dispatch-task-I904.md)"`,
+			"cmd": `herdr agent prompt w2 "$(<.superpowers/sdd/2026-07-26-i904/dispatch-task-I904.md)"`,
 		}),
 	)
 
@@ -641,6 +645,69 @@ func TestCodexLaterMessageTokenDoesNotAttribute(t *testing.T) {
 	}
 }
 
+// Acceptance (D21 amended, I009 Verified 2026-07-27 live acceptance): the
+// literal first role="user" message in a real codex session is a
+// harness-injected preamble, not the operator's brief — an "# AGENTS.md
+// instructions" block, then a "<recommended_plugins>" block, THEN the real
+// dispatch brief. Both injected-shaped messages must be skipped for the
+// opening-message latch; the brief (the first non-injected user message)
+// is what attributes.
+func TestCodexInjectedPreamblesSkippedForOpeningMessage(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I909": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-909", "worker-909", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# AGENTS.md instructions for /Users/x/project\n\nFollow repo conventions."),
+		codexUserMessageLine("<recommended_plugins>\nsome-plugin\n</recommended_plugins>"),
+		codexUserMessageLine("# Task I909 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I909"]
+	if r.Verdict != VerdictMatch {
+		t.Fatalf("I909 verdict = %s (%s), want match — the injected AGENTS.md/recommended_plugins preambles must be skipped, leaving the real brief as the opening message", r.Verdict, r.Detail)
+	}
+	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra" {
+		t.Errorf("I909 actuals = %q, want gpt-5.6-terra", got)
+	}
+}
+
+// Acceptance (D21 amended, I009 Verified 2026-07-27): if EVERY role="user"
+// message in a file is injected-shaped (no real brief ever arrives), the
+// opening-message latch never fires — the existing "no opening" degrade
+// applies: this session contributes nothing, not a mistaken attribution to
+// injected preamble text.
+func TestCodexAllInjectedMessagesContributeNoOpening(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I910": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-910", "worker-910", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# AGENTS.md instructions for /Users/x/project\n\nFollow repo conventions."),
+		codexUserMessageLine("<recommended_plugins>\nsome-plugin\n</recommended_plugins>"),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I910"]
+	if r.Verdict != VerdictNoTranscript {
+		t.Fatalf("I910 verdict = %s (%s), want no-transcript — an all-injected-preamble session names no ticket anywhere and must contribute nothing", r.Verdict, r.Detail)
+	}
+	if len(r.Actuals) != 0 {
+		t.Errorf("I910 actuals = %v, want none — injected-preamble turn models must never attribute", r.Actuals)
+	}
+}
+
 // Acceptance (D21 clause 3): an orchestrator fixture whose opening message
 // names the ticket but which itself carries a dispatch record (spawn_agent,
 // unrelated task) contributes no own-turn evidence. Any session that
@@ -777,7 +844,7 @@ func TestCodexModelLessSpawnStillExcludesOwnTurns(t *testing.T) {
 			// no -m flag: the M4a-class spawn shape that carries no explicit
 			// model. codexTeamSpawnStartRe (evidence path) will not match
 			// this — it must still mark the session as dispatched.
-			"command": "herdr agent start w1 --kind codex --pane wA:p1 --",
+			"cmd": "herdr agent start w1 --kind codex --pane wA:p1 --",
 		}),
 	)
 

@@ -20,7 +20,11 @@
 //     no parent) that is not an orchestrator contributes its per-turn
 //     models as ticket evidence, correlated by the ticket token's presence
 //     in the FIRST LINE of the session's OPENING user message — the first
-//     response_item/message with role "user" in file order (scanCodexLine),
+//     response_item/message with role "user" in file order that is NOT
+//     shaped like a harness-injected preamble (scanCodexLine,
+//     codexIsInjectedPreamble; I009 Verified 2026-07-27 live acceptance: the
+//     literal first user message is always an injected "# AGENTS.md
+//     instructions" or angle-bracket-tag block, never the operator's brief),
 //     matched on its title line only (I042 review fix C2: whole-message
 //     matching let a context sentence naming a neighboring ticket attribute
 //     to it). A session is an orchestrator iff it contains ANY spawn-shaped
@@ -83,6 +87,28 @@ var codexTeamSpawnPromptRe = regexp.MustCompile(`^\s*(?:herdr|cmux)\s+agent\s+pr
 // auditable) still marks the session as an orchestrator even though it
 // contributes no dispatch-record evidence.
 var codexTeamSpawnAnyRe = regexp.MustCompile(`^\s*(?:herdr|cmux)\s+agent\s+(?:start|prompt)\s+(\S+)`)
+
+// codexInjectedPreambleRe matches an angle-bracket tag opener, e.g.
+// "<recommended_plugins>" or "<hook_prompt hook_run_id=…>" — one of the two
+// injected-preamble shapes I009's live acceptance found leading real codex
+// sessions (Verified 2026-07-27). The other shape, a literal
+// "# AGENTS.md instructions" first line, is checked separately since it is
+// not angle-bracket-shaped.
+var codexInjectedPreambleRe = regexp.MustCompile(`^<[a-z_]+[ >]`)
+
+// codexIsInjectedPreamble reports whether text's first line is shaped like a
+// harness-injected preamble rather than the operator's own dispatch brief
+// (I009 Verified 2026-07-27, live acceptance): "# AGENTS.md instructions"
+// (96/120 real sessions) or an angle-bracket tag opener such as
+// "<recommended_plugins>" or "<hook_prompt …>" (19/120, plus future
+// injections of the same shape). Injected-shaped messages are skipped for
+// the D21 opening-message latch but still contribute to the near-miss
+// search surface (searchText) — they are real session text, just not the
+// brief.
+func codexIsInjectedPreamble(text string) bool {
+	line := firstLine(text)
+	return strings.HasPrefix(line, "# AGENTS.md instructions") || codexInjectedPreambleRe.MatchString(line)
+}
 
 // codexSessionMeta is the payload of a codex rollout's session_meta line —
 // the one line kind carrying thread identity and the guardian marker
@@ -368,7 +394,15 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 				}
 				return true
 			}
-			cmd := args["command"]
+			// exec_command's argument key carrying the command text is `cmd`
+			// (I009 Verified 2026-07-27, live acceptance — the design's own
+			// synthetic fixtures had guessed `command`). `command` is kept as
+			// a tolerated fallback per the parser's drift posture: an older
+			// or renamed shape degrades to no evidence, never a wrong parse.
+			cmd := args["cmd"]
+			if cmd == "" {
+				cmd = args["command"]
+			}
 			if cmd == "" {
 				return true
 			}
@@ -397,19 +431,27 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 			}
 		case "message":
 			// Opening message = the first role="user" response_item/message
-			// in file order (D21). Only the first is captured for
+			// in file order that is NOT shaped like a harness-injected
+			// preamble (D21, amended per I009 Verified 2026-07-27 live
+			// acceptance: the literal first user message is always an
+			// injected "# AGENTS.md instructions" or "<recommended_plugins>"
+			// block, never the operator's brief — codexIsInjectedPreamble).
+			// Only the first non-injected user message is captured for
 			// attribution — a later message naming a different ticket
 			// (neighboring-ticket bleed, I009) must never overwrite it or
 			// attribute, and non-user messages (e.g. an assistant turn
 			// preceding the first real user line, if any) are skipped
-			// without latching haveOpening. Later user messages are still
-			// captured into laterUserText (D24/I044) — near-miss detection
-			// only, so a later mention reports unattributed-transcript
-			// rather than vanishing as no-transcript; attribution itself is
-			// unchanged.
+			// without latching haveOpening. Injected-shaped messages and
+			// every later user message are still captured into
+			// laterUserText (D24/I044) — near-miss detection only, so a
+			// later mention reports unattributed-transcript rather than
+			// vanishing as no-transcript; attribution itself is unchanged.
+			// If every user message in the file is injected-shaped,
+			// haveOpening never latches — the existing "no opening"
+			// degrade (contributes nothing) applies unchanged.
 			if item.Role == "user" {
 				text := codexMessageText(item.Content)
-				if !st.haveOpening {
+				if !st.haveOpening && !codexIsInjectedPreamble(text) {
 					st.res.openingUserMessage = text
 					st.haveOpening = true
 				} else {
