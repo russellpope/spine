@@ -914,6 +914,58 @@ func TestCodexModelLessSpawnStillExcludesOwnTurns(t *testing.T) {
 	}
 }
 
+// codexCustomToolCallLine builds a response_item/custom_tool_call line whose
+// input is a plain script-text STRING (I009 cmux-lead fact, Verified
+// 2026-07-27 live acceptance) — the shape cmux codex-team LEADS use to
+// dispatch: a whole script blob that itself invokes
+// tools.exec_command({"cmd": …}) internally, never a direct function_call.
+func codexCustomToolCallLine(input string) string {
+	return fmt.Sprintf(`{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":%q}}`, input)
+}
+
+// Acceptance (I009 cmux-lead fact, fix round 3). cmux codex-team LEADS
+// dispatch via response_item/custom_tool_call, not function_call — I009's
+// live maipipe observation found 60 such calls and ZERO recognizable
+// herdr/cmux-agent function_calls in a real lead's file. Before the fix, a
+// reader that only scanned function_call cmd args saw no dispatch-shaped
+// record at all here and mistook the lead for a worker: its own sol+terra
+// turns attributed to I917, the ticket named in the kickoff's opening
+// message — a manufactured silent-descent BLOCKING verdict from a session
+// that never itself ran a turn against the ticket (the design's worst
+// class). After the fix, the custom_tool_call input is scanned for the
+// non-anchored orchestrator-latch marker (`cmux send --surface`), marking
+// the session dispatched; own turns are excluded and the opening-message
+// mention reports honestly as unattributed-transcript rather than
+// manufacturing a match or vanishing as no-transcript.
+func TestCodexLeadCustomToolCallDispatchExcludesOwnTurns(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I917": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+		codexSessionMetaLine("lead-917", "lead-917", "", sessRepo, "user", topLevelSource),
+		codexUserMessageLine("# Task I917 — orchestrator dispatch\n\nCoordinate the build."),
+		codexTurnContextLine("gpt-5.6-sol"),   // decoy: must never surface as I917 evidence
+		codexTurnContextLine("gpt-5.6-terra"), // decoy: must never surface as I917 evidence
+		codexCustomToolCallLine(`const p = "I917 build the thing"; await tools.exec_command({"cmd": "cmux send --surface wA:p1 "+JSON.stringify(p)+" && cmux send-key --surface wA:p1 enter"});`),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I917"]
+	if r.Verdict != VerdictUnattributedTranscript {
+		t.Fatalf("I917 verdict = %s (%s), want unattributed-transcript — the cmux lead's own sol+terra turns must not attribute", r.Verdict, r.Detail)
+	}
+	if len(r.Actuals) != 0 {
+		t.Errorf("I917 actuals = %v, want none — the decoy sol/terra own-turn models must not leak in", r.Actuals)
+	}
+	if rep.Blocking() {
+		t.Error("a cmux lead dispatching via custom_tool_call must never manufacture a blocking verdict")
+	}
+}
+
 // Regression (review finding C2, Critical; probe P2). Token matching is
 // against the FIRST LINE of the opening user message only (D21 amended at
 // review, 0bd554a) — a context sentence naming a neighboring, higher-tier

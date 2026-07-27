@@ -88,6 +88,21 @@ var codexTeamSpawnPromptRe = regexp.MustCompile(`^\s*(?:herdr|cmux)\s+agent\s+pr
 // contributes no dispatch-record evidence.
 var codexTeamSpawnAnyRe = regexp.MustCompile(`^\s*(?:herdr|cmux)\s+agent\s+(?:start|prompt)\s+(\S+)`)
 
+// codexOrchestratorLatchRe is the NON-ANCHORED orchestrator-latch marker
+// (I009 cmux-lead fact, fix): `herdr agent start|prompt`, `cmux agent
+// start|prompt`, or `cmux send --surface`, matched ANYWHERE in the text
+// rather than only at its start. Two surfaces need this, neither of which
+// codexTeamSpawnAnyRe (anchored) can reach: a custom_tool_call's `input` is
+// a whole script blob with the marker embedded partway through (I009's
+// verified cmux-lead shape — 60 such calls observed live on maipipe, zero
+// recognizable function_calls), and a function_call cmd can equally embed
+// one behind a shell chain (`cd x && herdr agent start …`). A hit sets
+// dispatched=true ONLY — this latch produces no dispatch-record evidence;
+// cmux cluster evidence remains the worker scan (D21) plus D26's
+// records-at-source, since worker models inside these scripts are
+// template-built and not reliably extractable (I009).
+var codexOrchestratorLatchRe = regexp.MustCompile(`(?:herdr|cmux)\s+agent\s+(?:start|prompt)\s|cmux\s+send\s+--surface\s`)
+
 // codexInjectedPreambleRe matches an angle-bracket tag opener, e.g.
 // "<recommended_plugins>" or "<hook_prompt hook_run_id=…>" — one of the two
 // injected-preamble shapes I009's live acceptance found leading real codex
@@ -195,10 +210,11 @@ func (m codexSessionMeta) rootID() string {
 // (reasoning, …) decode harmlessly with empty fields and are skipped.
 type codexResponseItem struct {
 	Type      string          `json:"type"`
-	Name      string          `json:"name"`      // function_call
+	Name      string          `json:"name"`      // function_call, custom_tool_call ("exec")
 	Arguments json.RawMessage `json:"arguments"` // function_call
 	Role      string          `json:"role"`      // message
 	Content   json.RawMessage `json:"content"`   // message
+	Input     json.RawMessage `json:"input"`     // custom_tool_call
 }
 
 // codexMessageText extracts the human-readable text from a message
@@ -249,6 +265,19 @@ func codexFunctionArgs(raw json.RawMessage) map[string]string {
 		}
 	}
 	return out
+}
+
+// codexCustomToolCallInput extracts a custom_tool_call response_item's
+// `input` as plain script text (I009 cmux-lead fact: input is always a
+// plain JSON string holding script text, never an object or array — unlike
+// function_call's `arguments`). Degrade-never-fail: a non-string input
+// (format drift) yields ok=false and is silently ignored, never an error.
+func codexCustomToolCallInput(raw json.RawMessage) (string, bool) {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return "", false
+	}
+	return s, true
 }
 
 // codexFileResult is what scanCodexFile extracts from one rollout file: its
@@ -441,6 +470,14 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 			if codexTeamSpawnAnyRe.MatchString(cmd) {
 				st.res.dispatched = true
 			}
+			// I009 cmux-lead fact (fix): the same non-anchored latch also
+			// scans function_call cmd text, for symmetry with the
+			// custom_tool_call case below — a marker can equally be embedded
+			// mid-command behind a shell chain, not just at cmd's start the
+			// way codexTeamSpawnAnyRe (anchored) requires.
+			if codexOrchestratorLatchRe.MatchString(cmd) {
+				st.res.dispatched = true
+			}
 			// Only commands structurally shaped like a team spawn (herdr/cmux
 			// agent start|prompt) may become dispatch evidence (fix, C1) — an
 			// arbitrary exec_command carrying an unrelated -m flag (a lead
@@ -455,6 +492,29 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 				w := st.execWorker(match[1])
 				w.text.WriteString(cmd)
 				w.text.WriteByte(' ')
+			}
+		case "custom_tool_call":
+			// I009 cmux-lead fact (fix): cmux codex-team LEADS dispatch via
+			// THIS shape (`name":"exec"`, `input` = a whole script's text),
+			// not function_call — a reader that only scans function_call
+			// cmd text misses these orchestrators entirely, letting their
+			// own turns fall through to the worker-session scan below and
+			// attribute to every primary ticket the kickoff's opening
+			// message names (manufactured BLOCKING, observed live on
+			// maipipe: 60 such calls, zero recognizable herdr/cmux-agent
+			// function_calls). ORCHESTRATOR LATCH ONLY: worker models
+			// inside these scripts are template-built
+			// (`${JSON.stringify(…)}`) and not reliably extractable
+			// (I009), so no dispatch-record evidence is produced here —
+			// cmux cluster evidence remains the worker scan (D21) plus
+			// D26's records-at-source. Deliberately NOT folded into
+			// searchText/laterUserText this round: a whole script blob in
+			// the near-miss surface would flood report details for little
+			// benefit, since the latch already prevents the manufactured
+			// verdict this ticket exists to fix. Non-string input (format
+			// drift) degrades to ignored, never an error.
+			if input, ok := codexCustomToolCallInput(item.Input); ok && codexOrchestratorLatchRe.MatchString(input) {
+				st.res.dispatched = true
 			}
 		case "message":
 			// Opening message = the first role="user" response_item/message
