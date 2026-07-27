@@ -625,3 +625,121 @@ func TestCodexM4aUndeclaredModelJudgesUnmappedDispatch(t *testing.T) {
 		t.Fatalf("I904 verdict = %s (%s), want unmapped-dispatch — gpt-5.5 was never a shipped id", r.Verdict, r.Detail)
 	}
 }
+
+// --- I042 review fix round 1 ---
+
+// Regression (review finding C1, Critical; probe P1). A model-less
+// dispatcher — a team-spawn "start" command with no explicit -m flag,
+// definitionally the pre-I038 M4a class this ticket exists to make
+// auditable — is still a spawn-SHAPED record and must still trigger the
+// orchestrator exclusion (D21 amended at review, 0bd554a): "contains
+// dispatch records" means ANY spawn-shaped record, with or without a
+// usable model, not just ones that survived the explicit-model evidence
+// gate. Before the fix, len(res.dispatches)==0 saw zero dispatch-record
+// *evidence* (the model-less spawn produces none) and treated this lead as
+// a worker: its own decoy turn model attributed and manufactured a
+// blocking silent-descent (probe P1). After the fix, the lead contributes
+// nothing at all — no own-turn evidence, no dispatch evidence (there was
+// none to give) — and the ticket lands on no-transcript, never blocking.
+func TestCodexModelLessSpawnStillExcludesOwnTurns(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I905": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+		codexSessionMetaLine("lead-905", "lead-905", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I905 — orchestrator dispatch\n\nCoordinate the build."),
+		codexTurnContextLine("gpt-5.6-luna"), // decoy: must never surface as I905 evidence
+		codexFunctionCallLine("exec_command", map[string]string{
+			// no -m flag: the M4a-class spawn shape that carries no explicit
+			// model. codexTeamSpawnStartRe (evidence path) will not match
+			// this — it must still mark the session as dispatched.
+			"command": "herdr agent start w1 --kind codex --pane wA:p1 --",
+		}),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I905"]
+	if r.Verdict != VerdictNoTranscript {
+		t.Fatalf("I905 verdict = %s (%s), want no-transcript — a model-less spawn is still an orchestrator; its own turn must not attribute", r.Verdict, r.Detail)
+	}
+	if len(r.Actuals) != 0 {
+		t.Errorf("I905 actuals = %v, want none (the decoy gpt-5.6-luna own-turn model must not leak in)", r.Actuals)
+	}
+	if rep.Blocking() {
+		t.Error("a model-less dispatcher's own decoy turn must never manufacture a blocking verdict")
+	}
+}
+
+// Regression (review finding C2, Critical; probe P2). Token matching is
+// against the FIRST LINE of the opening user message only (D21 amended at
+// review, 0bd554a) — a context sentence naming a neighboring, higher-tier
+// ticket must not attribute to it. Before the fix, the whole opening
+// message was folded into the worker's description and matched per
+// ticket, so a brief titled for I906 that merely mentions "this stacks on
+// I907's reader work" gave I907 (primary) a terra actual and manufactured
+// a blocking silent-descent from a fully correct build (probe P2). After
+// the fix: I906 (named in the title line) attributes; I907 (named only in
+// a later line of the SAME opening message) gets no evidence from this
+// session at all, and nothing blocks.
+func TestCodexOpeningMessageContextSentenceDoesNotAttributeToNeighbor(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I906": "routine", "I907": "primary"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-906", "worker-906", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I906 — implementer dispatch\n\nContext: this stacks on I907's reader work."),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I906"]; r.Verdict != VerdictMatch {
+		t.Errorf("I906 verdict = %s (%s), want match — its token is in the opening message's title line", r.Verdict, r.Detail)
+	}
+	if r := rows["I907"]; r.Verdict != VerdictNoTranscript || len(r.Actuals) != 0 {
+		t.Errorf("I907 verdict = %s actuals=%v, want no-transcript/none — a context-sentence mention (not the title line) must not attribute", r.Verdict, r.Actuals)
+	}
+	if rep.Blocking() {
+		t.Error("a brief's context-sentence mention of a higher-tier neighbor must never manufacture a blocking verdict")
+	}
+}
+
+// Regression (review finding I1, Important). The audit.go codex case-fold
+// (Run's agent-correlation loop, ToUpper for a.flavor=="codex") was
+// previously untested — every prior fixture's opening-message title
+// happened to carry the ticket token uppercase already, so deleting the
+// fold left the suite green. A lowercase title line (plausible per D20's
+// own "lowercase by convention" note for task_name) must still attribute —
+// this is the Run-boundary, flavor-scoped seam the I040 Testing Decisions
+// clause explicitly permits testing.
+func TestCodexLowercaseOpeningMessageTitleAttributesCaseInsensitively(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I908": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-908", "worker-908", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("task i908 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I908"]
+	if r.Verdict != VerdictMatch {
+		t.Fatalf("I908 verdict = %s (%s), want match — codex ticket-token matching is case-insensitive (D20)", r.Verdict, r.Detail)
+	}
+	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra" {
+		t.Errorf("I908 actuals = %q, want gpt-5.6-terra", got)
+	}
+}

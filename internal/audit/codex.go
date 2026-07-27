@@ -17,13 +17,19 @@
 //     linkable, exactly as claude's linked subagent transcripts do.
 //  3. A worker-session scan (D21, ticket I042) for builds that predate
 //     explicit-model dispatch: a top-level session (thread_source "user",
-//     no parent) with no dispatch records of its own contributes its
-//     per-turn models as ticket evidence, correlated by the ticket token's
-//     presence in the session's OPENING user message — the first
-//     response_item/message with role "user" in file order (scanCodexLine).
-//     A session that dispatches is an orchestrator (clause 3): its own
-//     turns are excluded, but its dispatch records still count via the
-//     existing description-match path above.
+//     no parent) that is not an orchestrator contributes its per-turn
+//     models as ticket evidence, correlated by the ticket token's presence
+//     in the FIRST LINE of the session's OPENING user message — the first
+//     response_item/message with role "user" in file order (scanCodexLine),
+//     matched on its title line only (I042 review fix C2: whole-message
+//     matching let a context sentence naming a neighboring ticket attribute
+//     to it). A session is an orchestrator iff it contains ANY spawn-shaped
+//     record — a spawn_agent call or team-spawn start/prompt command, with
+//     or without a usable model (I042 review fix C1: a model-less spawn is
+//     still an orchestrator, generalizing D21's clause 3 beyond dispatches
+//     that survived the explicit-model evidence gate) — whose own turns are
+//     excluded, but whose dispatch records still count via the existing
+//     description-match path above.
 //
 // Guardian auto-review threads (D23) are structurally excluded from every
 // evidence path: their reported model is synthetic and must never be read.
@@ -56,6 +62,16 @@ var codexTeamSpawnStartRe = regexp.MustCompile(`^\s*(?:herdr|cmux)\s+agent\s+sta
 // name the prompt text (typically carrying the ticket token via a
 // dispatch-task file path, I009) belongs to.
 var codexTeamSpawnPromptRe = regexp.MustCompile(`^\s*(?:herdr|cmux)\s+agent\s+prompt\s+(\S+)`)
+
+// codexTeamSpawnAnyRe matches ANY team-spawn start|prompt command, with or
+// without an explicit -m model flag — the orchestrator-exclusion latch
+// (D21 amended at I042 review, 0bd554a: "contains dispatch records" means
+// any spawn-SHAPED record, not just ones that survived the stricter
+// explicit-model evidence gate codexTeamSpawnStartRe enforces). A
+// model-less "start" (the pre-I038 M4a class this ticket exists to make
+// auditable) still marks the session as an orchestrator even though it
+// contributes no dispatch-record evidence.
+var codexTeamSpawnAnyRe = regexp.MustCompile(`^\s*(?:herdr|cmux)\s+agent\s+(?:start|prompt)\s+(\S+)`)
 
 // codexSessionMeta is the payload of a codex rollout's session_meta line —
 // the one line kind carrying thread identity and the guardian marker
@@ -176,6 +192,7 @@ func codexFunctionArgs(raw json.RawMessage) map[string]string {
 type codexFileResult struct {
 	meta               codexSessionMeta
 	dispatches         []dispatch
+	dispatched         bool // I042 review fix (C1): ANY spawn-shaped record seen, model or not — see dispatches' doc
 	turnModels         []string
 	openingUserMessage string // D21/I042: first role="user" message in file order
 }
@@ -294,6 +311,12 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 		case "function_call":
 			args := codexFunctionArgs(item.Arguments)
 			if item.Name == "spawn_agent" {
+				// I042 review fix (C1): ANY spawn_agent call marks the
+				// session as an orchestrator, model or not — the D21
+				// amendment's broad "dispatch record" reading. A model-less
+				// spawn_agent contributes no dispatch-record evidence below
+				// but must still exclude this session's own turns.
+				st.res.dispatched = true
 				if m := args["model"]; m != "" {
 					st.res.dispatches = append(st.res.dispatches, dispatch{
 						model:       m,
@@ -305,6 +328,14 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 			cmd := args["command"]
 			if cmd == "" {
 				return true
+			}
+			// I042 review fix (C1): a team-spawn command shape (start or
+			// prompt) marks the session as an orchestrator regardless of
+			// whether it carries an explicit -m model — codexTeamSpawnAnyRe
+			// is intentionally looser than the two evidence-producing
+			// regexes below.
+			if codexTeamSpawnAnyRe.MatchString(cmd) {
+				st.res.dispatched = true
 			}
 			// Only commands structurally shaped like a team spawn (herdr/cmux
 			// agent start|prompt) may become dispatch evidence (fix, C1) — an
@@ -431,14 +462,20 @@ func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []s
 			agents = append(agents, subagent{toolUseID: "codex:" + root, models: res.turnModels, flavor: "codex"})
 		}
 		// D21 worker-session scan (I042): a top-level session with no
-		// dispatch records of its own (clause 3, orchestrator exclusion)
-		// contributes its per-turn models as evidence, correlated in Run by
-		// the ticket token's presence in its opening user message (clauses
-		// 1-2) — the same description+containsToken seam claude subagents
-		// already use, so Run needs no codex-specific worker-scan logic.
-		if res.meta.isTopLevelUser() && len(res.dispatches) == 0 && len(res.turnModels) > 0 {
+		// dispatch records of its own (clause 3, orchestrator exclusion —
+		// gated on res.dispatched, not len(res.dispatches): I042 review fix
+		// C1, any spawn-shaped record excludes, model or not) contributes
+		// its per-turn models as evidence, correlated in Run by the ticket
+		// token's presence in the FIRST LINE of its opening user message
+		// (clauses 1-2; I042 review fix C2 — matching the whole message let
+		// a context sentence naming a neighboring ticket attribute to it,
+		// mirroring the fix Run's dispatch matching already applies via
+		// firstLine(d.prompt)) — the same description+containsToken seam
+		// claude subagents already use, so Run needs no codex-specific
+		// worker-scan logic.
+		if res.meta.isTopLevelUser() && !res.dispatched && len(res.turnModels) > 0 {
 			agents = append(agents, subagent{
-				description: res.openingUserMessage,
+				description: firstLine(res.openingUserMessage),
 				models:      res.turnModels,
 				flavor:      "codex",
 			})
