@@ -124,6 +124,22 @@ missed, found by running the finished reader against the real store):
   invisible). Parse it polymorphically; a string source means a plain
   top-level session. Other payload fields observed with non-string types:
   `base_instructions` (object), `context_window` (object), `git` (object).
+- **cmux codex-team leads dispatch via `custom_tool_call`, not
+  `function_call`.** A third call shape: `response_item` with
+  `payload.type: "custom_tool_call"`, `name: "exec"`, and `input` = a plain
+  STRING holding script text that itself invokes
+  `tools.exec_command({"cmd":` cmux send --surface <ref> <prompt> && cmux
+  send-key --surface <ref> enter `,…})`. The observed maipipe cmux lead
+  (2026-07-21) carries 60 such calls and ZERO recognizable
+  herdr/cmux-agent function_calls — so an orchestrator latch reading only
+  function_call cmd args misses cmux leads entirely, and the lead's own
+  sol+terra turns attribute to every primary ticket its kickoff's first
+  line names (manufactured blocking verdicts, observed live). Worker
+  models inside these scripts are template-built (`${JSON.stringify(…)}`)
+  and NOT reliably extractable — cmux cluster evidence remains the worker
+  scan plus D26's records-at-source; the latch, however, MUST scan
+  custom_tool_call input text for team-dispatch markers (`herdr|cmux agent
+  start|prompt`, `cmux send --surface`), non-anchored (script-embedded).
 
 ## Fix
 
