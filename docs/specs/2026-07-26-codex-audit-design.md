@@ -220,7 +220,11 @@ given a repo state and transcript fixtures on disk, what Report does the
 audit entry point return. Tests must not reach into reader internals or
 intermediate structures — the codex format is undocumented and the parser
 will shift; tests coupled to it would obstruct exactly the adaptation this
-effort exists to make routine.
+effort exists to make routine. (Scope, ratified at I040 review: this ban
+targets the undocumented parsing layer — scanJSONL/parseLine, codex JSON
+shapes — not the resolution seam D15 named and stabilized as a contract;
+a white-box test of per-token flavor resolution is legitimate where no
+Run-level fixture can yet construct the discriminating input.)
 
 **Audit module (the single behavioral seam).** Scenario fixture directories
 following the existing clean/degraded/mixed/vacuous convention, extended
