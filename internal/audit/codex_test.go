@@ -301,6 +301,51 @@ func TestCodexGuardianContributesNoEvidence(t *testing.T) {
 	}
 }
 
+// Regression (I044 fix round 1, review finding Important-1): the D22 scope
+// check must run BEFORE the guardian check, not after — an out-of-scope
+// guardian file must stay invisible to the audit entirely, never surface as
+// a D24 near miss just because its quoted content happens to mention a
+// ticket ("Sessions outside scope are invisible to attribution — they are
+// not 'unattributed', they simply do not exist for this audit," I043's
+// ticket text, D22). Every guardian fixture before this one used an
+// in-scope cwd, so the reorder had no forcing test: reverting it left the
+// full suite green. This fixture's guardian session has a cwd OUTSIDE the
+// audited repo and no commit_hash — out of scope by D22 — with content that
+// would otherwise be a textbook guardian-only match (I044's own
+// TestCodexGuardianContributesNoEvidence fixture, restaged out of scope).
+// It must stay no-transcript, not unattributed-transcript, and produce no
+// warning (an out-of-scope session isn't a degradation, it's normal).
+func TestCodexOutOfScopeGuardianProducesNoNearMiss(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	outsideCwd := t.TempDir() // deliberately NOT inside sessRepo, no commit_hash given
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I955": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "guardian.jsonl"),
+		codexSessionMetaLine("guard-955", "root-955", "root-955", outsideCwd, "subagent", guardianSource),
+		codexTurnContextLine("codex-auto-review"),
+		codexFunctionCallLine("spawn_agent", map[string]string{
+			"model":     "gpt-5.6-terra",
+			"task_name": "i955 quoted replay inside an out-of-scope guardian review",
+		}),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I955"]
+	if r.Verdict != VerdictNoTranscript {
+		t.Fatalf("I955 verdict = %s (%s), want no-transcript — an out-of-scope guardian's content must never surface as a near miss", r.Verdict, r.Detail)
+	}
+	if len(r.Actuals) != 0 {
+		t.Errorf("I955 actuals = %v, want none", r.Actuals)
+	}
+	if len(rep.Warnings) != 0 {
+		t.Errorf("want no warnings for an out-of-scope guardian (out of scope is normal, not a degradation), got %q", rep.Warnings)
+	}
+}
+
 // Acceptance: a model-switching session contributes each turn's model, not
 // one per file. The linked subagent thread's two turn_context lines report
 // different models; both must surface as evidence, and the worse one

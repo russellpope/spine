@@ -541,7 +541,9 @@ func (p *gitCommitProber) knows(hash string) bool {
 // Out-of-repo sessions (D22: neither cwdInsideRepo nor a known commit hash,
 // gitCommitProber) are excluded before anything else — including near-miss
 // detection — so out-of-scope material stays invisible to this audit, never
-// "unattributed" (D22, ticket I044 interfaces note). Guardian threads (D23)
+// "unattributed" ("Sessions outside scope are invisible to attribution —
+// they are not 'unattributed', they simply do not exist for this audit,"
+// I043's ticket text, D22). Guardian threads (D23)
 // are structurally excluded from evidence but, once in scope, DO produce a
 // near miss: their content still gets searched for ticket mentions so a
 // guardian-only match reports honestly rather than as no-transcript. All
@@ -587,7 +589,9 @@ func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []s
 		// prober anything, keeping probe count and probe-failure warnings
 		// bounded to builds that actually use worktree cwds. Checked BEFORE
 		// the guardian exclusion below (D24 fix note: an out-of-scope
-		// guardian file must stay invisible, not surface as a near miss).
+		// guardian file must stay invisible, not surface as a near miss —
+		// regression-guarded by TestCodexOutOfScopeGuardianProducesNoNearMiss,
+		// I044 fix round 1).
 		if !cwdInsideRepo(res.meta.Cwd, absRepo) && !prober.knows(res.meta.Git.CommitHash) {
 			continue
 		}
