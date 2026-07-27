@@ -108,9 +108,10 @@ declares exactly one.
   dispatches counts. Generalizes the Claude reader's main-session rule.
   _Avoid_: lead session (herdr/cmux role name, narrower than this concept).
 - **worker session** — a top-level codex session attributed to a ticket
-  because the ticket's token appears in its opening user message (the
-  dispatch brief) and it is not an orchestrator session. Its per-turn models
-  are actual evidence.
+  because the ticket's token appears in the first line of its opening user
+  message (the dispatch brief's title; first-line rule ratified at I042
+  review to kill context-sentence bleed) and it is not an orchestrator
+  session. Its per-turn models are actual evidence.
 - **thread tree** — codex sessions form trees: each rollout file's
   session_meta carries its own thread id, its immediate parent, and the
   root's id (shared tree-wide). Membership is decided by root id, not by

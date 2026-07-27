@@ -28,6 +28,13 @@ ticket must NOT attribute; a worker that itself spawned a subagent loses
 its own turn evidence but keeps equivalent evidence through its own
 dispatch records.
 
+Amended at review (spec-level rulings, see design D21): token matching is
+against the FIRST LINE of the opening user message only (context-sentence
+mentions of neighbor tickets must not attribute — probe-proven blocking
+bleed otherwise), and the orchestrator exclusion triggers on any
+spawn-SHAPED record, with or without a usable model (a model-less M4a-class
+lead is still an orchestrator).
+
 ## Acceptance criteria
 
 - [ ] Worker fixture with token in opening message and no dispatch records attributes its per-turn models

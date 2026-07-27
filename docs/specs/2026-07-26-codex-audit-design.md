@@ -136,11 +136,23 @@ mid-run contributes each turn's model.
 
 **D21 — Worker attribution rule.** A top-level codex session (thread_source
 "user", no parent) counts as worker evidence for ticket T iff: it is
-repo-scoped (D22), AND T's token appears in the session's opening user
-message (the dispatch brief), AND the session contains no dispatch records of
-its own. The third clause is the orchestrator exclusion — any session that
-dispatches is an orchestrator and its own models are never ticket evidence,
-generalizing the claude reader's main-session rule. Validated against M4a:
+repo-scoped (D22), AND T's token appears in the FIRST LINE of the session's
+opening user message (the dispatch brief's title line — amended at I042
+review: whole-message matching let a brief's context sentence naming a
+higher-tier neighbor manufacture a blocking verdict on it; first-line
+matching mirrors the claude reader's existing firstLine(d.prompt) treatment,
+which exists for exactly this reason, and the estate's brief convention
+carries the token in the title. A brief whose title omits the token degrades
+toward no-transcript/unattributed — honest, never a manufactured blocker),
+AND the session contains no dispatch records of its own. The third clause is
+the orchestrator exclusion — any session that dispatches is an orchestrator
+and its own models are never ticket evidence, generalizing the claude
+reader's main-session rule. (Ratified at I042 review: "contains dispatch
+records" means any spawn-SHAPED record — a spawn_agent call or team-spawn
+command with or without a usable model field — per the glossary's broad
+definition; a model-less dispatcher is still an orchestrator. The asymmetry
+governs: false-orchestrator costs one missed worker session, false-worker
+attributes orchestration turns and can manufacture a blocking verdict.) Validated against M4a:
 opening-message matching excludes the neighboring-ticket bleed present in
 later messages; a worker that itself spawned a spec-review subagent loses its
 own turn evidence but keeps equivalent evidence through its `spawn_agent`
