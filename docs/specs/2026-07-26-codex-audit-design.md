@@ -164,7 +164,13 @@ is a commit known to the audited repo (one git object-existence probe per
 distinct hash; spine already shells to git elsewhere). This covers worktree
 cwds like /private/tmp team dirs and makes cross-repo token collision
 impossible unless repos share history. A failing or absent git probe degrades
-to cwd-only plus a report warning.
+to cwd-only plus a report warning. (Ratified at I043 review: the warning is
+attempt-gated — it fires when a session structurally needed the commit probe
+and the mechanism was unavailable/failed, not eagerly on every audit of a
+non-git dir; same shape as the I041 warning rule. Probe inputs are validated
+to look like git object ids before shelling out — a ref-ish value like
+"main" or "HEAD" in a drifted commit_hash field must never resolve against
+the audited repo's refs, which would readmit the I008 false-positive class.)
 
 **D23 — Guardian exclusion.** Threads whose source marks them as guardian
 auto-review are structurally excluded from all evidence paths and never
