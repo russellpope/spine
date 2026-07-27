@@ -144,10 +144,23 @@ matching mirrors the claude reader's existing firstLine(d.prompt) treatment,
 which exists for exactly this reason, and the estate's brief convention
 carries the token in the title. A brief whose title omits the token degrades
 toward no-transcript/unattributed — honest, never a manufactured blocker),
-AND the session contains no dispatch records of its own. The third clause is
+AND the session contains no dispatch records of its own. (Second narrowing,
+ratified at I048 live acceptance: a worker session whose opening line names
+MORE THAN ONE distinct audited ticket is ambiguous — its own turns attribute
+to none of them; the session surfaces as near-miss material for each. Live
+estate evidence forced this: single-line briefs make "first line" the whole
+brief, and an "I043 TASKS 2+3" routine-terra worker's turns were blocking
+maipipe's primary I044 purely because the brief named it — the C2 bleed
+class returning through unbroken lines. Single-token first lines, the
+estate norm, attribute exactly as before; multi-token briefs degrade
+honestly rather than guessing which ticket the session served.)
+The third clause is
 the orchestrator exclusion — any session that dispatches is an orchestrator
 and its own models are never ticket evidence, generalizing the claude
-reader's main-session rule. (Ratified at I042 review: "contains dispatch
+reader's main-session rule. (Latch scope, ratified at I048: on cmux leads
+dispatch commands hide in `custom_tool_call` script text — the latch scans
+that surface with non-anchored team-dispatch markers; script blobs yield no
+evidence, only exclusion.) (Ratified at I042 review: "contains dispatch
 records" means any spawn-SHAPED record — a spawn_agent call or team-spawn
 command with or without a usable model field — per the glossary's broad
 definition; a model-less dispatcher is still an orchestrator. The asymmetry
