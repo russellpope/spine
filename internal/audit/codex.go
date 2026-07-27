@@ -35,6 +35,16 @@
 // evidence path: their reported model is synthetic and must never be read.
 // session_meta.payload.model is present but always null (D20) and is never
 // read; model evidence is per-turn only, from turn_context.
+//
+// Repo scoping (D22, ticket I043): a session belongs to the audited repo iff
+// its cwd resolves inside the repo (cwdInsideRepo) OR its
+// session_meta.payload.git.commit_hash names a commit known to the repo
+// (gitCommitProber, one git object-existence probe per distinct hash) —
+// covering worktree cwds like /private/tmp team dirs and making cross-repo
+// ticket-token collision impossible unless repos share history. Out-of-scope
+// sessions are invisible to the audit, not "unattributed". A failing or
+// absent git probe degrades to cwd-only plus a report warning naming the
+// degradation, never an error.
 package audit
 
 import (
@@ -43,6 +53,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -88,6 +99,9 @@ type codexSessionMeta struct {
 			ThreadSpawn json.RawMessage `json:"thread_spawn"` // present on real codex-native subagents
 		} `json:"subagent"`
 	} `json:"source"`
+	Git struct {
+		CommitHash string `json:"commit_hash"` // D22/I043 repo-scoping signal; no remote URL is ever present (I009)
+	} `json:"git"`
 }
 
 // isGuardian reports whether this thread is a guardian auto-review subagent
@@ -383,14 +397,13 @@ func (st *codexScanState) execWorker(name string) *codexExecWorker {
 	return w
 }
 
-// cwdInsideRepo reports whether cwd resolves inside absRepo. This is the
-// simplest correct repo scoping available to I041 — full D22 scoping (a
-// git-commit-hash probe for worktree cwds like /private/tmp team dirs) is
-// I043's job; this cwd-only check is the seam it extends. A missing or
-// unresolvable cwd cannot be proven to belong to the audited repo and is
+// cwdInsideRepo reports whether cwd resolves inside absRepo — clause 1 of
+// D22's repo-scoping rule (I041 seam, extended by clause 2 below). A missing
+// or unresolvable cwd cannot be proven to belong to the audited repo and is
 // excluded rather than leniently included: a false negative here costs one
-// missed session (no-transcript, at worst); a false positive would be
-// exactly the cross-repo attribution I008 exists to prevent.
+// missed session (no-transcript, at worst, unless clause 2 admits it via a
+// known commit); a false positive would be exactly the cross-repo
+// attribution I008 exists to prevent.
 func cwdInsideRepo(cwd, absRepo string) bool {
 	if cwd == "" {
 		return false
@@ -406,13 +419,69 @@ func cwdInsideRepo(cwd, absRepo string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// gitCommitProber implements D22 clause 2: a codex session whose cwd falls
+// outside the repo is still in scope if its session_meta.payload.git.
+// commit_hash names a commit KNOWN to the audited repo's object store — the
+// signal that makes worktree cwds (/private/tmp team dirs) visible. The
+// probe mechanism itself (does `git` work at all against this repo dir) is
+// checked lazily, on first use, and cached: most audits are fully cwd-scoped
+// and never need a probe at all (readCodexSessions short-circuits on
+// cwdInsideRepo before calling knows), so a repo that happens not to be a
+// git checkout must not warn when nothing ever needed the probe. Once
+// checked, per-distinct-hash results are cached too — a 951-file session
+// store must not fork 951 git processes, only one per distinct hash it
+// actually needs.
+type gitCommitProber struct {
+	repoDir   string
+	warnings  *[]string
+	checked   bool
+	available bool
+	cache     map[string]bool
+}
+
+func newGitCommitProber(repoDir string, warnings *[]string) *gitCommitProber {
+	return &gitCommitProber{repoDir: repoDir, warnings: warnings, cache: map[string]bool{}}
+}
+
+// knows reports whether hash names a commit in p.repoDir's object store. A
+// missing/empty hash trivially contributes no probe (D22). Degrade-never-
+// fail: if the probe mechanism itself doesn't work — repoDir is not a git
+// checkout, or the git binary is unavailable — knows reports false (cwd-only
+// behavior) and records exactly one report warning naming the degradation,
+// no matter how many hashes are asked about.
+func (p *gitCommitProber) knows(hash string) bool {
+	if hash == "" {
+		return false
+	}
+	if !p.checked {
+		p.checked = true
+		p.available = exec.Command("git", "-C", p.repoDir, "rev-parse", "--git-dir").Run() == nil
+		if !p.available {
+			*p.warnings = append(*p.warnings, fmt.Sprintf(
+				"codex repo scoping: git commit-hash probe unavailable for %s (not a git repository, or git is not installed) — degrading to cwd-only scoping",
+				p.repoDir))
+		}
+	}
+	if !p.available {
+		return false
+	}
+	if known, ok := p.cache[hash]; ok {
+		return known
+	}
+	known := exec.Command("git", "-C", p.repoDir, "cat-file", "-e", hash+"^{commit}").Run() == nil
+	p.cache[hash] = known
+	return known
+}
+
 // readCodexSessions walks a codex sessions dir — real layout
 // <dir>/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl, though any nesting is
 // accepted — collecting dispatch records and spawned-thread actuals (D20)
 // as the same dispatch/subagent structures readTranscripts produces,
 // tagged with the codex flavor. Guardian threads (D23) and out-of-repo
-// sessions (cwdInsideRepo) are structurally excluded before their content
-// is ever folded into evidence. All trouble degrades to a warning, never an
+// sessions (D22: neither cwdInsideRepo nor a known commit hash,
+// gitCommitProber) are structurally excluded before their content is ever
+// folded into evidence — excluded sessions are invisible to this audit, not
+// "unattributed" (D22). All trouble degrades to a warning, never an
 // error — an undocumented, drifting format must never break the verify
 // stage (design D-doc, "spine maintainer" story).
 func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []subagent) {
@@ -439,6 +508,7 @@ func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []s
 	}
 	sort.Strings(files)
 
+	prober := newGitCommitProber(absRepo, warnings)
 	var dispatches []dispatch
 	var agents []subagent
 	for _, path := range files {
@@ -449,7 +519,12 @@ func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []s
 		if res.meta.isGuardian() {
 			continue // D23: never evidence, in any path
 		}
-		if !cwdInsideRepo(res.meta.Cwd, absRepo) {
+		// D22: in scope iff cwd resolves inside the repo (clause 1) or the
+		// session's git commit hash is known to the repo (clause 2). The
+		// short-circuit means a fully cwd-scoped session never asks the
+		// prober anything, keeping probe count and probe-failure warnings
+		// bounded to builds that actually use worktree cwds.
+		if !cwdInsideRepo(res.meta.Cwd, absRepo) && !prober.knows(res.meta.Git.CommitHash) {
 			continue
 		}
 		root := res.meta.rootID()

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,6 +35,56 @@ func codexSessionMetaLine(id, sessionID, parent, cwd, threadSource, sourceJSON s
 	return fmt.Sprintf(
 		`{"type":"session_meta","payload":{"id":%q,"session_id":%q,"parent_thread_id":%q,"cwd":%q,"thread_source":%q,"model":null,"source":%s}}`,
 		id, sessionID, parent, cwd, threadSource, sourceJSON)
+}
+
+// codexSessionMetaLineWithGit builds a session_meta line carrying a
+// session_meta.payload.git.commit_hash (I009: payload.git carries only
+// {commit_hash, branch}, no remote URL) — the D22/I043 commit-known repo
+// scoping signal. Kept as a separate helper (rather than adding a param to
+// codexSessionMetaLine) so every pre-I043 call site stays byte-untouched.
+func codexSessionMetaLineWithGit(id, sessionID, parent, cwd, threadSource, sourceJSON, commitHash string) string {
+	return fmt.Sprintf(
+		`{"type":"session_meta","payload":{"id":%q,"session_id":%q,"parent_thread_id":%q,"cwd":%q,"thread_source":%q,"model":null,"source":%s,"git":{"commit_hash":%q,"branch":"main"}}}`,
+		id, sessionID, parent, cwd, threadSource, sourceJSON, commitHash)
+}
+
+// makeTestGitRepo creates a real, minimal git repository at dir with one
+// commit and returns its hash — D22's commit-known probe shells to git
+// against a real object store, so the fixture must be a real repo, not a
+// JSON stand-in (Testing Decisions: "tiny real git repos built in test
+// temp dirs — precedented, spine already shells to git").
+func makeTestGitRepo(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=spine-test", "GIT_AUTHOR_EMAIL=spine-test@example.com",
+			"GIT_COMMITTER_NAME=spine-test", "GIT_COMMITTER_EMAIL=spine-test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q", ".")
+	// Content includes dir so two fixture repos created in the same test
+	// (and possibly the same wall-clock second) don't produce byte-identical
+	// commit objects — a same-hash collision would silently defeat the
+	// cross-repo test this helper exists for.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("fixture: "+dir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README.md")
+	run("commit", "-q", "-m", "fixture commit")
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func codexTurnContextLine(model string) string {
@@ -741,5 +792,198 @@ func TestCodexLowercaseOpeningMessageTitleAttributesCaseInsensitively(t *testing
 	}
 	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra" {
 		t.Errorf("I908 actuals = %q, want gpt-5.6-terra", got)
+	}
+}
+
+// --- D22 repo scoping — cwd or known commit (I043) ---
+
+// Acceptance: a session whose cwd resolves inside the audited repo attributes
+// normally; a sibling repo's session carrying the SAME ticket token (I024
+// restarts per repo across the estate, per D22's rationale) is out of scope
+// and contributes nothing — cwd-only scoping's existing guarantee, made an
+// explicit D22 fixture.
+func TestCodexSiblingRepoCwdSameTicketTokenOutOfScope(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	siblingRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I910": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "in-scope.jsonl"),
+		codexSessionMetaLine("in-910", "in-910", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I910 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+	writeCodexFile(t, filepath.Join(codexDir, "sibling.jsonl"),
+		codexSessionMetaLine("sib-910", "sib-910", "", siblingRepo, "user", "{}"),
+		codexUserMessageLine("# Task I910 — implementer dispatch\n\nBuild the thing (sibling repo's own I910)."),
+		codexTurnContextLine("gpt-5.6-luna"), // decoy: sibling repo, must never surface here
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I910"]
+	if r.Verdict != VerdictMatch {
+		t.Fatalf("I910 verdict = %s (%s), want match", r.Verdict, r.Detail)
+	}
+	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra" {
+		t.Errorf("I910 actuals = %q, want gpt-5.6-terra only — the sibling repo's session must not attribute", got)
+	}
+}
+
+// Acceptance (D22 clause 2, the ticket's headline scenario): a worktree
+// fixture — cwd OUTSIDE the audited repo (a /private/tmp team dir stand-in),
+// but session_meta.payload.git.commit_hash names a commit that IS in the
+// audited repo's real git history — is in scope. This is what makes
+// worktree-cwd codex teams visible at all.
+func TestCodexWorktreeCwdKnownCommitInScope(t *testing.T) {
+	codexDir := t.TempDir()
+	repoDir := t.TempDir()
+	commitHash := makeTestGitRepo(t, repoDir)
+	writeAuditRepo(t, repoDir, gen9DefaultWorkflow, map[string]string{"I911": "routine"})
+	worktreeCwd := t.TempDir() // deliberately NOT inside repoDir
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLineWithGit("worker-911", "worker-911", "", worktreeCwd, "user", "{}", commitHash),
+		codexUserMessageLine("# Task I911 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: repoDir, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I911"]
+	if r.Verdict != VerdictMatch {
+		t.Fatalf("I911 verdict = %s (%s), want match — a commit known to the repo puts the worktree cwd in scope", r.Verdict, r.Detail)
+	}
+	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra" {
+		t.Errorf("I911 actuals = %q, want gpt-5.6-terra", got)
+	}
+}
+
+// Acceptance (D22 clause 2, negative): cwd outside the repo AND a
+// well-formed but unknown commit hash — neither scoping signal fires, so the
+// session is invisible to this audit (not "unattributed": D22 says out-of-
+// scope sessions do not exist for the audit) and the ticket stays
+// no-transcript.
+func TestCodexUnknownCommitOutsideCwdOutOfScope(t *testing.T) {
+	codexDir := t.TempDir()
+	repoDir := t.TempDir()
+	makeTestGitRepo(t, repoDir) // a real repo, but the hash below is not one of its objects
+	writeAuditRepo(t, repoDir, gen9DefaultWorkflow, map[string]string{"I912": "routine"})
+	worktreeCwd := t.TempDir()
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLineWithGit("worker-912", "worker-912", "", worktreeCwd, "user", "{}",
+			"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
+		codexUserMessageLine("# Task I912 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-sol"), // decoy: out of scope, must never surface
+	)
+
+	rep, err := Run(Options{RepoDir: repoDir, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I912"]
+	if r.Verdict != VerdictNoTranscript {
+		t.Fatalf("I912 verdict = %s (%s), want no-transcript — an unknown commit hash and an outside cwd must not admit the session", r.Verdict, r.Detail)
+	}
+	if len(r.Actuals) != 0 {
+		t.Errorf("I912 actuals = %v, want none", r.Actuals)
+	}
+}
+
+// Acceptance (D22 clause 3, degrade-never-fail): when the audited repo dir
+// is not a git repository — a hermetic stand-in for "git probe failure"
+// (the same failure mode covers a missing git binary, since both make the
+// probe mechanism itself unusable) — commit-hash scoping degrades to
+// cwd-only, with a report warning naming the degradation, never an error.
+// A same-run cwd-inside-repo session proves cwd-only scoping keeps working
+// through the degradation, not that scoping breaks wholesale.
+func TestCodexGitProbeFailureDegradesToCwdOnlyWithWarning(t *testing.T) {
+	codexDir := t.TempDir()
+	repoDir := t.TempDir() // deliberately never git-initialized
+	writeAuditRepo(t, repoDir, gen9DefaultWorkflow, map[string]string{"I913": "routine", "I914": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "cwd-worker.jsonl"),
+		codexSessionMetaLine("cwd-913", "cwd-913", "", repoDir, "user", "{}"),
+		codexUserMessageLine("# Task I913 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+	writeCodexFile(t, filepath.Join(codexDir, "worktree-worker.jsonl"),
+		codexSessionMetaLineWithGit("wt-914", "wt-914", "", t.TempDir(), "user", "{}",
+			"0123456789abcdef0123456789abcdef01234567"),
+		codexUserMessageLine("# Task I914 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-luna"), // decoy: the probe can't run, must never surface
+	)
+
+	rep, err := Run(Options{RepoDir: repoDir, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I913"]; r.Verdict != VerdictMatch {
+		t.Errorf("I913 verdict = %s (%s), want match — cwd-only scoping must keep working when the git probe degrades", r.Verdict, r.Detail)
+	}
+	if r := rows["I914"]; r.Verdict != VerdictNoTranscript {
+		t.Errorf("I914 verdict = %s (%s), want no-transcript — a degraded git probe must not admit a worktree-cwd session", r.Verdict, r.Detail)
+	}
+	found := false
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "git") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want a warning naming the git-probe degradation, got %q", rep.Warnings)
+	}
+	if rep.Blocking() {
+		t.Error("a degraded git probe must never manufacture a blocking verdict")
+	}
+}
+
+// Acceptance (D22, the ticket's cross-repo guarantee): two distinct real git
+// repos each carry a worktree-cwd session for the SAME ticket id (I024
+// restarts per repo across the estate). Each repo's audit must see only its
+// own session's evidence — a shared codex sessions dir must never let the
+// commit-hash probe cross repo boundaries.
+func TestCodexCrossRepoCollisionSameTicketEachAuditsOwnEvidence(t *testing.T) {
+	codexDir := t.TempDir()
+	repoA := t.TempDir()
+	hashA := makeTestGitRepo(t, repoA)
+	writeAuditRepo(t, repoA, gen9DefaultWorkflow, map[string]string{"I024": "routine"})
+	repoB := t.TempDir()
+	hashB := makeTestGitRepo(t, repoB)
+	writeAuditRepo(t, repoB, gen9DefaultWorkflow, map[string]string{"I024": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker-a.jsonl"),
+		codexSessionMetaLineWithGit("wa-024", "wa-024", "", t.TempDir(), "user", "{}", hashA),
+		codexUserMessageLine("# Task I024 — implementer dispatch\n\nBuild repo A's thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+	writeCodexFile(t, filepath.Join(codexDir, "worker-b.jsonl"),
+		codexSessionMetaLineWithGit("wb-024", "wb-024", "", t.TempDir(), "user", "{}", hashB),
+		codexUserMessageLine("# Task I024 — implementer dispatch\n\nBuild repo B's thing."),
+		codexTurnContextLine("gpt-5.6-luna"),
+	)
+
+	repA, err := Run(Options{RepoDir: repoA, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repB, err := Run(Options{RepoDir: repoB, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rA := rowsByID(t, repA)["I024"]
+	if got := strings.Join(rA.Actuals, ","); got != "gpt-5.6-terra" {
+		t.Errorf("repo A I024 actuals = %q, want gpt-5.6-terra only — repo B's session must not leak in", got)
+	}
+	rB := rowsByID(t, repB)["I024"]
+	if got := strings.Join(rB.Actuals, ","); got != "gpt-5.6-luna" {
+		t.Errorf("repo B I024 actuals = %q, want gpt-5.6-luna only — repo A's session must not leak in", got)
 	}
 }
