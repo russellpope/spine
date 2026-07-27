@@ -226,9 +226,10 @@ scope the transcript set as operator escape hatches. No started-date
 anchoring: time-anchoring to the current build would blind multi-milestone
 repos to earlier builds' transcripts (M4a), the wrong default for the estate.
 (Amendments ratified at I047 review: (1) Reference matching is
-boundary-aware — the path clause requires a separator/end after the matched
-path and the basename clause treats `-`/`_`/`.` as word characters, so a
-`praxis-web` dispatch can never qualify a `praxis` audit; prefix-sharing
+boundary-aware — the path clause requires a boundary on both sides of the
+matched path (ratified at spec-review: both-sides is the shipped, strictly
+safer form) and the basename clause treats `-`/`_`/`.` as word characters,
+so a `praxis-web` dispatch can never qualify a `praxis` audit; prefix-sharing
 sibling repos are the I008 class too. (2) The subagent-direct-description
 evidence path is gated by the same rule — a front-door-only gate is theater
 on a shared transcripts dir. (3) Worktree limitation, documented posture:
