@@ -36,11 +36,15 @@
 //     dispatch's model alias; a dispatch with neither contributes nothing.
 //     Main-session assistant models are never ticket evidence — inline
 //     execution is out of the audit's scope by design.
-//   - Flavor of a dispatch is derived from the transcript source
-//     (design D15; see transcriptFlavor, the deferred codex-audit's seam).
-//     Only the claude harness's transcripts are parsed today, so every
-//     audited dispatch resolves within the claude flavor; ids declared
-//     under other flavors are deliberately invisible to it.
+//   - Flavor of a dispatch is derived from its transcript source (design
+//     D15; see transcriptFlavor) and travels with the token itself
+//     (evidenceToken) all the way into judgeToken, which resolves it within
+//     that flavor's table alone (I040). Only the claude harness's
+//     transcripts are parsed today, so every token in play carries the
+//     claude flavor; ids declared under other flavors are deliberately
+//     invisible to it. Later readers (the deferred codex-audit effort) plug
+//     in by tagging the tokens they produce with their own flavor — no
+//     change to judge/judgeToken required.
 //   - Token -> tier, within the dispatch's flavor: a token maps to a tier
 //     when it equals the resolved id, one of the table entry's explicitly
 //     declared aliases, or an id the entry shipped as a default before the
@@ -157,11 +161,44 @@ func (r Report) Blocking() bool {
 // tier order: mechanical < routine < primary; fallback is lateral (rank 0).
 var tierRank = map[string]int{"mechanical": 1, "routine": 2, "primary": 3, "fallback": 0}
 
-// Run audits repoDir's declared routing against the transcript records in
-// transcriptsDir. Transcript trouble of any kind degrades to Warnings; the
-// only errors are a repo without docs/issues and the D14 version-gate
-// refusal (see the package comment).
-func Run(repoDir, transcriptsDir string) (Report, error) {
+// evidenceToken is one observed model string paired with the flavor of the
+// transcript source it came from (design D15's per-token seam, made real by
+// I040). judgeToken resolves value within flavor's table alone; nothing
+// upstream of it needs to know which flavor a token carries.
+type evidenceToken struct {
+	value  string
+	flavor string
+}
+
+// tokenValues extracts the raw model strings from a slice of evidence
+// tokens, for the report's flavor-agnostic TicketRow.Actuals display.
+func tokenValues(tokens []evidenceToken) []string {
+	values := make([]string, len(tokens))
+	for i, tok := range tokens {
+		values[i] = tok.value
+	}
+	return values
+}
+
+// Options configures one Run. RepoDir and ClaudeTranscriptsDir are the only
+// fields read today; CodexSessionsDir and the time/session filters are
+// declared for the codex-audit tickets that follow I040 (D20-D28) and are
+// not yet consumed — reserving them here means those tickets add inputs
+// without churning this signature again.
+type Options struct {
+	RepoDir              string
+	ClaudeTranscriptsDir string
+	CodexSessionsDir     string // unread until the codex reader lands
+	Since                string // --since operator filter (D28); unread
+	Session              string // --session operator filter (D28); unread
+}
+
+// Run audits opts.RepoDir's declared routing against the transcript records
+// in opts.ClaudeTranscriptsDir. Transcript trouble of any kind degrades to
+// Warnings; the only errors are a repo without docs/issues and the D14
+// version-gate refusal (see the package comment).
+func Run(opts Options) (Report, error) {
+	repoDir, transcriptsDir := opts.RepoDir, opts.ClaudeTranscriptsDir
 	var rep Report
 	tickets, err := readTickets(filepath.Join(repoDir, "docs", "issues"))
 	if err != nil {
@@ -178,12 +215,16 @@ func Run(repoDir, transcriptsDir string) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	// mappings is keyed by flavor so judgeToken can resolve each token
+	// within its own flavor's table (I040); only the claude reader is wired
+	// today, so this holds exactly one entry.
+	mappings := map[string]map[string]resolvedTier{flavor: mapping}
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
-	dispatches, agents := readTranscripts(transcriptsDir, &rep.Warnings)
+	dispatches, agents := readTranscripts(transcriptsDir, flavor, &rep.Warnings)
 
-	evidence := map[string][]string{} // ticket id -> raw model tokens
-	claimed := map[int]bool{}         // dispatch index -> matched a ticket
-	linked := map[string]bool{}       // toolUseID -> a subagent transcript carries models
+	evidence := map[string][]evidenceToken{} // ticket id -> flavor-tagged model tokens
+	claimed := map[int]bool{}                // dispatch index -> matched a ticket
+	linked := map[string]bool{}              // toolUseID -> a subagent transcript carries models
 	for _, a := range agents {
 		if a.toolUseID != "" && len(a.models) > 0 {
 			linked[a.toolUseID] = true
@@ -202,7 +243,7 @@ func Run(repoDir, transcriptsDir string) (Report, error) {
 				continue // the subagent transcript below is the actual
 			}
 			if d.model != "" {
-				evidence[t.id] = append(evidence[t.id], d.model)
+				evidence[t.id] = append(evidence[t.id], evidenceToken{value: d.model, flavor: d.flavor})
 			}
 		}
 		for _, a := range agents {
@@ -214,7 +255,9 @@ func Run(repoDir, transcriptsDir string) (Report, error) {
 				use = d.toolUseID != "" && d.toolUseID == a.toolUseID && matches(d, t.id)
 			}
 			if use {
-				evidence[t.id] = append(evidence[t.id], a.models...)
+				for _, m := range a.models {
+					evidence[t.id] = append(evidence[t.id], evidenceToken{value: m, flavor: a.flavor})
+				}
 			}
 		}
 	}
@@ -225,8 +268,9 @@ func Run(repoDir, transcriptsDir string) (Report, error) {
 	}
 
 	for _, t := range tickets {
-		row := TicketRow{ID: t.id, Tier: t.tier, Actuals: dedupSorted(evidence[t.id])}
-		row.Verdict, row.Detail = judge(t, row.Actuals, flavor, mapping, ledger)
+		tokens := evidence[t.id]
+		row := TicketRow{ID: t.id, Tier: t.tier, Actuals: dedupSorted(tokenValues(tokens))}
+		row.Verdict, row.Detail = judge(t, tokens, mappings, ledger)
 		rep.Tickets = append(rep.Tickets, row)
 	}
 	sort.Slice(rep.Tickets, func(i, j int) bool { return rep.Tickets[i].ID < rep.Tickets[j].ID })
@@ -234,16 +278,16 @@ func Run(repoDir, transcriptsDir string) (Report, error) {
 }
 
 // judge decides one ticket's verdict from its declared tier, its observed
-// model tokens, the dispatch flavor's resolved tier table, and the ledger
-// records.
-func judge(t ticket, actuals []string, flavor string, mapping map[string]resolvedTier, l ledger) (Verdict, string) {
+// evidence tokens, and the ledger records. Each token resolves within its
+// own flavor's table (I040): judge itself never picks a flavor.
+func judge(t ticket, tokens []evidenceToken, mappings map[string]map[string]resolvedTier, l ledger) (Verdict, string) {
 	if t.tier == "" {
 		return VerdictUnannotated, "no tier annotation — not judged"
 	}
 	if _, known := tierRank[t.tier]; !known {
 		return VerdictUnannotated, fmt.Sprintf("unknown tier %q — not judged", t.tier)
 	}
-	if len(actuals) == 0 {
+	if len(tokens) == 0 {
 		return VerdictNoTranscript, "no dispatch or transcript evidence found"
 	}
 	verdict, detail := VerdictMatch, ""
@@ -252,19 +296,24 @@ func judge(t ticket, actuals []string, flavor string, mapping map[string]resolve
 			verdict, detail = v, d
 		}
 	}
-	for _, token := range actuals {
-		v, d := judgeToken(token, t, flavor, mapping, l)
+	for _, tok := range tokens {
+		v, d := judgeToken(tok, t, mappings, l)
 		worse(v, d)
 	}
 	return verdict, detail
 }
 
-// judgeToken classifies a single observed model token against the ticket's
-// declared tier, resolving the token within the dispatch's flavor.
-func judgeToken(token string, t ticket, flavor string, mapping map[string]resolvedTier, l ledger) (Verdict, string) {
-	tiers := tiersOf(token, mapping)
+// judgeToken classifies a single observed evidence token against the
+// ticket's declared tier, resolving the token within its own flavor's table
+// — the per-token seam design D15 names and I040 makes real. A token whose
+// flavor has no resolved table (unreachable while only the claude reader is
+// wired) is treated the same as one that maps to no entry: unmapped, never a
+// crash or a silent match.
+func judgeToken(tok evidenceToken, t ticket, mappings map[string]map[string]resolvedTier, l ledger) (Verdict, string) {
+	mapping := mappings[tok.flavor]
+	tiers := tiersOf(tok.value, mapping)
 	if len(tiers) == 0 {
-		return VerdictUnmappedDispatch, fmt.Sprintf("%s maps to no %s entry in the model table", token, flavor)
+		return VerdictUnmappedDispatch, fmt.Sprintf("%s maps to no %s entry in the model table", tok.value, tok.flavor)
 	}
 	actual := pickTier(tiers, t.tier)
 	if actual == t.tier {
@@ -272,19 +321,19 @@ func judgeToken(token string, t ticket, flavor string, mapping map[string]resolv
 	}
 	if actual == "fallback" { // lateral, never descent (see package doc)
 		if reason, ok := l.fallback[t.id]; ok {
-			return VerdictEscalatedWithReason, fmt.Sprintf("%s (fallback) — FALLBACK reason: %s", token, reason)
+			return VerdictEscalatedWithReason, fmt.Sprintf("%s (fallback) — FALLBACK reason: %s", tok.value, reason)
 		}
-		return VerdictUnexplainedFallback, fmt.Sprintf("%s (fallback) without a FALLBACK record or fallback annotation", token)
+		return VerdictUnexplainedFallback, fmt.Sprintf("%s (fallback) without a FALLBACK record or fallback annotation", tok.value)
 	}
 	for _, rec := range l.escalation[t.id] {
 		if rec.to == actual { // a record excuses exactly its to-tier
-			return VerdictEscalatedWithReason, fmt.Sprintf("%s (%s) vs declared %s — ESCALATION reason: %s", token, actual, t.tier, rec.reason)
+			return VerdictEscalatedWithReason, fmt.Sprintf("%s (%s) vs declared %s — ESCALATION reason: %s", tok.value, actual, t.tier, rec.reason)
 		}
 	}
 	if t.tier != "fallback" && tierRank[actual] < tierRank[t.tier] {
-		return VerdictSilentDescent, fmt.Sprintf("%s (%s) below declared %s with no ESCALATION record", token, actual, t.tier)
+		return VerdictSilentDescent, fmt.Sprintf("%s (%s) below declared %s with no ESCALATION record", tok.value, actual, t.tier)
 	}
-	return VerdictEscalatedNoReason, fmt.Sprintf("%s (%s) above declared %s with no ESCALATION record", token, actual, t.tier)
+	return VerdictEscalatedNoReason, fmt.Sprintf("%s (%s) above declared %s with no ESCALATION record", tok.value, actual, t.tier)
 }
 
 // tiersOf resolves a model token to every tier it could mean within one
@@ -396,14 +445,17 @@ func frontmatter(content string) map[string]string {
 	return fm
 }
 
-// transcriptFlavor derives the flavor of the dispatches audited from
-// transcriptsDir — THE flavor-derivation seam (design D15): flavor comes
-// from the transcript source, never from the ticket or the table. Exactly
-// one source is parsed today, the claude harness's ~/.claude/projects
-// layout (readTranscripts), so every audited dispatch resolves within the
-// claude flavor. The deferred codex-audit effort plugs in here: derive the
-// flavor per transcript file and thread it beside each token into judge,
-// instead of once per run.
+// transcriptFlavor derives the flavor of one transcript source — THE
+// flavor-derivation seam (design D15): flavor comes from the transcript
+// source, never from the ticket or the table. readTranscripts tags every
+// dispatch and subagent record it reads from that source with this value,
+// and it rides along inside evidenceToken all the way into judgeToken
+// (I040), so mixed builds judge each token within its own source's flavor.
+// Exactly one source is parsed today, the claude harness's
+// ~/.claude/projects layout, so every token in play carries the claude
+// flavor. The deferred codex-audit effort plugs in by calling this (or its
+// codex equivalent) once for the codex sessions dir and tagging the records
+// it reads the same way — judge and judgeToken need no further change.
 func transcriptFlavor(transcriptsDir string) string {
 	return "claude"
 }
@@ -583,18 +635,22 @@ type dispatch struct {
 	description string
 	prompt      string
 	model       string
+	flavor      string // the transcript source's flavor (I040 per-token seam)
 }
 
 type subagent struct {
 	toolUseID   string
 	description string
 	models      []string
+	flavor      string // the transcript source's flavor (I040 per-token seam)
 }
 
 // readTranscripts collects Task/Agent dispatch records from every session
 // *.jsonl and actual models from <session>/subagents/agent-*.jsonl, linked
-// by the sidecar meta.json. All trouble becomes warnings.
-func readTranscripts(dir string, warnings *[]string) ([]dispatch, []subagent) {
+// by the sidecar meta.json. Every record it emits is tagged with flavor —
+// the claude source's flavor for every call today, and the seam later
+// readers (codex) tag with their own. All trouble becomes warnings.
+func readTranscripts(dir, flavor string, warnings *[]string) ([]dispatch, []subagent) {
 	des, err := os.ReadDir(dir)
 	if err != nil {
 		*warnings = append(*warnings, "transcript dir unreadable — all tickets will report no-transcript: "+err.Error())
@@ -609,7 +665,7 @@ func readTranscripts(dir string, warnings *[]string) ([]dispatch, []subagent) {
 			subs, _ := filepath.Glob(filepath.Join(subDir, "agent-*.jsonl"))
 			sort.Strings(subs)
 			for _, sub := range subs {
-				a := subagent{}
+				a := subagent{flavor: flavor}
 				if metaRaw, err := os.ReadFile(strings.TrimSuffix(sub, ".jsonl") + ".meta.json"); err == nil {
 					var meta struct {
 						ToolUseID   string `json:"toolUseId"`
@@ -620,6 +676,9 @@ func readTranscripts(dir string, warnings *[]string) ([]dispatch, []subagent) {
 					}
 				}
 				more, models := scanJSONL(sub, warnings)
+				for i := range more {
+					more[i].flavor = flavor
+				}
 				a.models = models
 				dispatches = append(dispatches, more...)
 				agents = append(agents, a)
@@ -628,6 +687,9 @@ func readTranscripts(dir string, warnings *[]string) ([]dispatch, []subagent) {
 		}
 		if strings.HasSuffix(name, ".jsonl") {
 			more, _ := scanJSONL(filepath.Join(dir, name), warnings)
+			for i := range more {
+				more[i].flavor = flavor
+			}
 			dispatches = append(dispatches, more...)
 		}
 	}

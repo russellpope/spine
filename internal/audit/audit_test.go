@@ -8,7 +8,10 @@ import (
 
 func runFixture(t *testing.T, name string) Report {
 	t.Helper()
-	rep, err := Run(filepath.Join("testdata", name, "repo"), filepath.Join("testdata", name, "transcripts"))
+	rep, err := Run(Options{
+		RepoDir:              filepath.Join("testdata", name, "repo"),
+		ClaudeTranscriptsDir: filepath.Join("testdata", name, "transcripts"),
+	})
 	if err != nil {
 		t.Fatalf("Run(%s): %v", name, err)
 	}
@@ -206,7 +209,10 @@ func TestUnmatchedDispatchListedOnce(t *testing.T) {
 // Acceptance: missing transcript dir -> warning + no-transcript verdicts,
 // never an error and never blocking.
 func TestMissingTranscriptDirDegrades(t *testing.T) {
-	rep, err := Run(filepath.Join("testdata", "clean", "repo"), filepath.Join("testdata", "clean", "no-such-dir"))
+	rep, err := Run(Options{
+		RepoDir:              filepath.Join("testdata", "clean", "repo"),
+		ClaudeTranscriptsDir: filepath.Join("testdata", "clean", "no-such-dir"),
+	})
 	if err != nil {
 		t.Fatalf("missing transcript dir must not error: %v", err)
 	}
@@ -250,7 +256,7 @@ func TestMalformedJSONLWarnsNeverFails(t *testing.T) {
 
 // A repo without docs/issues is a usage error, not a report.
 func TestMissingIssuesDirErrors(t *testing.T) {
-	if _, err := Run(t.TempDir(), filepath.Join("testdata", "clean", "transcripts")); err == nil {
+	if _, err := Run(Options{RepoDir: t.TempDir(), ClaudeTranscriptsDir: filepath.Join("testdata", "clean", "transcripts")}); err == nil {
 		t.Fatal("want an error for a repo with no docs/issues")
 	}
 }

@@ -63,7 +63,7 @@ func TestAuditRefusesNewerGeneration(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, "profile: go-service\ntemplate_version: 99\n",
 		map[string]string{"I801": "primary"})
-	_, err := Run(dir, t.TempDir())
+	_, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: t.TempDir()})
 	if err == nil {
 		t.Fatal("want a refusal for template generation 99, got nil error")
 	}
@@ -76,7 +76,7 @@ func TestAuditRefusesNewerGeneration(t *testing.T) {
 	tolerant := t.TempDir()
 	writeAuditRepo(t, tolerant, "profile: go-service\ntemplate_version: someday\n",
 		map[string]string{"I802": "primary"})
-	if _, err := Run(tolerant, t.TempDir()); err != nil {
+	if _, err := Run(Options{RepoDir: tolerant, ClaudeTranscriptsDir: t.TempDir()}); err != nil {
 		t.Fatalf("non-integer stamp must fall through, got %v", err)
 	}
 }
@@ -94,7 +94,7 @@ func TestSubstringTokenNoLongerMaps(t *testing.T) {
 		"I811": "claude-sonnet", // substring of claude-sonnet-5, not an alias
 		"I812": "sonnet",        // declared alias
 	})
-	rep, err := Run(dir, tdir)
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestHistoricalIDMatchesByExactID(t *testing.T) {
 		"I821": "claude-opus-4-8",
 		"I822": "claude-opus-4-8",
 	})
-	rep, err := Run(dir, tdir)
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,12 +152,47 @@ func TestCodexIDInvisibleWithinClaudeFlavor(t *testing.T) {
 	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I831": "primary"})
 	tdir := t.TempDir()
 	writeDispatchTranscript(t, tdir, map[string]string{"I831": "gpt-5.6-sol"})
-	rep, err := Run(dir, tdir)
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if r := rowsByID(t, rep)["I831"]; r.Verdict != VerdictUnmappedDispatch {
 		t.Errorf("I831 verdict = %s (%s), want unmapped-dispatch — codex ids must not resolve within the claude flavor", r.Verdict, r.Detail)
+	}
+}
+
+// I040: proves the per-token flavor seam directly. judgeToken must resolve
+// each evidenceToken within the table named by its own flavor field, not a
+// single table shared across every token judged for a ticket. No fixture
+// can yet exercise this end to end through Run (only the claude reader is
+// wired, so every token Run produces carries "claude"); this pins the
+// plumbing the deferred codex reader will rely on without churning judge or
+// judgeToken again.
+func TestJudgeTokenResolvesWithinItsOwnFlavor(t *testing.T) {
+	mappings := map[string]map[string]resolvedTier{
+		"claude": {"primary": {id: "claude-model-x"}},
+		"codex":  {"primary": {id: "codex-model-x"}},
+	}
+	tk := ticket{id: "I900", tier: "primary"}
+
+	// Same declared tier, disjoint tables: a codex-flavored token matches
+	// the codex entry...
+	if v, d := judgeToken(evidenceToken{value: "codex-model-x", flavor: "codex"}, tk, mappings, ledger{}); v != VerdictMatch {
+		t.Errorf("codex-flavored token: verdict = %s (%s), want match against the codex table", v, d)
+	}
+	// ...the identical string tagged claude instead must not: the flavor on
+	// the token, not the value, decides which table resolves it.
+	if v, d := judgeToken(evidenceToken{value: "codex-model-x", flavor: "claude"}, tk, mappings, ledger{}); v != VerdictUnmappedDispatch {
+		t.Errorf("claude-flavored token carrying a codex-only id: verdict = %s (%s), want unmapped-dispatch", v, d)
+	}
+	// A claude-flavored token still matches the claude table normally.
+	if v, d := judgeToken(evidenceToken{value: "claude-model-x", flavor: "claude"}, tk, mappings, ledger{}); v != VerdictMatch {
+		t.Errorf("claude-flavored token: verdict = %s (%s), want match against the claude table", v, d)
+	}
+	// A flavor with no resolved table at all degrades to unmapped, never a
+	// panic or a silent match.
+	if v, d := judgeToken(evidenceToken{value: "anything", flavor: "unknown-flavor"}, tk, mappings, ledger{}); v != VerdictUnmappedDispatch {
+		t.Errorf("unresolved-flavor token: verdict = %s (%s), want unmapped-dispatch", v, d)
 	}
 }
 
@@ -184,7 +219,7 @@ model_routing:
 		"I841": "claude-sonnet-5",
 		"I842": "claude-sonnet-5",
 	})
-	rep, err := Run(dir, tdir)
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +246,7 @@ func TestMissingRoutingBlockWarnsOnGen6Plus(t *testing.T) {
 		map[string]string{"I861": "primary"})
 	tdir := t.TempDir()
 	writeDispatchTranscript(t, tdir, map[string]string{"I861": "fable"})
-	rep, err := Run(dir, tdir)
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +266,7 @@ func TestMissingRoutingBlockWarnsOnGen6Plus(t *testing.T) {
 	old := t.TempDir()
 	writeAuditRepo(t, old, "# Workflow — proof\n\nprofile: go-service\ntemplate_version: 5\n",
 		map[string]string{"I862": "primary"})
-	rep, err = Run(old, tdir)
+	rep, err = Run(Options{RepoDir: old, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +302,7 @@ model_routing:
 		"I873": "claude-fable-5",  // displaced default's full id
 		"I874": "claude-opus-4-8", // displaced fallback's historical id
 	})
-	rep, err := Run(dir, tdir)
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +346,7 @@ model_routing:
 		"I882": "shared-tier-model",
 		"I883": "shared-tier-model",
 	})
-	rep, err := Run(dir, tdir)
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +373,7 @@ func TestMissingWorkflowResolvesEmbeddedDefaultsWithWarning(t *testing.T) {
 	writeAuditRepo(t, dir, "", map[string]string{"I851": "primary"})
 	tdir := t.TempDir()
 	writeDispatchTranscript(t, tdir, map[string]string{"I851": "fable"})
-	rep, err := Run(dir, tdir)
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}

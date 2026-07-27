@@ -40,7 +40,7 @@ model_routing:
 		"I503": "claude-haiku-4-5",
 		"I504": "claude-opus-4-8",
 	})
-	rep, err := Run(dir, tdir)
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestGen10ScaffoldMirrorResolvesThroughAudit(t *testing.T) {
 		"I603": "claude-haiku-4-5",
 		"I604": "opus",
 	})
-	rep, err := Run(dir, tdir)
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestGen6ScaffoldTicketsAuditCleanly(t *testing.T) {
 	for id, tier := range tiers {
 		gen6ProofTicket(t, dir, id, tier)
 	}
-	rep, err := Run(dir, filepath.Join(dir, "no-such-transcripts-dir"))
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: filepath.Join(dir, "no-such-transcripts-dir")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestGen6PlainBugIssueWithoutAnnotationsStaysValid(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "docs", "issues", "I999.md"), []byte(plain), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := Run(dir, filepath.Join(dir, "no-such-transcripts-dir"))
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: filepath.Join(dir, "no-such-transcripts-dir")})
 	if err != nil {
 		t.Fatal(err)
 	}

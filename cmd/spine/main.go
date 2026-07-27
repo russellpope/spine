@@ -600,7 +600,7 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 		}
 		tdir = derived
 	}
-	rep, err := audit.Run(*dir, tdir)
+	rep, err := audit.Run(audit.Options{RepoDir: *dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		fmt.Fprintln(stderr, "audit routing:", err)
 		return 2
