@@ -508,6 +508,87 @@ func TestCodexSinceAndSessionFilters(t *testing.T) {
 	})
 }
 
+// --- Important-1 (final-review fix round): --since must scope a codex
+// thread TREE as one unit, not per file ---
+
+// Acceptance (Important-1, final whole-branch review — the codex
+// counterpart of the claude-side I2 fix above): a codex thread tree's lead
+// file and its linked thread_spawn subagent file must be scoped by --since
+// TOGETHER, not independently. Fixture mirrors the review's own probe: the
+// lead file (spawn_agent dispatch declaring the CORRECT routine-tier model)
+// is newer; the linked subagent file (the REAL actual — a genuine descent
+// to mechanical tier) is older. Before the fix, --since skipped the
+// subagent file at walk time by its own mtime, before its root id was ever
+// discovered — leaving the lead's clean declared alias standing alone and
+// manufacturing a false `match`, hiding real descent behind the declared
+// alias. The fix must keep the whole tree in scope whenever ANY member's
+// mtime is at/after the cutoff (max-mtime-governs), exactly like claude's
+// session-unit rule.
+func TestCodexSinceScopesThreadTreeAsOneUnit(t *testing.T) {
+	dir := t.TempDir()
+	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I982": "routine"})
+	codexDir := t.TempDir()
+	leadPath := filepath.Join(codexDir, "lead.jsonl")
+	subPath := filepath.Join(codexDir, "sub.jsonl")
+
+	// Lead: declares gpt-5.6-terra — routine's OWN model, clean on its own.
+	writeCodexFile(t, leadPath,
+		codexSessionMetaLine("root-982", "root-982", "", dir, "user", "{}"),
+		codexFunctionCallLine("spawn_agent", map[string]string{
+			"model":     "gpt-5.6-terra",
+			"task_name": "i982 dispatch",
+		}),
+	)
+	// Linked subagent: the REAL actual, gpt-5.6-luna (mechanical) — a
+	// genuine descent against the routine declaration once it supersedes
+	// the lead's declared alias (D20 clause 2).
+	writeCodexFile(t, subPath,
+		codexSessionMetaLine("sub-982a", "root-982", "root-982", dir, "subagent", threadSpawnSource("root-982")),
+		codexTurnContextLine("gpt-5.6-luna"),
+	)
+
+	// Straddle mtimes: lead NEW, subagent OLD — the typical ordering (a
+	// spawned worker finishes, and stops touching its file, before its lead
+	// keeps being appended to).
+	chtime(t, leadPath, time.Date(2020, 1, 5, 0, 0, 0, 0, time.UTC))
+	chtime(t, subPath, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	t.Run("no filter: linked subagent actual supersedes the alias, real descent shows", func(t *testing.T) {
+		rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := rowsByID(t, rep)["I982"]
+		if r.Verdict != VerdictSilentDescent {
+			t.Errorf("verdict = %s (%s), want silent-descent — the linked subagent's gpt-5.6-luna actual is real", r.Verdict, r.Detail)
+		}
+	})
+
+	t.Run("--since between the subagent's old mtime and the lead's new mtime keeps the whole tree in scope", func(t *testing.T) {
+		rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir, Since: "2020-01-03"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := rowsByID(t, rep)["I982"]
+		if r.Verdict != VerdictSilentDescent {
+			t.Errorf("verdict = %s (%s), want silent-descent — tree-unit scoping must keep lead+subagent together (max mtime), not drop the subagent alone and fall back to the clean declared alias", r.Verdict, r.Detail)
+		}
+		if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-luna" {
+			t.Errorf("actuals = %q, want gpt-5.6-luna (the linked subagent actual) — a false match here (actuals gpt-5.6-terra) means the per-file mtime-skip bug is back", got)
+		}
+	})
+
+	t.Run("--since after both mtimes excludes the whole tree", func(t *testing.T) {
+		rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir, Since: "2020-01-10"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r := rowsByID(t, rep)["I982"]; r.Verdict != VerdictNoTranscript {
+			t.Errorf("verdict = %s (%s), want no-transcript — a cutoff after both mtimes must exclude the whole tree", r.Verdict, r.Detail)
+		}
+	})
+}
+
 // --- I2 (I047 review fix round): --since must scope a session as one unit ---
 
 // Acceptance (I2, I047 review): a claude session's top-level "<id>.jsonl"
@@ -672,4 +753,77 @@ func TestSessionMatchingNothingWarns(t *testing.T) {
 			}
 		}
 	})
+}
+
+// --- Important-2 (final-review fix round): coarse-linkage note must not
+// fire on claude-only evidence ---
+
+// Acceptance (Important-2, final whole-branch review): coarseLinkageNotes
+// gates on rootTickets, which is populated for EVERY flavor (see its own
+// doc) — not just codex, despite the codex-specific wording of the
+// disclosure text it drives. A single claude Task dispatch whose own
+// description names two ticket ids claims both under that one toolUseID,
+// so a linked subagent transcript superseding the declared alias produces
+// exactly the "root claimed by >=2 distinct tickets with a linked actual"
+// shape coarseLinkageNotes looks for — on pure claude evidence, with no
+// codex sessions dir configured at all. Before the fix, this fired the
+// codex-worded note ("codex session root", "(D20)") on both tickets,
+// breaking the I040 claude-only byte-identity promise. The fix scopes the
+// note to roots carrying codex's own "codex:" toolUseID prefix.
+func TestCoarseLinkageNoteDoesNotFireOnClaudeOnlyEvidence(t *testing.T) {
+	dir := t.TempDir()
+	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I201": "mechanical", "I202": "primary"})
+	tdir := t.TempDir()
+
+	// One dispatch, one toolUseID, description naming BOTH tickets.
+	dispatchLine := fmt.Sprintf(
+		`{"type":"assistant","cwd":%q,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"tool-combined","name":"Task","input":{"description":"I201 and I202: combined fix","model":"claude-haiku-4-5","prompt":"You are implementing tickets I201 and I202."}}]}}`+"\n",
+		dir)
+	if err := os.WriteFile(filepath.Join(tdir, "s1.jsonl"), []byte(dispatchLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Linked subagent: its actual (claude-sonnet-5, routine) supersedes the
+	// dispatch's declared alias for BOTH tickets once linked — the shared,
+	// root-coarse actual coarseLinkageNotes exists to disclose for codex.
+	subDir := filepath.Join(tdir, "s1", "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentLine := fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"model":"claude-sonnet-5","role":"assistant","content":[{"type":"text","text":"done"}]}}`+"\n", dir)
+	if err := os.WriteFile(filepath.Join(subDir, "agent-x.jsonl"), []byte(agentLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "agent-x.meta.json"),
+		[]byte(`{"toolUseId":"tool-combined","description":"I201 and I202: combined fix"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Claude-only repo: no CodexSessionsDir at all.
+	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+
+	r201 := rows["I201"]
+	if r201.Verdict != VerdictEscalatedNoReason {
+		t.Errorf("I201 verdict = %s (%s), want escalated-no-reason (the shared routine actual is above its mechanical declaration)", r201.Verdict, r201.Detail)
+	}
+	if strings.Contains(r201.Detail, "coarse linkage") {
+		t.Errorf("I201 detail = %q, must not carry the codex-worded coarse-linkage note on claude-only evidence", r201.Detail)
+	}
+	if strings.Contains(strings.ToLower(r201.Detail), "codex") {
+		t.Errorf("I201 detail = %q, must not mention codex on a claude-only audit", r201.Detail)
+	}
+
+	r202 := rows["I202"]
+	if r202.Verdict != VerdictSilentDescent {
+		t.Errorf("I202 verdict = %s (%s), want silent-descent (the shared routine actual is below its primary declaration)", r202.Verdict, r202.Detail)
+	}
+	if strings.Contains(r202.Detail, "coarse linkage") {
+		t.Errorf("I202 detail = %q, must not carry the codex-worded coarse-linkage note on claude-only evidence", r202.Detail)
+	}
+	if strings.Contains(strings.ToLower(r202.Detail), "codex") {
+		t.Errorf("I202 detail = %q, must not mention codex on a claude-only audit", r202.Detail)
+	}
 }

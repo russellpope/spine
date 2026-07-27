@@ -609,29 +609,42 @@ func codexMayContribute(data []byte, tokens []string) bool {
 //
 // since and sessionID implement D28's --since/--session operator filters
 // (ticket I047), layered on top of D22's hard repo scoping rather than
-// replacing it: --since compares each rollout FILE's own mtime against the
-// cutoff (parseSince's doc — the format is undocumented, a file's mtime
-// needs no parsing of it at all), skipped before the file is even opened;
-// --session matches session_meta.payload.session_id, the thread tree's
-// ROOT id (codexSessionMeta.rootID) — the same id every file in one lead+
-// workers tree shares, so restricting to one session id keeps that whole
-// tree together, mirroring what --session does for a claude session and
-// its subagents. A zero since and empty sessionID (every pre-I047 caller)
-// filter nothing.
+// replacing it. --session matches session_meta.payload.session_id, the
+// thread tree's ROOT id (codexSessionMeta.rootID) — the same id every file
+// in one lead+workers tree shares, so restricting to one session id keeps
+// that whole tree together, mirroring what --session does for a claude
+// session and its subagents. --since scopes a whole thread TREE as one
+// unit (Important-1, final-review fix round — the codex counterpart of
+// claude's I2 fix, sessionInScope/sessionFiles): a tree's evidence is in
+// scope iff the MAX mtime among its own member files is at/after the
+// cutoff, never each file judged on its own mtime. The typical mtime
+// ordering is a spawned subagent file finishing (and stopping mtime
+// updates) BEFORE its lead file, which keeps being appended to — so a
+// per-file mtime skip can drop an old, real-descent subagent actual while
+// keeping the lead's clean declared alias, manufacturing a false `match`
+// on exactly the evidence class ("a worker running a lower model than
+// declared") this tool exists to catch. Per-file skipping was tried and
+// reverted for this reason: since a codex tree's root id lives inside each
+// file (not the filename), there is no way to know which files share a
+// tree without parsing them first, so the mtime decision cannot be made
+// before that parse — unlike claude's session-unit fix, which can still
+// stat the two on-disk pieces before reading either. A zero since and
+// empty sessionID (every pre-I047 caller) filter nothing.
 //
-// tokens implements I049's discovery pre-filter: after the mtime skip above
-// (cheapest — no file open) each surviving file is read ONCE into memory;
-// codexMayContribute checks those bytes for the pre-filter (cheap — a
-// handful of substring scans) before parseCodexBytes decodes the same bytes
-// line by line (expensive — ~12-14s live over 953 real files, the ticket's
-// own measurement, dominated by per-line JSON unmarshaling). A file proven
-// unable to contribute (see codexMayContribute's doc) is dropped without
-// ever reaching parseCodexBytes. The pre-filter itself is skipped whenever
-// sessionID is set: --session's matchedSession diagnostic (M3, I047 review)
-// needs every candidate file's rootID parsed to know whether the requested
-// id exists in the store at all, even for a file that turns out to carry no
-// ticket token — pruning it first would silently flip "matched" to "matched
-// no sessions" and violate AC2's byte-identical-Reports requirement, for a
+// tokens implements I049's discovery pre-filter: every file is read ONCE
+// into memory; codexMayContribute checks those bytes for the pre-filter
+// (cheap — a handful of substring scans) before parseCodexBytes decodes the
+// same bytes line by line (expensive — ~12-14s live over 953 real files,
+// the ticket's own measurement, dominated by per-line JSON unmarshaling). A
+// file proven unable to contribute (see codexMayContribute's doc) is
+// dropped without ever reaching parseCodexBytes — this is what keeps the
+// since-is-set case affordable despite no longer skipping by mtime at walk
+// time. The pre-filter itself is skipped whenever sessionID is set:
+// --session's matchedSession diagnostic (M3, I047 review) needs every
+// candidate file's rootID parsed to know whether the requested id exists in
+// the store at all, even for a file that turns out to carry no ticket
+// token — pruning it first would silently flip "matched" to "matched no
+// sessions" and violate AC2's byte-identical-Reports requirement, for a
 // query that isn't the whole-store sweep the pre-filter targets anyway. A
 // read failure degrades exactly as it always has — a per-file "unreadable"
 // warning, never an error — and is never treated as pre-filter proof of
@@ -652,11 +665,9 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 		if de.IsDir() || !strings.HasSuffix(de.Name(), ".jsonl") {
 			return nil
 		}
-		if !since.IsZero() {
-			if info, err := de.Info(); err == nil && info.ModTime().Before(since) {
-				return nil // --since: older than the cutoff, skipped before it's even opened
-			}
-		}
+		// Important-1 fix: no mtime skip here — a --since cutoff is decided
+		// per thread TREE, after parsing, below. See the doc above for why
+		// this can't be decided at walk time the way claude's can.
 		files = append(files, path)
 		return nil
 	})
@@ -667,21 +678,22 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 	sort.Strings(files)
 
 	prober := newGitCommitProber(absRepo, warnings)
-	var dispatches []dispatch
-	var agents []subagent
-	var nearMisses []codexNearMiss
+	// candidate is one file that survived the pre-filter, --session, and D22
+	// repo scoping — everything except the --since tree-unit decision, which
+	// needs every candidate's root id and mtime gathered first.
+	type candidate struct {
+		path      string
+		res       codexFileResult
+		mtime     time.Time
+		haveMtime bool
+	}
+	var candidates []candidate
 	// matchedSession is M3's diagnostic input (I047 review): whether
-	// sessionID (non-empty) equaled at least one root id among files that
-	// SURVIVED the --since walk-time skip above. Unlike claude's
-	// sessionInScope (id lives in the filename, checkable before any
-	// parsing), a codex session's id lives inside the file
-	// (session_meta.payload.session_id; the filename is
-	// rollout-<ts>-<uuid>.jsonl, uuid unrelated to the thread id) — so a
-	// --since-excluded file's id is never discovered at all, and can't
-	// contribute to this check. An operator combining --since with a
-	// codex --session id that only exists in an excluded file gets "matched
-	// no sessions" too; that is still an honest answer (nothing in scope
-	// has that id), just not "the id exists nowhere in the store".
+	// sessionID (non-empty) equaled at least one root id among parsed,
+	// repo-scoped files — independent of the --since tree-unit filter
+	// applied below, exactly mirroring claude's matchedSession (I2, D28):
+	// whether the id exists in scope at all, not whether --since then
+	// excludes it.
 	matchedSession := sessionID == ""
 	for _, path := range files {
 		// I049: read once, reuse the same bytes for both the pre-filter and
@@ -720,6 +732,46 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 		if !cwdInsideRepo(res.meta.Cwd, absRepo) && !prober.knows(res.meta.Git.CommitHash) {
 			continue
 		}
+		c := candidate{path: path, res: res}
+		if fi, err := os.Stat(path); err == nil {
+			c.mtime, c.haveMtime = fi.ModTime(), true
+		}
+		candidates = append(candidates, c)
+	}
+
+	// Important-1 fix: --since scopes a whole thread tree as one unit — a
+	// tree is included iff the MAX mtime among its own members is at/after
+	// the cutoff (mirroring sessionInScope's max-of-file-and-dir rule on the
+	// claude side). A tree with no readable mtime on any member degrades
+	// toward inclusion, matching fileMTime's claude-side posture.
+	included := candidates
+	if !since.IsZero() {
+		maxMtime := map[string]time.Time{}
+		haveMtime := map[string]bool{}
+		for _, c := range candidates {
+			if !c.haveMtime {
+				continue
+			}
+			root := c.res.meta.rootID()
+			if !haveMtime[root] || c.mtime.After(maxMtime[root]) {
+				maxMtime[root] = c.mtime
+			}
+			haveMtime[root] = true
+		}
+		included = included[:0]
+		for _, c := range candidates {
+			root := c.res.meta.rootID()
+			if !haveMtime[root] || !maxMtime[root].Before(since) {
+				included = append(included, c)
+			}
+		}
+	}
+
+	var dispatches []dispatch
+	var agents []subagent
+	var nearMisses []codexNearMiss
+	for _, c := range included {
+		path, res := c.path, c.res
 		root := res.meta.rootID()
 		for i := range res.dispatches {
 			res.dispatches[i].toolUseID = "codex:" + root

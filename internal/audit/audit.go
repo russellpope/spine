@@ -201,7 +201,7 @@ func tokenValues(tokens []evidenceToken) []string {
 type Options struct {
 	RepoDir              string
 	ClaudeTranscriptsDir string
-	CodexSessionsDir     string // unread until the codex reader lands
+	CodexSessionsDir     string // codex sessions dir (readCodexSessions); empty opts out of codex discovery entirely (I041)
 	// Since scopes the transcript set to sessions active at/after a cutoff
 	// (D28, ticket I047): an operator escape hatch, never an automatic
 	// build-start anchor (rejected at grill — see parseSince). Accepts
@@ -353,14 +353,17 @@ func Run(opts Options) (Report, error) {
 		}
 		return true
 	}
-	// rootTickets tracks, per codex dispatch root (toolUseID), every distinct
+	// rootTickets tracks, per dispatch root (toolUseID), every distinct
 	// ticket claimed under it — the coarse-linkage disclosure input (I041
 	// review referred-Q3, ticket I044): thread_spawn actuals link by ROOT
 	// session id only, so two dispatches for two different tickets sharing
 	// one root also share whatever actual evidence that root's subagent(s)
-	// contribute. Populated for every flavor but only ever non-trivial for
-	// codex, since claude's toolUseID is the tool_use block's own id — unique
-	// per dispatch call, never shared across tickets.
+	// contribute. Populated for every flavor: a claude toolUseID IS the
+	// tool_use block's own id, unique per dispatch call, but that only means
+	// it can't be shared by two SEPARATE dispatch calls — a single Task
+	// dispatch whose own description names two ticket ids still claims both
+	// under that one toolUseID (final-review fix round, Important-2). The
+	// disclosure text itself stays codex-specific — see coarseLinkageNotes.
 	rootTickets := map[string]map[string]bool{}
 	for _, t := range tickets {
 		for i, d := range dispatches {
@@ -480,10 +483,19 @@ func nearMissDetail(nms []codexNearMiss, id string) (string, bool) {
 // only one ticket, or one with no linked actual evidence at all (nothing to
 // merge), gets no note — this is a diagnostic aid for a real ambiguity, not
 // standing noise.
+//
+// The disclosure's wording ("codex session root", "(D20)") is codex-specific
+// by construction, so only roots carrying the "codex:" toolUseID prefix
+// (readCodexSessions' own tagging) are eligible (final-review fix round,
+// Important-2). Without this, a single claude Task dispatch whose own
+// description names two ticket ids — rootTickets is populated for every
+// flavor, not just codex, see its doc — would fire this codex-worded note on
+// pure-claude evidence, breaking the I040 claude-only byte-identity promise
+// with misleading, factually wrong text.
 func coarseLinkageNotes(rootTickets map[string]map[string]bool, dispatches []dispatch, linked map[string]bool) map[string]string {
 	notes := map[string]string{}
 	for root, ids := range rootTickets {
-		if len(ids) < 2 || !linked[root] {
+		if len(ids) < 2 || !linked[root] || !strings.HasPrefix(root, "codex:") {
 			continue
 		}
 		idList := make([]string, 0, len(ids))
