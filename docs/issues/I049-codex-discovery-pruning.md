@@ -20,12 +20,19 @@ I041 reader's full walk measured ~12–14s live), and no ticket owned it —
 the I041 report's claim that I043 owns it was checked and found false.
 
 Add a cheap pre-filter to codex session discovery so the audit does not
-fully parse files that cannot contribute evidence. Sound basis: every
-evidence path (spawn_agent task_name, team spawn command text, opening
-user message) requires some audited ticket token to appear as a literal
-byte string in the file, so a raw-bytes token scan is a safe pre-filter.
-Any pre-filter error falls back to the full parse (degrade-never-fail);
-pruning must be invisible in Report content — wall time only.
+fully parse files that cannot contribute evidence. Sound basis (corrected
+at review — the original wording was a genuine requirements defect,
+caught by the implementer and confirmed against D20): the token-bearing
+evidence paths (spawn_agent task_name, team spawn command text, opening
+user message) require an audited ticket token as a literal byte string in
+the file, BUT D20-clause-2 spawned-thread actuals files link by root
+session id and need carry no token — subagent-shaped files are therefore
+exempt from pruning (the shipped `:"subagent"` value-shape marker; holds
+compact-serialized across the live corpus, 619/953 files, zero spaced
+variants). Any pre-filter error falls back to the full parse
+(degrade-never-fail); pruning must be invisible in Report content — wall
+time only (warnings for files the pre-filter skips are designed-out, per
+the dispatch's pre-authorized resolution).
 
 ## Acceptance criteria
 
