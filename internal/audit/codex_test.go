@@ -29,8 +29,11 @@ func writeCodexFile(t *testing.T, path string, lines ...string) {
 }
 
 // codexSessionMetaLine builds a session_meta line. sourceJSON is the raw
-// "source" object: "{}" for a plain top-level user session, or one of the
-// guardian/thread_spawn shapes I009 documents.
+// "source" value: topLevelSource (a plain JSON string, e.g. "cli") for a
+// plain top-level user session, or one of the guardian/thread_spawn OBJECT
+// shapes I009 documents — session_meta.payload.source is polymorphic on the
+// real wire (I009 Verified 2026-07-27) and these fixtures encode both real
+// shapes, not just the one that happens to satisfy an object-typed reader.
 func codexSessionMetaLine(id, sessionID, parent, cwd, threadSource, sourceJSON string) string {
 	return fmt.Sprintf(
 		`{"type":"session_meta","payload":{"id":%q,"session_id":%q,"parent_thread_id":%q,"cwd":%q,"thread_source":%q,"model":null,"source":%s}}`,
@@ -115,6 +118,12 @@ func codexUserMessageLine(text string) string {
 	return fmt.Sprintf(`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}}`, text)
 }
 
+// topLevelSource is the REAL session_meta.payload.source shape on a
+// top-level user session: a plain JSON string, not an object (I009 Verified
+// 2026-07-27 — the fact pre-fix codexSessionMeta.Source, typed as an object,
+// failed to unmarshal).
+const topLevelSource = `"cli"`
+
 const guardianSource = `{"subagent":{"other":"guardian"}}`
 
 func threadSpawnSource(parent string) string {
@@ -150,7 +159,7 @@ func TestCodexHerdrDispatchRecordJudgesMatch(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I041": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
-		codexSessionMetaLine("root-1", "root-1", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-1", "root-1", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("exec_command", map[string]string{
 			"cmd": "herdr agent start moo-clone-worker1 --kind codex --pane wM:p2 -- -m gpt-5.6-terra",
 		}),
@@ -163,7 +172,7 @@ func TestCodexHerdrDispatchRecordJudgesMatch(t *testing.T) {
 		}),
 	)
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLine("worker-1", "worker-1", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-1", "worker-1", "", sessRepo, "user", topLevelSource),
 		codexTurnContextLine("gpt-5.6-sol"), // decoy: must never surface as I041 evidence
 	)
 
@@ -207,7 +216,7 @@ func runCodexFixtureWithDispatch(t *testing.T, id, tier, codexDir string, callLi
 	t.Helper()
 	sessRepo := t.TempDir()
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{id: tier})
-	lines := append([]string{codexSessionMetaLine("root", "root", "", sessRepo, "user", "{}")}, callLines...)
+	lines := append([]string{codexSessionMetaLine("root", "root", "", sessRepo, "user", topLevelSource)}, callLines...)
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"), lines...)
 	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
 	if err != nil {
@@ -227,7 +236,7 @@ func TestCodexSpawnedThreadActualSupersedesDeclared(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I043": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
-		codexSessionMetaLine("root-3", "root-3", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-3", "root-3", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("spawn_agent", map[string]string{
 			"model":     "gpt-5.6-luna", // declared, must be superseded
 			"task_name": "i043 subagent dispatch",
@@ -361,7 +370,7 @@ func TestCodexModelSwitchingSessionContributesEachTurn(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I045": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
-		codexSessionMetaLine("root-5", "root-5", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-5", "root-5", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("spawn_agent", map[string]string{
 			"model":     "gpt-5.6-terra",
 			"task_name": "i045 switch dispatch",
@@ -400,7 +409,7 @@ func TestCodexGitCommitNoiseNotMistakenForDispatch(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I903": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
-		codexSessionMetaLine("root-903", "root-903", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-903", "root-903", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("exec_command", map[string]string{
 			"cmd": "herdr agent start w1 --kind codex --pane wA:p1 -- -m gpt-5.6-terra",
 		}),
@@ -441,7 +450,7 @@ func TestCodexTwoTeamSpawnsKeyedPerWorker(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I903": "routine", "I904": "mechanical"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
-		codexSessionMetaLine("root-904", "root-904", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-904", "root-904", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("exec_command", map[string]string{
 			"cmd": "herdr agent start w1 --kind codex --pane wA:p1 -- -m gpt-5.6-terra",
 		}),
@@ -555,7 +564,7 @@ func TestCodexMixedClaudeAndCodexEvidenceJudgedPerFlavor(t *testing.T) {
 	writeDispatchTranscript(t, dir, tdir, map[string]string{"I048": "sonnet"})
 	codexDir := t.TempDir()
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
-		codexSessionMetaLine("root-8", "root-8", "", dir, "user", "{}"),
+		codexSessionMetaLine("root-8", "root-8", "", dir, "user", topLevelSource),
 		codexFunctionCallLine("spawn_agent", map[string]string{
 			"model":     "gpt-5.6-terra",
 			"task_name": "i048 codex leg",
@@ -590,7 +599,7 @@ func TestCodexWorkerOpeningMessageAttributesOwnTurns(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I900": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLine("worker-900", "worker-900", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-900", "worker-900", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I900 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-terra"),
 	)
@@ -602,6 +611,47 @@ func TestCodexWorkerOpeningMessageAttributesOwnTurns(t *testing.T) {
 	r := rowsByID(t, rep)["I900"]
 	if r.Verdict != VerdictMatch {
 		t.Fatalf("I900 verdict = %s (%s), want match — the opening message names I900 and the session dispatches nothing of its own", r.Verdict, r.Detail)
+	}
+	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra" {
+		t.Errorf("I900 actuals = %q, want gpt-5.6-terra", got)
+	}
+}
+
+// Regression (I048 live-acceptance round 2 / I009 Verified 2026-07-27):
+// session_meta.payload.source is polymorphic — a plain JSON string ("cli")
+// on real top-level sessions, not the object shape codexSessionMeta.Source
+// used to require. A reader that types Source as an object fails to
+// unmarshal this line, so haveMeta stays false and the whole file is
+// skipped as "no session_meta line" — every lead/worker in the store
+// invisible (observed live: 410 malformed-meta warnings across 953 files).
+// This test writes the session_meta line with the REAL string-source shape
+// directly (not via the topLevelSource fixture constant every other test
+// uses) so it fails the same way live data did against pre-fix code, and
+// asserts the session still parses and attributes normally.
+func TestCodexStringSourceSessionMetaParsesAndAttributes(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I900": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		`{"type":"session_meta","payload":{"id":"worker-900","session_id":"worker-900","parent_thread_id":"","cwd":`+
+			fmt.Sprintf("%q", sessRepo)+`,"thread_source":"user","model":null,"source":"cli"}}`,
+		codexUserMessageLine("# Task I900 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "no session_meta line") {
+			t.Fatalf("unexpected warning %q — string-source session_meta must parse, not be skipped as malformed", w)
+		}
+	}
+	r := rowsByID(t, rep)["I900"]
+	if r.Verdict != VerdictMatch {
+		t.Fatalf("I900 verdict = %s (%s), want match — a string session_meta.source must not prevent attribution", r.Verdict, r.Detail)
 	}
 	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra" {
 		t.Errorf("I900 actuals = %q, want gpt-5.6-terra", got)
@@ -626,7 +676,7 @@ func TestCodexLaterMessageTokenDoesNotAttribute(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I900": "routine", "I901": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLine("worker-901", "worker-901", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-901", "worker-901", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I900 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-terra"),
 		codexUserMessageLine("while you're at it, take a look at I901 too"),
@@ -658,7 +708,7 @@ func TestCodexInjectedPreamblesSkippedForOpeningMessage(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I909": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLine("worker-909", "worker-909", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-909", "worker-909", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# AGENTS.md instructions for /Users/x/project\n\nFollow repo conventions."),
 		codexUserMessageLine("<recommended_plugins>\nsome-plugin\n</recommended_plugins>"),
 		codexUserMessageLine("# Task I909 — implementer dispatch\n\nBuild the thing."),
@@ -689,7 +739,7 @@ func TestCodexAllInjectedMessagesContributeNoOpening(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I910": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLine("worker-910", "worker-910", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-910", "worker-910", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# AGENTS.md instructions for /Users/x/project\n\nFollow repo conventions."),
 		codexUserMessageLine("<recommended_plugins>\nsome-plugin\n</recommended_plugins>"),
 		codexTurnContextLine("gpt-5.6-terra"),
@@ -727,7 +777,7 @@ func TestCodexOrchestratorOpeningMessageContributesNoOwnTurnEvidence(t *testing.
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I902": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
-		codexSessionMetaLine("lead-902", "lead-902", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("lead-902", "lead-902", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I902 — orchestrator dispatch\n\nCoordinate the build."),
 		codexTurnContextLine("gpt-5.6-sol"), // decoy: must never surface as I902 evidence
 		codexFunctionCallLine("spawn_agent", map[string]string{
@@ -761,7 +811,7 @@ func TestCodexWorkerThatSpawnsKeepsDispatchRecordEvidenceOnly(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I903": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLine("worker-903", "worker-903", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-903", "worker-903", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I903 — implementer dispatch\n\nBuild the thing, then spawn review."),
 		codexTurnContextLine("gpt-5.6-sol"), // decoy: must never surface (own-turn, orchestrator now)
 		codexFunctionCallLine("spawn_agent", map[string]string{
@@ -794,7 +844,7 @@ func TestCodexM4aUndeclaredModelJudgesUnmappedDispatch(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I904": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLine("worker-904", "worker-904", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-904", "worker-904", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I904 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.5"),
 	)
@@ -837,7 +887,7 @@ func TestCodexModelLessSpawnStillExcludesOwnTurns(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I905": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
-		codexSessionMetaLine("lead-905", "lead-905", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("lead-905", "lead-905", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I905 — orchestrator dispatch\n\nCoordinate the build."),
 		codexTurnContextLine("gpt-5.6-luna"), // decoy: must never surface as I905 evidence
 		codexFunctionCallLine("exec_command", map[string]string{
@@ -888,7 +938,7 @@ func TestCodexOpeningMessageContextSentenceDoesNotAttributeToNeighbor(t *testing
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I906": "routine", "I907": "primary"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLine("worker-906", "worker-906", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-906", "worker-906", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I906 — implementer dispatch\n\nContext: this stacks on I907's reader work."),
 		codexTurnContextLine("gpt-5.6-terra"),
 	)
@@ -923,7 +973,7 @@ func TestCodexLowercaseOpeningMessageTitleAttributesCaseInsensitively(t *testing
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I908": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLine("worker-908", "worker-908", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-908", "worker-908", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("task i908 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-terra"),
 	)
@@ -955,12 +1005,12 @@ func TestCodexSiblingRepoCwdSameTicketTokenOutOfScope(t *testing.T) {
 	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I910": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "in-scope.jsonl"),
-		codexSessionMetaLine("in-910", "in-910", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("in-910", "in-910", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I910 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-terra"),
 	)
 	writeCodexFile(t, filepath.Join(codexDir, "sibling.jsonl"),
-		codexSessionMetaLine("sib-910", "sib-910", "", siblingRepo, "user", "{}"),
+		codexSessionMetaLine("sib-910", "sib-910", "", siblingRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I910 — implementer dispatch\n\nBuild the thing (sibling repo's own I910)."),
 		codexTurnContextLine("gpt-5.6-luna"), // decoy: sibling repo, must never surface here
 	)
@@ -991,7 +1041,7 @@ func TestCodexWorktreeCwdKnownCommitInScope(t *testing.T) {
 	worktreeCwd := t.TempDir() // deliberately NOT inside repoDir
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLineWithGit("worker-911", "worker-911", "", worktreeCwd, "user", "{}", commitHash),
+		codexSessionMetaLineWithGit("worker-911", "worker-911", "", worktreeCwd, "user", topLevelSource, commitHash),
 		codexUserMessageLine("# Task I911 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-terra"),
 	)
@@ -1022,7 +1072,7 @@ func TestCodexUnknownCommitOutsideCwdOutOfScope(t *testing.T) {
 	worktreeCwd := t.TempDir()
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLineWithGit("worker-912", "worker-912", "", worktreeCwd, "user", "{}",
+		codexSessionMetaLineWithGit("worker-912", "worker-912", "", worktreeCwd, "user", topLevelSource,
 			"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
 		codexUserMessageLine("# Task I912 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-sol"), // decoy: out of scope, must never surface
@@ -1054,12 +1104,12 @@ func TestCodexGitProbeFailureDegradesToCwdOnlyWithWarning(t *testing.T) {
 	writeAuditRepo(t, repoDir, gen9DefaultWorkflow, map[string]string{"I913": "routine", "I914": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "cwd-worker.jsonl"),
-		codexSessionMetaLine("cwd-913", "cwd-913", "", repoDir, "user", "{}"),
+		codexSessionMetaLine("cwd-913", "cwd-913", "", repoDir, "user", topLevelSource),
 		codexUserMessageLine("# Task I913 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-terra"),
 	)
 	writeCodexFile(t, filepath.Join(codexDir, "worktree-worker.jsonl"),
-		codexSessionMetaLineWithGit("wt-914", "wt-914", "", t.TempDir(), "user", "{}",
+		codexSessionMetaLineWithGit("wt-914", "wt-914", "", t.TempDir(), "user", topLevelSource,
 			"0123456789abcdef0123456789abcdef01234567"),
 		codexUserMessageLine("# Task I914 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-luna"), // decoy: the probe can't run, must never surface
@@ -1105,12 +1155,12 @@ func TestCodexCrossRepoCollisionSameTicketEachAuditsOwnEvidence(t *testing.T) {
 	writeAuditRepo(t, repoB, gen9DefaultWorkflow, map[string]string{"I024": "routine"})
 
 	writeCodexFile(t, filepath.Join(codexDir, "worker-a.jsonl"),
-		codexSessionMetaLineWithGit("wa-024", "wa-024", "", t.TempDir(), "user", "{}", hashA),
+		codexSessionMetaLineWithGit("wa-024", "wa-024", "", t.TempDir(), "user", topLevelSource, hashA),
 		codexUserMessageLine("# Task I024 — implementer dispatch\n\nBuild repo A's thing."),
 		codexTurnContextLine("gpt-5.6-terra"),
 	)
 	writeCodexFile(t, filepath.Join(codexDir, "worker-b.jsonl"),
-		codexSessionMetaLineWithGit("wb-024", "wb-024", "", t.TempDir(), "user", "{}", hashB),
+		codexSessionMetaLineWithGit("wb-024", "wb-024", "", t.TempDir(), "user", topLevelSource, hashB),
 		codexUserMessageLine("# Task I024 — implementer dispatch\n\nBuild repo B's thing."),
 		codexTurnContextLine("gpt-5.6-luna"),
 	)
@@ -1158,12 +1208,12 @@ func TestCodexRefLikeCommitHashNotTreatedAsObjectID(t *testing.T) {
 	worktreeCwd := t.TempDir()
 
 	writeCodexFile(t, filepath.Join(codexDir, "main-ref.jsonl"),
-		codexSessionMetaLineWithGit("worker-915", "worker-915", "", worktreeCwd, "user", "{}", "main"),
+		codexSessionMetaLineWithGit("worker-915", "worker-915", "", worktreeCwd, "user", topLevelSource, "main"),
 		codexUserMessageLine("# Task I915 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-sol"), // decoy: must never surface — "main" is a ref, not an object id
 	)
 	writeCodexFile(t, filepath.Join(codexDir, "head-ref.jsonl"),
-		codexSessionMetaLineWithGit("worker-916", "worker-916", "", worktreeCwd, "user", "{}", "HEAD"),
+		codexSessionMetaLineWithGit("worker-916", "worker-916", "", worktreeCwd, "user", topLevelSource, "HEAD"),
 		codexUserMessageLine("# Task I916 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-luna"), // decoy: must never surface — "HEAD" is a ref, not an object id
 	)
@@ -1201,7 +1251,7 @@ func TestCodexZeroScopedMaterialStaysNoTranscript(t *testing.T) {
 	// codex sessions dir — not the opening line, not later text, not a
 	// guardian, not an orchestrator mention. Nothing at all.
 	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
-		codexSessionMetaLine("worker-960", "worker-960", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-960", "worker-960", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I960 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-terra"),
 	)
@@ -1242,27 +1292,27 @@ func TestCodexJudgedVerdictsNameSourceFile(t *testing.T) {
 
 	matchFile := filepath.Join(codexDir, "i950.jsonl")
 	writeCodexFile(t, matchFile,
-		codexSessionMetaLine("root-950", "root-950", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-950", "root-950", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-terra", "task_name": "i950 match dispatch"}),
 	)
 	escNoReasonFile := filepath.Join(codexDir, "i951.jsonl")
 	writeCodexFile(t, escNoReasonFile,
-		codexSessionMetaLine("root-951", "root-951", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-951", "root-951", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-terra", "task_name": "i951 escalate dispatch"}),
 	)
 	descentFile := filepath.Join(codexDir, "i952.jsonl")
 	writeCodexFile(t, descentFile,
-		codexSessionMetaLine("root-952", "root-952", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-952", "root-952", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-luna", "task_name": "i952 descent dispatch"}),
 	)
 	unmappedFile := filepath.Join(codexDir, "i953.jsonl")
 	writeCodexFile(t, unmappedFile,
-		codexSessionMetaLine("root-953", "root-953", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-953", "root-953", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("spawn_agent", map[string]string{"model": "totally-unknown-model", "task_name": "i953 unmapped dispatch"}),
 	)
 	escWithReasonFile := filepath.Join(codexDir, "i954.jsonl")
 	writeCodexFile(t, escWithReasonFile,
-		codexSessionMetaLine("root-954", "root-954", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-954", "root-954", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-terra", "task_name": "i954 escalated with reason dispatch"}),
 	)
 
@@ -1314,7 +1364,7 @@ func TestCodexCoarseLinkageDisclosedWhenRootSharesDistinctTickets(t *testing.T) 
 
 	leadFile := filepath.Join(codexDir, "lead.jsonl")
 	writeCodexFile(t, leadFile,
-		codexSessionMetaLine("root-lc", "root-lc", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("root-lc", "root-lc", "", sessRepo, "user", topLevelSource),
 		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-luna", "task_name": "i972 coarse dispatch"}),
 		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-sol", "task_name": "i973 coarse dispatch"}),
 	)
@@ -1367,19 +1417,19 @@ func TestCodexUnattributedTranscriptNeverBlocks(t *testing.T) {
 		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-terra", "task_name": "i980 quoted replay"}),
 	)
 	writeCodexFile(t, filepath.Join(codexDir, "worker981.jsonl"),
-		codexSessionMetaLine("worker-981", "worker-981", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-981", "worker-981", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I900-placeholder — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-terra"),
 		codexUserMessageLine("also take a look at I981 while you're there"),
 	)
 	writeCodexFile(t, filepath.Join(codexDir, "lead982.jsonl"),
-		codexSessionMetaLine("lead-982", "lead-982", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("lead-982", "lead-982", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I982 — orchestrator dispatch\n\nCoordinate the build."),
 		codexTurnContextLine("gpt-5.6-sol"),
 		codexFunctionCallLine("spawn_agent", map[string]string{"model": "gpt-5.6-terra", "task_name": "unrelated review pass"}),
 	)
 	writeCodexFile(t, filepath.Join(codexDir, "worker983.jsonl"),
-		codexSessionMetaLine("worker-983", "worker-983", "", sessRepo, "user", "{}"),
+		codexSessionMetaLine("worker-983", "worker-983", "", sessRepo, "user", topLevelSource),
 		codexUserMessageLine("# Task I983 — implementer dispatch\n\nBuild the thing."),
 		codexTurnContextLine("gpt-5.6-luna"), // mechanical, below primary — real descent
 	)

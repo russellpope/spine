@@ -114,20 +114,47 @@ func codexIsInjectedPreamble(text string) bool {
 // the one line kind carrying thread identity and the guardian marker
 // (I009, verified 2026-07-25).
 type codexSessionMeta struct {
-	ID             string `json:"id"`         // this thread's own id
-	SessionID      string `json:"session_id"` // the tree's ROOT thread id (shared tree-wide)
-	ParentThreadID string `json:"parent_thread_id"`
-	Cwd            string `json:"cwd"`
-	ThreadSource   string `json:"thread_source"` // "user" (top-level) or "subagent"
-	Source         struct {
-		Subagent struct {
-			Other       string          `json:"other"`        // "guardian" on auto-review threads (D23)
-			ThreadSpawn json.RawMessage `json:"thread_spawn"` // present on real codex-native subagents
-		} `json:"subagent"`
-	} `json:"source"`
-	Git struct {
+	ID             string             `json:"id"`         // this thread's own id
+	SessionID      string             `json:"session_id"` // the tree's ROOT thread id (shared tree-wide)
+	ParentThreadID string             `json:"parent_thread_id"`
+	Cwd            string             `json:"cwd"`
+	ThreadSource   string             `json:"thread_source"` // "user" (top-level) or "subagent"
+	Source         codexSessionSource `json:"source"`
+	Git            struct {
 		CommitHash string `json:"commit_hash"` // D22/I043 repo-scoping signal; no remote URL is ever present (I009)
 	} `json:"git"`
+}
+
+// codexSessionSource is session_meta.payload.source — POLYMORPHIC on the
+// real wire (I009 Verified 2026-07-27, live acceptance): a plain JSON string
+// (e.g. "cli") on top-level user sessions, an object
+// ({"subagent":{"other":"guardian"}} / {"subagent":{"thread_spawn":{…}}})
+// only on subagent threads. A reader that types this field as an object
+// fails to unmarshal every top-level session's meta line — observed live as
+// 410 malformed-meta warnings across a 953-file store, every lead and worker
+// invisible. UnmarshalJSON accepts either shape; a string source carries no
+// subagent info, so it decodes to the zero value (isGuardian/isSubagent both
+// false, as they must be for a plain top-level session).
+type codexSessionSource struct {
+	Subagent struct {
+		Other       string          `json:"other"`        // "guardian" on auto-review threads (D23)
+		ThreadSpawn json.RawMessage `json:"thread_spawn"` // present on real codex-native subagents
+	} `json:"subagent"`
+}
+
+func (s *codexSessionSource) UnmarshalJSON(data []byte) error {
+	type shape codexSessionSource // avoid infinite recursion into this method
+	var obj shape
+	if err := json.Unmarshal(data, &obj); err == nil {
+		*s = codexSessionSource(obj)
+		return nil
+	}
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*s = codexSessionSource{}
+		return nil
+	}
+	return fmt.Errorf("codexSessionSource: unrecognized shape %s", data)
 }
 
 // isGuardian reports whether this thread is a guardian auto-review subagent
