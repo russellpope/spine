@@ -275,7 +275,11 @@ func Run(opts Options) (Report, error) {
 			}
 		}
 		for _, a := range agents {
-			use := containsToken(a.description, t.id)
+			desc := a.description
+			if a.flavor == "codex" {
+				desc = strings.ToUpper(desc)
+			}
+			use := containsToken(desc, t.id)
 			for _, d := range dispatches {
 				if use {
 					break

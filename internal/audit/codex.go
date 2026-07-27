@@ -15,10 +15,15 @@
 //     shared root id (session_meta.payload.session_id) — no parent-walking,
 //     per I009. These supersede the dispatch's declared model where
 //     linkable, exactly as claude's linked subagent transcripts do.
-//  3. A worker-session scan (D21) for builds that predate explicit-model
-//     dispatch — deliberately NOT implemented here; that is I042's job. A
-//     top-level session with no dispatch records of its own contributes
-//     nothing in this reader.
+//  3. A worker-session scan (D21, ticket I042) for builds that predate
+//     explicit-model dispatch: a top-level session (thread_source "user",
+//     no parent) with no dispatch records of its own contributes its
+//     per-turn models as ticket evidence, correlated by the ticket token's
+//     presence in the session's OPENING user message — the first
+//     response_item/message with role "user" in file order (scanCodexLine).
+//     A session that dispatches is an orchestrator (clause 3): its own
+//     turns are excluded, but its dispatch records still count via the
+//     existing description-match path above.
 //
 // Guardian auto-review threads (D23) are structurally excluded from every
 // evidence path: their reported model is synthetic and must never be read.
@@ -83,6 +88,14 @@ func (m codexSessionMeta) isSubagent() bool {
 	return m.ThreadSource == "subagent" && len(m.Source.Subagent.ThreadSpawn) > 0
 }
 
+// isTopLevelUser reports whether this thread is a top-level, user-initiated
+// codex session — D21's worker-session-scan candidate set (thread_source
+// "user", no parent): a lead or a worker, as opposed to a codex-native
+// subagent or guardian thread (both thread_source "subagent").
+func (m codexSessionMeta) isTopLevelUser() bool {
+	return m.ThreadSource == "user" && m.ParentThreadID == ""
+}
+
 // rootID is the thread tree's linking key (D20 clause 2): every file in a
 // tree, the root included, carries the same session_id. Filtering on this
 // one field finds every member; no parent-walking is needed (I009).
@@ -93,13 +106,41 @@ func (m codexSessionMeta) rootID() string {
 	return m.ID
 }
 
-// codexFunctionCall is one response_item's payload when it records a tool
-// call. Only function_call entries carry dispatch evidence; other
-// response_item shapes (messages, reasoning, …) are not dispatch-relevant.
-type codexFunctionCall struct {
+// codexResponseItem is one response_item's payload, covering the two shapes
+// this reader needs: a function_call (dispatch evidence) and a message
+// (the opening-user-message carrier, D21/I042). Other response_item shapes
+// (reasoning, …) decode harmlessly with empty fields and are skipped.
+type codexResponseItem struct {
 	Type      string          `json:"type"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
+	Name      string          `json:"name"`      // function_call
+	Arguments json.RawMessage `json:"arguments"` // function_call
+	Role      string          `json:"role"`      // message
+	Content   json.RawMessage `json:"content"`   // message
+}
+
+// codexMessageText extracts the human-readable text from a message
+// response_item's content field: an array of typed parts, e.g.
+// [{"type":"input_text","text":"..."}] (codex mirrors the OpenAI Responses
+// API item shape here — undocumented but internally consistent, Testing
+// Decisions). Parts are concatenated in file order; a bare string content is
+// also accepted. No recognized shape yields "", never an error —
+// degrade-never-fail.
+func codexMessageText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var parts []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &parts) != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, p := range parts {
+		b.WriteString(p.Text)
+	}
+	return b.String()
 }
 
 // codexFunctionArgs decodes a function_call's arguments into its string
@@ -133,9 +174,10 @@ func codexFunctionArgs(raw json.RawMessage) map[string]string {
 // thread — session_meta.payload.model is never read; every turn_context
 // line contributes its own token, D20).
 type codexFileResult struct {
-	meta       codexSessionMeta
-	dispatches []dispatch
-	turnModels []string
+	meta               codexSessionMeta
+	dispatches         []dispatch
+	turnModels         []string
+	openingUserMessage string // D21/I042: first role="user" message in file order
 }
 
 // codexExecWorker accumulates one team-spawned worker's evidence across its
@@ -155,6 +197,7 @@ type codexExecWorker struct {
 type codexScanState struct {
 	res         codexFileResult
 	haveMeta    bool
+	haveOpening bool // D21/I042: opening user message already captured
 	seenModel   map[string]bool
 	execWorkers map[string]*codexExecWorker
 }
@@ -243,41 +286,52 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 			st.res.turnModels = append(st.res.turnModels, tc.Model)
 		}
 	case "response_item":
-		var fc codexFunctionCall
-		if json.Unmarshal(ev.Payload, &fc) != nil {
+		var item codexResponseItem
+		if json.Unmarshal(ev.Payload, &item) != nil {
 			return false
 		}
-		if fc.Type != "function_call" {
-			return true
-		}
-		args := codexFunctionArgs(fc.Arguments)
-		if fc.Name == "spawn_agent" {
-			if m := args["model"]; m != "" {
-				st.res.dispatches = append(st.res.dispatches, dispatch{
-					model:       m,
-					description: args["task_name"],
-				})
+		switch item.Type {
+		case "function_call":
+			args := codexFunctionArgs(item.Arguments)
+			if item.Name == "spawn_agent" {
+				if m := args["model"]; m != "" {
+					st.res.dispatches = append(st.res.dispatches, dispatch{
+						model:       m,
+						description: args["task_name"],
+					})
+				}
+				return true
 			}
-			return true
-		}
-		cmd := args["command"]
-		if cmd == "" {
-			return true
-		}
-		// Only commands structurally shaped like a team spawn (herdr/cmux
-		// agent start|prompt) may become dispatch evidence (fix, C1) — an
-		// arbitrary exec_command carrying an unrelated -m flag (a lead
-		// committing routinely, `git commit -m "..."`) is not a dispatch
-		// record and must contribute nothing.
-		if match := codexTeamSpawnStartRe.FindStringSubmatch(cmd); match != nil {
-			w := st.execWorker(match[1])
-			w.model = match[2]
-			w.text.WriteString(cmd)
-			w.text.WriteByte(' ')
-		} else if match := codexTeamSpawnPromptRe.FindStringSubmatch(cmd); match != nil {
-			w := st.execWorker(match[1])
-			w.text.WriteString(cmd)
-			w.text.WriteByte(' ')
+			cmd := args["command"]
+			if cmd == "" {
+				return true
+			}
+			// Only commands structurally shaped like a team spawn (herdr/cmux
+			// agent start|prompt) may become dispatch evidence (fix, C1) — an
+			// arbitrary exec_command carrying an unrelated -m flag (a lead
+			// committing routinely, `git commit -m "..."`) is not a dispatch
+			// record and must contribute nothing.
+			if match := codexTeamSpawnStartRe.FindStringSubmatch(cmd); match != nil {
+				w := st.execWorker(match[1])
+				w.model = match[2]
+				w.text.WriteString(cmd)
+				w.text.WriteByte(' ')
+			} else if match := codexTeamSpawnPromptRe.FindStringSubmatch(cmd); match != nil {
+				w := st.execWorker(match[1])
+				w.text.WriteString(cmd)
+				w.text.WriteByte(' ')
+			}
+		case "message":
+			// Opening message = the first role="user" response_item/message
+			// in file order (D21). Only the first is captured — a later
+			// message naming a different ticket (neighboring-ticket bleed,
+			// I009) must never overwrite it, and non-user messages (e.g. an
+			// assistant turn preceding the first real user line, if any) are
+			// skipped without latching haveOpening.
+			if !st.haveOpening && item.Role == "user" {
+				st.res.openingUserMessage = codexMessageText(item.Content)
+				st.haveOpening = true
+			}
 		}
 	}
 	// event_msg / world_state and any other recognized-but-irrelevant line
@@ -375,6 +429,19 @@ func readCodexSessions(dir, repoDir string, warnings *[]string) ([]dispatch, []s
 		dispatches = append(dispatches, res.dispatches...)
 		if res.meta.isSubagent() && len(res.turnModels) > 0 {
 			agents = append(agents, subagent{toolUseID: "codex:" + root, models: res.turnModels, flavor: "codex"})
+		}
+		// D21 worker-session scan (I042): a top-level session with no
+		// dispatch records of its own (clause 3, orchestrator exclusion)
+		// contributes its per-turn models as evidence, correlated in Run by
+		// the ticket token's presence in its opening user message (clauses
+		// 1-2) — the same description+containsToken seam claude subagents
+		// already use, so Run needs no codex-specific worker-scan logic.
+		if res.meta.isTopLevelUser() && len(res.dispatches) == 0 && len(res.turnModels) > 0 {
+			agents = append(agents, subagent{
+				description: res.openingUserMessage,
+				models:      res.turnModels,
+				flavor:      "codex",
+			})
 		}
 	}
 	return dispatches, agents

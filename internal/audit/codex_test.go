@@ -55,6 +55,15 @@ func codexFunctionCallLine(name string, argsObj map[string]string) string {
 	return fmt.Sprintf(`{"type":"response_item","payload":{"type":"function_call","name":%q,"call_id":"call_1","arguments":%s}}`, name, encoded)
 }
 
+// codexUserMessageLine builds a response_item/message line with role "user"
+// — the carrier for a session's opening dispatch brief (D21, I042). Content
+// mirrors the Responses-API item shape (an array of typed text parts), the
+// same undocumented-but-internally-consistent convention codexFunctionCallLine
+// already uses for function_call items.
+func codexUserMessageLine(text string) string {
+	return fmt.Sprintf(`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}}`, text)
+}
+
 const guardianSource = `{"subagent":{"other":"guardian"}}`
 
 func threadSpawnSource(parent string) string {
@@ -458,5 +467,161 @@ func TestCodexMixedClaudeAndCodexEvidenceJudgedPerFlavor(t *testing.T) {
 	}
 	if r.Verdict != VerdictMatch {
 		t.Errorf("I048 verdict = %s (%s), want match — both tokens resolve within their own flavor's routine tier", r.Verdict, r.Detail)
+	}
+}
+
+// --- D21 worker-session scan (I042) ---
+
+// Acceptance: a worker fixture — opening user message carries the ticket
+// token (the dispatch brief), no dispatch records of its own — attributes
+// its per-turn models as ticket evidence. This is the case I041 deliberately
+// left inert (AC1's ratified inert-worker note); D21 turns it on.
+func TestCodexWorkerOpeningMessageAttributesOwnTurns(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I900": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-900", "worker-900", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I900 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I900"]
+	if r.Verdict != VerdictMatch {
+		t.Fatalf("I900 verdict = %s (%s), want match — the opening message names I900 and the session dispatches nothing of its own", r.Verdict, r.Detail)
+	}
+	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra" {
+		t.Errorf("I900 actuals = %q, want gpt-5.6-terra", got)
+	}
+}
+
+// Acceptance (D21 clause 2): a ticket token appearing only in a LATER user
+// message — never the opening one — must not attribute. This is the
+// neighboring-ticket bleed the design calls out: opening message dispatches
+// I900; a later message mentions I901 in passing. I901 must stay unjudged
+// (no-transcript), and I900 must still attribute correctly from the true
+// opening message.
+func TestCodexLaterMessageTokenDoesNotAttribute(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I900": "routine", "I901": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-901", "worker-901", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I900 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.6-terra"),
+		codexUserMessageLine("while you're at it, take a look at I901 too"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I900"]; r.Verdict != VerdictMatch {
+		t.Errorf("I900 verdict = %s (%s), want match from the true opening message", r.Verdict, r.Detail)
+	}
+	if r := rows["I901"]; r.Verdict != VerdictNoTranscript {
+		t.Errorf("I901 verdict = %s (%s), want no-transcript — a later-message mention must not attribute (neighboring-ticket bleed)", r.Verdict, r.Detail)
+	}
+}
+
+// Acceptance (D21 clause 3): an orchestrator fixture whose opening message
+// names the ticket but which itself carries a dispatch record (spawn_agent,
+// unrelated task) contributes no own-turn evidence. Any session that
+// dispatches is an orchestrator; its own models are never ticket evidence.
+// With no other evidence source, I902 lands on no-transcript — proof the
+// orchestrator's own turn_context model (a decoy, wrong-looking on purpose)
+// never leaked in.
+func TestCodexOrchestratorOpeningMessageContributesNoOwnTurnEvidence(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I902": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+		codexSessionMetaLine("lead-902", "lead-902", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I902 — orchestrator dispatch\n\nCoordinate the build."),
+		codexTurnContextLine("gpt-5.6-sol"), // decoy: must never surface as I902 evidence
+		codexFunctionCallLine("spawn_agent", map[string]string{
+			"model":     "gpt-5.6-terra",
+			"task_name": "unrelated review pass",
+		}),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I902"]
+	if r.Verdict != VerdictNoTranscript {
+		t.Fatalf("I902 verdict = %s (%s), want no-transcript — the orchestrator's own turn model must not attribute", r.Verdict, r.Detail)
+	}
+	if len(r.Actuals) != 0 {
+		t.Errorf("I902 actuals = %v, want none (the decoy gpt-5.6-sol own-turn model must not leak in)", r.Actuals)
+	}
+}
+
+// Acceptance (D21 clause 3, composition): a worker-that-spawns fixture —
+// opening message names the ticket, own turn_context carries a decoy model,
+// AND it spawns its own subagent (e.g. a spec-review pass) whose dispatch
+// record also names the ticket — keeps ticket evidence via the dispatch
+// record while its own turns are excluded. Proves the rules compose without
+// loss, per D21's validation note.
+func TestCodexWorkerThatSpawnsKeepsDispatchRecordEvidenceOnly(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I903": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-903", "worker-903", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I903 — implementer dispatch\n\nBuild the thing, then spawn review."),
+		codexTurnContextLine("gpt-5.6-sol"), // decoy: must never surface (own-turn, orchestrator now)
+		codexFunctionCallLine("spawn_agent", map[string]string{
+			"model":     "gpt-5.6-terra",
+			"task_name": "i903 spec-review pass",
+		}),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I903"]
+	if r.Verdict != VerdictMatch {
+		t.Fatalf("I903 verdict = %s (%s), want match — the spawn_agent dispatch record still carries evidence", r.Verdict, r.Detail)
+	}
+	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra" {
+		t.Errorf("I903 actuals = %q, want gpt-5.6-terra only — the own-turn decoy gpt-5.6-sol must be excluded", got)
+	}
+}
+
+// Acceptance: an M4a-shaped fixture — a worker attributed by D21 whose
+// declared model was never a shipped id (gpt-5.5, the design doc's own
+// example of a pre-explicit-model-dispatch build's honest history) — judges
+// unmapped-dispatch, not match (it isn't) and not silence (no-transcript
+// would hide real, repo-scoped, attributed evidence).
+func TestCodexM4aUndeclaredModelJudgesUnmappedDispatch(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I904": "routine"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-904", "worker-904", "", sessRepo, "user", "{}"),
+		codexUserMessageLine("# Task I904 — implementer dispatch\n\nBuild the thing."),
+		codexTurnContextLine("gpt-5.5"),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rowsByID(t, rep)["I904"]
+	if r.Verdict != VerdictUnmappedDispatch {
+		t.Fatalf("I904 verdict = %s (%s), want unmapped-dispatch — gpt-5.5 was never a shipped id", r.Verdict, r.Detail)
 	}
 }
