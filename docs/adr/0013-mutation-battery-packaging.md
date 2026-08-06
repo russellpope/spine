@@ -5,6 +5,9 @@ status: Accepted
 date: 2026-08-06
 ---
 
+Amended 2026-08-06 (pre-merge, R2): record home corrected from stage/score fields
+to the Audit/Rescore body.
+
 # 0013: Mutation battery packaging: docs-only, runner outside spine, no enforcement code
 
 The behavioural mutation battery (`docs/research/2026-08-05-behavioural-mutation-battery.md`,
@@ -26,10 +29,12 @@ Decided (grill, 2026-08-06):
    its only consumer. A standalone repo was rejected: the redistribution story had
    no named external customer, and the estate does not need a 19th repo for ~60
    lines of Python.
-3. **The battery record rides `spine eval`'s existing opaque `stage`/`score` fields
-   (ADR 0007) — zero spine code.** Presence of the record is required by the
-   `/model-eval` skill's process, not by tooling; a `spine doctor` presence check is
-   explicitly out of scope unless a pass threshold is ever adopted.
+3. **The battery record rides the eval record's Audit / Rescore *body* — zero spine
+   code and no schema change.** `stage` keeps its fixed vocabulary and `score:`
+   stays the rubric total; neither is repurposed to carry battery data. Presence of
+   the record is required by the `/model-eval` skill's process, not by tooling; a
+   `spine doctor` presence check is explicitly out of scope (ADR 0007-consistent)
+   unless a pass threshold is ever adopted.
 4. **No enforcement code without a threshold.** There is no pass threshold (see the
    checklist's reporting rules), so there is nothing for enforcement code to gate on.
    Adding a `spine doctor` check ahead of a threshold would enforce presence of a
