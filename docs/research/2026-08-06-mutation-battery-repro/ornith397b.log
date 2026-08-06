@@ -1,0 +1,20 @@
+ID             RESULT     DETAIL
+------------------------------------------------------------------------
+B1-invoke      KILLED     transport classifier short-circuited to constant FC
+B2-flag        SURVIVED   --portgroup flag silently ignored  <-- BLIND SPOT
+B3-colorder    SURVIVED   USED and AVAILABLE row values swapped  <-- BLIND SPOT
+B4-colgone     SURVIVED   LACP always reported N/A (column made inert)  <-- BLIND SPOT
+B5-sort        KILLED     VM sort order reversed
+B6-units       SURVIVED   RAM off by 1024x  <-- BLIND SPOT
+B7-tls         SURVIVED   TLS verification unconditionally skipped  <-- BLIND SPOT
+B8-logout      SURVIVED   session Logout deleted (session leak)  <-- BLIND SPOT
+------------------------------------------------------------------------
+kill rate: 2/8 = 25%   (excluded: 0 no-site, 0 build-err)
+
+surviving mutations (behaviour the suite cannot see):
+  - B2-flag: --portgroup flag silently ignored
+  - B3-colorder: USED and AVAILABLE row values swapped
+  - B4-colgone: LACP always reported N/A (column made inert)
+  - B6-units: RAM off by 1024x
+  - B7-tls: TLS verification unconditionally skipped
+  - B8-logout: session Logout deleted (session leak)

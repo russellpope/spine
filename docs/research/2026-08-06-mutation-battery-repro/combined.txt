@@ -1,0 +1,50 @@
+=== opus (claude-code-opus-4.7)
+B2-flag        SURVIVED   --portgroup flag silently ignored  <-- BLIND SPOT
+B3-colorder    SURVIVED   USED and AVAILABLE columns swapped  <-- BLIND SPOT
+B4-colgone     SURVIVED   LACP column deleted from vswitches header  <-- BLIND SPOT
+B6-units       SURVIVED   RAM printed in MB but still labelled GB  <-- BLIND SPOT
+B7-tls         SURVIVED   TLS verification unconditionally skipped  <-- BLIND SPOT
+B8-logout      SURVIVED   session Logout deleted (session leak)  <-- BLIND SPOT
+kill rate: 2/8 = 25%   (excluded: 0 no-site, 0 build-err)
+
+=== gpt55 (gpt-5.5)
+B2-flag        SURVIVED   --portgroup flag silently ignored  <-- BLIND SPOT
+B3-colorder    SURVIVED   USED and AVAILABLE columns swapped  <-- BLIND SPOT
+B4-colgone     SURVIVED   LACP column deleted from vswitches header  <-- BLIND SPOT
+B6-units       SURVIVED   RAM off by 1024x (MB treated as KB)  <-- BLIND SPOT
+B7-tls         SURVIVED   TLS verification unconditionally skipped  <-- BLIND SPOT
+B8-logout      SURVIVED   session Logout deleted (session leak)  <-- BLIND SPOT
+kill rate: 2/8 = 25%   (excluded: 0 no-site, 0 build-err)
+
+=== laguna (laguna-s-2.1/vsphere-inventory)
+B3-colorder    SURVIVED   USED and AVAILABLE columns swapped  <-- BLIND SPOT
+B7-tls         SURVIVED   TLS verification unconditionally skipped  <-- BLIND SPOT
+B8-logout      SURVIVED   session Logout deleted (session leak)  <-- BLIND SPOT
+kill rate: 5/8 = 62%   (excluded: 0 no-site, 0 build-err)
+
+=== ornith397b (ornith-1.0-397B)
+B2-flag        SURVIVED   --portgroup flag silently ignored  <-- BLIND SPOT
+B3-colorder    SURVIVED   USED and AVAILABLE row values swapped  <-- BLIND SPOT
+B4-colgone     SURVIVED   LACP always reported N/A (column made inert)  <-- BLIND SPOT
+B6-units       SURVIVED   RAM off by 1024x  <-- BLIND SPOT
+B7-tls         SURVIVED   TLS verification unconditionally skipped  <-- BLIND SPOT
+B8-logout      SURVIVED   session Logout deleted (session leak)  <-- BLIND SPOT
+kill rate: 2/8 = 25%   (excluded: 0 no-site, 0 build-err)
+
+=== qwen36-27b (qwen-3.6-27b)
+B1-invoke      SURVIVED   transport classifier short-circuited to constant FC  <-- BLIND SPOT
+B2-flag        SURVIVED   --portgroup flag silently ignored  <-- BLIND SPOT
+B3-colorder    SURVIVED   USED and AVAILABLE row values swapped  <-- BLIND SPOT
+B4-colgone     SURVIVED   LACP column deleted from vswitches header  <-- BLIND SPOT
+B5-sort        SURVIVED   VM sort order reversed  <-- BLIND SPOT
+B6-units       SURVIVED   RAM off by 1024x  <-- BLIND SPOT
+B7-tls         SURVIVED   TLS verification unconditionally skipped  <-- BLIND SPOT
+B8-logout      SURVIVED   session Logout deleted (session leak)  <-- BLIND SPOT
+kill rate: 0/8 = 0%   (excluded: 0 no-site, 0 build-err)
+
+=== SUMMARY ===
+gpt55.log:kill rate: 2/8 = 25%   (excluded: 0 no-site, 0 build-err)
+laguna.log:kill rate: 5/8 = 62%   (excluded: 0 no-site, 0 build-err)
+opus.log:kill rate: 2/8 = 25%   (excluded: 0 no-site, 0 build-err)
+ornith397b.log:kill rate: 2/8 = 25%   (excluded: 0 no-site, 0 build-err)
+qwen36-27b.log:kill rate: 0/8 = 0%   (excluded: 0 no-site, 0 build-err)

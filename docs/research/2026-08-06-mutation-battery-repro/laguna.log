@@ -1,0 +1,17 @@
+ID             RESULT     DETAIL
+------------------------------------------------------------------------
+B1-invoke      KILLED     transport classifier short-circuited to constant "FC"
+B2-flag        KILLED     --portgroup flag silently ignored
+B3-colorder    SURVIVED   USED and AVAILABLE columns swapped  <-- BLIND SPOT
+B4-colgone     KILLED     LACP column deleted from vswitches header
+B5-sort        KILLED     VM sort order reversed
+B6-units       KILLED     RAM off by 1024x (MB treated as KB)
+B7-tls         SURVIVED   TLS verification unconditionally skipped  <-- BLIND SPOT
+B8-logout      SURVIVED   session Logout deleted (session leak)  <-- BLIND SPOT
+------------------------------------------------------------------------
+kill rate: 5/8 = 62%   (excluded: 0 no-site, 0 build-err)
+
+surviving mutations (behaviour the suite cannot see):
+  - B3-colorder: USED and AVAILABLE columns swapped
+  - B7-tls: TLS verification unconditionally skipped
+  - B8-logout: session Logout deleted (session leak)
