@@ -27,6 +27,7 @@ prevent it, every SDD effort's `.superpowers/sdd/progress.md` opens with a machi
 stage cursor block — one `<!-- spine:cursor -->` block naming the effort, PRD, ticket range, and
 every stage's marker. `[x]` marks a done stage, `[<]` marks YOU ARE HERE (exactly one, among the non-done stages), `[ ]` marks pending.
 The cursor is the single source of truth for "where are we"; check it at session start before acting.
+**Sole-writer rule:** `spine` is the only legal cursor writer. Mutate the block only with `spine cursor start`, `spine cursor tick <stage>`, `spine cursor here <stage>`, or `spine cursor set`; hand-editing it is a workflow violation.
 
 Grammar reference (documentation only — the real block lives at the head of
 `.superpowers/sdd/progress.md`, never here):
@@ -38,7 +39,7 @@ Grammar reference (documentation only — the real block lives at the head of
     stages: grill[x] prd[x] issues[x] implement[<] functional-test[ ] review[ ] verify[ ] ship[ ] ...
     <!-- /spine:cursor -->
 
-**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone. Alongside `spine audit stages` blocking on a missing/stale cursor block in the newest handoff, `spine doctor` advises (warns) on the same condition.
+**Handoff rule:** `spine handoff new` automatically embeds the current cursor block in the handoff it creates; do not copy `spine cursor` output by hand. Alongside `spine audit stages` blocking on a missing/stale cursor block in the newest handoff, `spine doctor` advises (warns) on the same condition.
 
 ## Model routing
 
