@@ -495,6 +495,12 @@ var supersededLines = map[string]bool{
 	// the doctor-advises half of the I014 backstop alongside the
 	// already-stated audit-stages-blocks half.
 	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone.": true,
+	// gen 9's completed handoff rule is replaced in gen 10 (I060): handoff
+	// creation now embeds the cursor automatically, and hand editing is a
+	// workflow violation. Keep this exact full line in the supersession set
+	// so ordinary gen-9 repos update rather than being skipped as locally
+	// modified.
+	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone. Alongside `spine audit stages` blocking on a missing/stale cursor block in the newest handoff, `spine doctor` advises (warns) on the same condition.": true,
 
 	// gen 6–9 WORKFLOW.md model_routing block, superseded in gen 10 (I036,
 	// design D8/D16) by the flavor-axis dotted mirror rendered from the model

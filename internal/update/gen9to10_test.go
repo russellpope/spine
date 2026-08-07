@@ -10,7 +10,7 @@ import (
 	"github.com/russellpope/spine/templates"
 )
 
-// gen10ContentLines are the emitted-content changes gen 10 ships (I036,
+// gen10ContentLines are the emitted-content changes gen 10 ships (I036/I060,
 // design D8/D16), both sides of the diff. The removed ("-") side is static —
 // those spellings are frozen history: the uncommented block header, the bare
 // claude tier rows every gen 6–9 render emitted (both fallback values gen 9
@@ -35,6 +35,12 @@ var gen10ContentLines = func() map[string]bool {
 		"effort: high                       # tier default: primary=high, routine=medium, mechanical=low, fallback=high; xhigh reserved for final verification and security-critical passes; per-ticket effort: only on deviation": true,
 		"model_default: claude-fable-5      # swappable; re-evaluate on major model/platform releases":                                                                                                                             true,
 		"model_default: claude-opus-4-8     # swappable; re-evaluate on major model/platform releases":                                                                                                                             true,
+		// I060 replaces the manual handoff-copy instruction with the
+		// sole-writer and automatic-embed rules. The cursor grammar itself is
+		// deliberately unchanged.
+		"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone. Alongside `spine audit stages` blocking on a missing/stale cursor block in the newest handoff, `spine doctor` advises (warns) on the same condition.": true,
+		"**Sole-writer rule:** `spine` is the only legal cursor writer. Mutate the block only with `spine cursor start`, `spine cursor tick <stage>`, `spine cursor here <stage>`, or `spine cursor set`; hand-editing it is a workflow violation.":                                                                                                                                                       true,
+		"**Handoff rule:** `spine handoff new` automatically embeds the current cursor block in the handoff it creates; do not copy `spine cursor` output by hand. Alongside `spine audit stages` blocking on a missing/stale cursor block in the newest handoff, `spine doctor` advises (warns) on the same condition.":                                                                                  true,
 	}
 	for _, row := range model.MirrorRows() {
 		lines[strings.TrimSpace(row)] = true
@@ -148,10 +154,11 @@ func TestGen9To10PristineUpdatesCleanly(t *testing.T) {
 	}
 }
 
-// AC (I036): the written migration stamps generation 10, renders every
+// AC (I036/I060): the written migration stamps generation 10, renders every
 // flavor and tier as dotted mirror rows, retires the top-level effort: and
-// model_default: keys, leaves the per-ticket/cursor effort grammar untouched
-// (D17), and is idempotent.
+// model_default: keys, leaves the cursor grammar untouched (D17), replaces
+// the manual handoff-copy rule with the sole-writer and automatic-embed rules,
+// and is idempotent.
 func TestGen9To10MigrationWritesFlavorMirror(t *testing.T) {
 	dir := stageGen9Repo(t, nil)
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
@@ -185,6 +192,25 @@ func TestGen9To10MigrationWritesFlavorMirror(t *testing.T) {
 			t.Errorf("per-ticket/cursor effort grammar lost in migration: %q", keep)
 		}
 	}
+	for _, want := range []string{
+		"**Sole-writer rule:** `spine` is the only legal cursor writer.",
+		"`spine cursor start`",
+		"`spine cursor tick <stage>`",
+		"`spine cursor here <stage>`",
+		"`spine cursor set`",
+		"`spine handoff new` automatically embeds the current cursor block",
+	} {
+		if !strings.Contains(gotStr, want) {
+			t.Errorf("migrated WORKFLOW.md missing I060 rule text %q", want)
+		}
+	}
+	const oldHandoffRule = "MUST embed the verbatim output of `spine cursor`"
+	if strings.Contains(gotStr, oldHandoffRule) {
+		t.Errorf("migrated WORKFLOW.md retained the superseded handoff rule %q", oldHandoffRule)
+	}
+	if n := strings.Count(gotStr, "**Handoff rule:**"); n != 1 {
+		t.Errorf("migrated WORKFLOW.md has %d handoff rules, want exactly one replacement", n)
+	}
 	reports, err := Run(Options{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -195,6 +221,47 @@ func TestGen9To10MigrationWritesFlavorMirror(t *testing.T) {
 				t.Errorf("second pass %s state=%v diff:\n%s", r.Path, r.State, r.Diff)
 			}
 		}
+	}
+}
+
+// AC (I060): a gen-9 repo's deliberate surrounding workflow choices remain
+// intact through the content-bearing migration. This models the customized
+// profile configuration found around the machine-owned stage-cursor section;
+// it must update with plain --write, never require --force.
+func TestGen9To10PreservesCustomizedSurroundingConfiguration(t *testing.T) {
+	dir := stageGen9Repo(t, func(content string) string {
+		content = mustReplace(t, content,
+			"reviewers: [go-reviewer, python-reviewer]",
+			"reviewers: [go-reviewer, security-review]")
+		return mustReplace(t, content,
+			"functional_harness: cli",
+			"functional_harness: rest")
+	})
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := report(t, reports, "WORKFLOW.md")
+	if wf.State != Pending || len(wf.Unrecognized) != 0 {
+		t.Fatalf("customized gen-9 repo must update cleanly: state=%v unrecognized=%v", wf.State, wf.Unrecognized)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotStr := string(got)
+	for _, want := range []string{
+		"reviewers: [go-reviewer, security-review]",
+		"functional_harness: rest",
+		"**Sole-writer rule:** `spine` is the only legal cursor writer.",
+		"`spine handoff new` automatically embeds the current cursor block",
+	} {
+		if !strings.Contains(gotStr, want) {
+			t.Errorf("updated customized WORKFLOW.md missing %q", want)
+		}
+	}
+	if strings.Contains(gotStr, "MUST embed the verbatim output of `spine cursor`") {
+		t.Error("updated customized WORKFLOW.md retained the superseded handoff rule")
 	}
 }
 

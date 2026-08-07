@@ -133,8 +133,8 @@ func TestGen5To6IsStampPlusDeclaredContent(t *testing.T) {
 
 // The gen-5 fixture's model_routing mapping and effort defaults must carry
 // forward correctly: the mechanical tier appears, the mapping still
-// contains all four tiers, security_routing is gone, and the word "auto"
-// does not survive the migration.
+// contains all four tiers, security_routing is gone, and the retired fallback
+// instruction "auto on" does not survive the migration.
 func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"WORKFLOW.md", "CLAUDE.md"} {
@@ -169,7 +169,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 			t.Errorf("migrated WORKFLOW.md missing mirror row %q", row)
 		}
 	}
-	for _, unwanted := range []string{"security_routing", "auto"} {
+	for _, unwanted := range []string{"security_routing", "auto on"} {
 		if strings.Contains(string(wf), unwanted) {
 			t.Errorf("migrated WORKFLOW.md still contains %q", unwanted)
 		}
