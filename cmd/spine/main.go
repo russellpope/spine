@@ -37,7 +37,7 @@ commands:
   eval     manage docs/evals (new, add-run, list)
   doctor   read-only workflow health checks
   audit    verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
-  cursor   print the parsed stage cursor (read-only; --quiet for hooks)
+  cursor   print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
   model    resolve the model table for a (flavor, tier) pair (read-only)
   version  print the compiled template generation
 `
@@ -745,6 +745,18 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 // blocking about the stages themselves — see internal/stages' package doc
 // (CursorFindings never affects Report.Blocking()).
 func cmdCursor(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "start":
+			return cmdCursorStart(args[1:], stdout, stderr)
+		case "tick":
+			return cmdCursorTick(args[1:], stdout, stderr)
+		case "here":
+			return cmdCursorHere(args[1:], stdout, stderr)
+		case "set":
+			return cmdCursorSet(args[1:], stdout, stderr)
+		}
+	}
 	fs := flag.NewFlagSet("cursor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
@@ -821,6 +833,216 @@ func cmdCursor(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "  handoff: %s\n", rep.Handoff.Detail)
 		}
 	}
+	return 0
+}
+
+// cursorForWrite loads the working-home cursor and refuses mutations of a
+// malformed block. A writer must never turn a diagnostic parse into a
+// partially informed rewrite; `set` can normalize formatting once the block
+// is valid.
+func cursorForWrite(dir string) (cursor.Cursor, error) {
+	res, err := cursor.Load(dir)
+	if err != nil {
+		return cursor.Cursor{}, err
+	}
+	if !res.HasCursor {
+		return cursor.Cursor{}, fmt.Errorf("no spine cursor found; use `spine cursor start`")
+	}
+	if len(res.Findings) > 0 {
+		return cursor.Cursor{}, fmt.Errorf("cursor block is malformed: %s", strings.Join(res.Findings, "; "))
+	}
+	return res.Cursor, nil
+}
+
+func cursorStageIndex(c cursor.Cursor, name string) int {
+	for i, s := range c.Stages {
+		if s.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// takeForce accepts --force in the conventional trailing position as well as
+// before a positional stage name, where the standard flag package otherwise
+// stops parsing. The remaining flags retain flag.FlagSet's usual validation.
+func takeForce(args []string) ([]string, bool) {
+	kept := make([]string, 0, len(args))
+	force := false
+	for _, arg := range args {
+		if arg == "--force" || arg == "-force" {
+			force = true
+			continue
+		}
+		kept = append(kept, arg)
+	}
+	return kept, force
+}
+
+func cmdCursorStart(args []string, stdout, stderr io.Writer) int {
+	args, force := takeForce(args)
+	fs := flag.NewFlagSet("cursor start", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	effort := fs.String("effort", "", "effort name")
+	prd := fs.String("prd", "", "PRD path")
+	tickets := fs.String("tickets", "", "ticket range")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 || strings.TrimSpace(*effort) == "" {
+		fmt.Fprintln(stderr, "usage: spine cursor start --effort <name> [--prd <path>] [--tickets <range>] [--force] [--dir D]")
+		return 2
+	}
+	res, err := cursor.Load(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "cursor start:", err)
+		return 2
+	}
+	if res.HasCursor {
+		if len(res.Findings) > 0 {
+			fmt.Fprintln(stderr, "cursor start: cursor block is malformed:", strings.Join(res.Findings, "; "))
+			return 1
+		}
+		for _, s := range res.Cursor.Stages {
+			if s.State != cursor.Done && !force {
+				fmt.Fprintln(stderr, "cursor start: existing cursor is mid-flight; pass --force to supersede it")
+				return 1
+			}
+		}
+	}
+	c, err := cursor.New(*dir, *effort, *prd, *tickets)
+	if err != nil {
+		fmt.Fprintln(stderr, "cursor start:", err)
+		return 2
+	}
+	if err := cursor.Save(*dir, c); err != nil {
+		fmt.Fprintln(stderr, "cursor start:", err)
+		return 2
+	}
+	fmt.Fprintf(stdout, "cursor started: %s\n", c.Effort)
+	return 0
+}
+
+func cmdCursorTick(args []string, stdout, stderr io.Writer) int {
+	args, force := takeForce(args)
+	fs := flag.NewFlagSet("cursor tick", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "usage: spine cursor tick [--dir D] <stage> [--force]")
+		return 2
+	}
+	c, err := cursorForWrite(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "cursor tick:", err)
+		return 1
+	}
+	idx := cursorStageIndex(c, fs.Arg(0))
+	if idx < 0 {
+		fmt.Fprintf(stderr, "cursor tick: stage %q is not in the cursor\n", fs.Arg(0))
+		return 2
+	}
+	candidate := c
+	candidate.Stages = append([]cursor.Stage(nil), c.Stages...)
+	wasHere := candidate.Stages[idx].State == cursor.Here
+	candidate.Stages[idx].State = cursor.Done
+	if wasHere {
+		for next := idx + 1; next < len(candidate.Stages); next++ {
+			if candidate.Stages[next].State != cursor.Done {
+				candidate.Stages[next].State = cursor.Here
+				break
+			}
+		}
+	}
+	// FromResult is the audit derivation engine applied to the proposed
+	// cursor state. Its Detail is printed verbatim below, so this early
+	// refusal and `spine audit stages` share one finding vocabulary.
+	rep := stages.FromResult(*dir, cursor.Result{Cursor: candidate, HasCursor: true})
+	row := rep.Stages[idx]
+	if row.Verdict == stages.VerdictTickedMissing && !force {
+		fmt.Fprintln(stderr, row.Detail)
+		return 1
+	}
+	if err := cursor.Save(*dir, candidate); err != nil {
+		fmt.Fprintln(stderr, "cursor tick:", err)
+		return 2
+	}
+	fmt.Fprintf(stdout, "cursor ticked: %s\n", fs.Arg(0))
+	return 0
+}
+
+func cmdCursorHere(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cursor here", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "usage: spine cursor here [--dir D] <stage>")
+		return 2
+	}
+	c, err := cursorForWrite(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "cursor here:", err)
+		return 1
+	}
+	idx := cursorStageIndex(c, fs.Arg(0))
+	if idx < 0 {
+		fmt.Fprintf(stderr, "cursor here: stage %q is not in the cursor\n", fs.Arg(0))
+		return 2
+	}
+	for i := range c.Stages {
+		if i != idx && c.Stages[i].State == cursor.Here {
+			c.Stages[i].State = cursor.Pending
+		}
+	}
+	// Assigning Here deliberately turns a completed stage back into current:
+	// this is the sole regression path and there is no separate untick verb.
+	c.Stages[idx].State = cursor.Here
+	if err := cursor.Save(*dir, c); err != nil {
+		fmt.Fprintln(stderr, "cursor here:", err)
+		return 2
+	}
+	fmt.Fprintf(stdout, "cursor here: %s\n", fs.Arg(0))
+	return 0
+}
+
+func cmdCursorSet(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cursor set", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	prd := fs.String("prd", "", "PRD path")
+	tickets := fs.String("tickets", "", "ticket range")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: spine cursor set [--prd <path>] [--tickets <range>] [--dir D]")
+		return 2
+	}
+	c, err := cursorForWrite(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "cursor set:", err)
+		return 1
+	}
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "prd":
+			c.PRD = *prd
+		case "tickets":
+			c.Tickets = *tickets
+		}
+	})
+	if err := cursor.Save(*dir, c); err != nil {
+		fmt.Fprintln(stderr, "cursor set:", err)
+		return 2
+	}
+	fmt.Fprintln(stdout, "cursor updated")
 	return 0
 }
 

@@ -397,6 +397,59 @@ func TestHandoffNewEmbedsCurrentCursorSnapshot(t *testing.T) {
 	}
 }
 
+func TestHandoffNewCanonicalizesValidCursorAndRejectsMalformedCursor(t *testing.T) {
+	t.Run("valid non-canonical working block", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte("stages: [grill, prd]\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		ledger := filepath.Join(dir, ".superpowers", "sdd", "progress.md")
+		if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		messy := "<!-- spine:cursor -->\n effort :  canonical-snapshot  \n prd : docs/specs/example.md \n tickets :  I058  \n stages :  grill[x]   prd[<]  \n<!-- /spine:cursor -->\n"
+		if err := os.WriteFile(ledger, []byte(messy), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		code, out, errs := runCmd(t, "handoff", "new", "--dir", dir, "canonical snapshot")
+		if code != 0 || errs != "" {
+			t.Fatalf("new: code=%d out=%q err=%q", code, out, errs)
+		}
+		raw, err := os.ReadFile(strings.TrimSpace(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonical := "<!-- spine:cursor -->\neffort: canonical-snapshot\nprd: docs/specs/example.md\ntickets: I058\nstages: grill[x] prd[<]\n<!-- /spine:cursor -->\n"
+		if !strings.Contains(string(raw), canonical) || strings.Contains(string(raw), " effort :") {
+			t.Fatalf("handoff snapshot was not canonical:\n%s", raw)
+		}
+	})
+
+	t.Run("malformed working block", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte("stages: [grill, prd]\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		ledger := filepath.Join(dir, ".superpowers", "sdd", "progress.md")
+		if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		malformed := "<!-- spine:cursor -->\neffort: malformed\nprd: \ntickets: \nstages: grill[<] prd[ ]\n"
+		if err := os.WriteFile(ledger, []byte(malformed), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		code, _, errs := runCmd(t, "handoff", "new", "--dir", dir, "must refuse")
+		if code == 0 || !strings.Contains(errs, "cursor block is malformed") {
+			t.Fatalf("malformed cursor: code=%d stderr=%q", code, errs)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "docs", "handoffs")); !os.IsNotExist(err) {
+			t.Fatalf("malformed cursor created a handoff directory: %v", err)
+		}
+	})
+}
+
 func TestEvalEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	code, out, errs := runCmd(t, "eval", "new", "--dir", dir, "govmomi cli")
@@ -1132,6 +1185,143 @@ func TestCursorCommandOnRealRepoLedger(t *testing.T) {
 	// would go stale as the build progresses toward its own handoff.
 	if !strings.Contains(out, "derivation: clean") && !strings.Contains(out, "derivation: blocking") {
 		t.Errorf("want a live derivation verdict (clean or blocking), out=%q", out)
+	}
+}
+
+// cursorWriteRepo creates a small on-disk spine repo for the cursor write
+// verbs. Tests drive run through its public command boundary; this helper
+// deliberately does not call cursor parsing or serialization APIs.
+func cursorWriteRepo(t *testing.T, stages string) string {
+	t.Helper()
+	dir := t.TempDir()
+	workflow := "profile: library-cli\nstages: [" + stages + "]\n"
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte(workflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func cursorLedger(t *testing.T, dir string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, ".superpowers", "sdd", "progress.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func TestCursorTickTripwireUsesAuditFindingAndForceWritesAtomically(t *testing.T) {
+	dir := cursorWriteRepo(t, "grill, prd, issues")
+	if code, _, errs := runCmd(t, "cursor", "start", "--dir", dir, "--effort", "tripwire", "--prd", "docs/specs/missing.md"); code != 0 {
+		t.Fatalf("start: code=%d stderr=%q", code, errs)
+	}
+	if code, _, errs := runCmd(t, "cursor", "tick", "--dir", dir, "grill"); code != 0 {
+		t.Fatalf("tick grill: code=%d stderr=%q", code, errs)
+	}
+	code, _, refusal := runCmd(t, "cursor", "tick", "--dir", dir, "prd")
+	if code != 1 {
+		t.Fatalf("tick without artifact: code=%d stderr=%q", code, refusal)
+	}
+	if !strings.Contains(refusal, "marked done but 1/1 PRD file docs/specs/missing.md missing") {
+		t.Fatalf("tripwire did not print the audit finding text: %q", refusal)
+	}
+	if got := cursorLedger(t, dir); strings.Contains(got, "prd[x]") {
+		t.Fatalf("refused tick wrote the ledger: %q", got)
+	}
+	if code, _, errs := runCmd(t, "cursor", "tick", "--dir", dir, "prd", "--force"); code != 0 {
+		t.Fatalf("forced tick: code=%d stderr=%q", code, errs)
+	}
+	code, auditOut, auditErr := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("forced tick must remain audit-blocking: code=%d out=%q stderr=%q", code, auditOut, auditErr)
+	}
+	if !strings.Contains(auditOut, strings.TrimSpace(refusal)) {
+		t.Fatalf("audit finding differs from tripwire: refusal=%q audit=%q", refusal, auditOut)
+	}
+	ledger := cursorLedger(t, dir)
+	want := "<!-- spine:cursor -->\neffort: tripwire\nprd: docs/specs/missing.md\ntickets: \nstages: grill[x] prd[x] issues[<]\n<!-- /spine:cursor -->\n"
+	if ledger != want {
+		t.Fatalf("forced tick bytes:\n%s\nwant:\n%s", ledger, want)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, ".superpowers", "sdd"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "progress.md" {
+		t.Fatalf("atomic cursor write left temporary residue: %#v", entries)
+	}
+}
+
+func TestCursorVerbsMarkerRegressionAndStartGuard(t *testing.T) {
+	dir := cursorWriteRepo(t, "grill, review, verify")
+	if code, _, errs := runCmd(t, "cursor", "start", "--dir", dir, "--effort", "first"); code != 0 {
+		t.Fatalf("start: code=%d stderr=%q", code, errs)
+	}
+	startWant := "<!-- spine:cursor -->\neffort: first\nprd: \ntickets: \nstages: grill[<] review[ ] verify[ ]\n<!-- /spine:cursor -->\n"
+	if got := cursorLedger(t, dir); got != startWant {
+		t.Fatalf("start did not seed canonical bytes:\n%s\nwant:\n%s", got, startWant)
+	}
+	if code, out, errs := runCmd(t, "cursor", "--dir", dir); code != 0 || strings.Contains(out, "finding:") {
+		t.Fatalf("started cursor did not parse cleanly: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	before := cursorLedger(t, dir)
+	if code, _, errs := runCmd(t, "cursor", "start", "--dir", dir, "--effort", "second"); code != 1 || !strings.Contains(errs, "mid-flight") {
+		t.Fatalf("unguarded start: code=%d stderr=%q", code, errs)
+	}
+	if got := cursorLedger(t, dir); got != before {
+		t.Fatalf("guarded start changed cursor:\n%s", got)
+	}
+	if code, _, errs := runCmd(t, "cursor", "start", "--dir", dir, "--effort", "second", "--force"); code != 0 {
+		t.Fatalf("forced start: code=%d stderr=%q", code, errs)
+	}
+	if code, _, errs := runCmd(t, "cursor", "tick", "--dir", dir, "verify"); code != 0 {
+		t.Fatalf("non-marker tick: code=%d stderr=%q", code, errs)
+	}
+	if got := cursorLedger(t, dir); !strings.Contains(got, "grill[<] review[ ] verify[x]") {
+		t.Fatalf("non-marker tick moved marker: %q", got)
+	}
+	if code, _, errs := runCmd(t, "cursor", "tick", "--dir", dir, "grill"); code != 0 {
+		t.Fatalf("marker tick: code=%d stderr=%q", code, errs)
+	}
+	if got := cursorLedger(t, dir); !strings.Contains(got, "grill[x] review[<] verify[x]") {
+		t.Fatalf("marker did not advance: %q", got)
+	}
+	if code, _, errs := runCmd(t, "cursor", "tick", "--dir", dir, "review"); code != 0 {
+		t.Fatalf("final marker tick: code=%d stderr=%q", code, errs)
+	}
+	if got := cursorLedger(t, dir); !strings.Contains(got, "grill[x] review[x] verify[x]") {
+		t.Fatalf("final marker was not dropped: %q", got)
+	}
+	if code, _, errs := runCmd(t, "cursor", "here", "--dir", dir, "grill"); code != 0 {
+		t.Fatalf("here done stage: code=%d stderr=%q", code, errs)
+	}
+	if got := cursorLedger(t, dir); !strings.Contains(got, "grill[<] review[x] verify[x]") {
+		t.Fatalf("here did not regress completed stage: %q", got)
+	}
+}
+
+func TestCursorSetNormalizesMessyValidBlockAndEditsFields(t *testing.T) {
+	dir := cursorWriteRepo(t, "grill, prd")
+	ledgerPath := filepath.Join(dir, ".superpowers", "sdd", "progress.md")
+	if err := os.MkdirAll(filepath.Dir(ledgerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	messy := "<!-- spine:cursor -->\n effort:  old-effort  \nprd:   docs/specs/old.md\ntickets:  I001  \nstages:   grill[x]    prd[<]  \n<!-- /spine:cursor -->\n\nnotes stay below\n"
+	if err := os.WriteFile(ledgerPath, []byte(messy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := runCmd(t, "cursor", "set", "--dir", dir, "--prd", "docs/specs/new.md", "--tickets", "I002-I003"); code != 0 {
+		t.Fatalf("set: code=%d stderr=%q", code, errs)
+	}
+	want := "<!-- spine:cursor -->\neffort: old-effort\nprd: docs/specs/new.md\ntickets: I002-I003\nstages: grill[x] prd[<]\n<!-- /spine:cursor -->\n\nnotes stay below\n"
+	if got := cursorLedger(t, dir); got != want {
+		t.Fatalf("set bytes:\n%s\nwant:\n%s", got, want)
+	}
+	if code, _, errs := runCmd(t, "cursor", "set", "--dir", dir); code != 0 {
+		t.Fatalf("no-op set: code=%d stderr=%q", code, errs)
+	}
+	if got := cursorLedger(t, dir); got != want {
+		t.Fatalf("no-op set was not canonical: %q", got)
 	}
 }
 

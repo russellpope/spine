@@ -62,6 +62,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/russellpope/spine/internal/fsutil"
 	"github.com/russellpope/spine/internal/update"
 )
 
@@ -124,15 +125,17 @@ func (c Cursor) StagesLine() string {
 	return strings.Join(parts, " ")
 }
 
-// Block renders c as the canonical, complete spine cursor block. It is used
-// when a handoff captures the cursor's committed snapshot.
+// Block renders c as the canonical stage-cursor block. It deliberately does
+// not include a trailing newline: callers replacing an existing block retain
+// the surrounding ledger bytes, while callers creating a ledger choose its
+// file-level newline convention.
 func (c Cursor) Block() string {
 	return openTag + "\n" +
-		"effort: " + c.Effort + "\n" +
-		"prd: " + c.PRD + "\n" +
-		"tickets: " + c.Tickets + "\n" +
+		"effort: " + strings.TrimSpace(c.Effort) + "\n" +
+		"prd: " + strings.TrimSpace(c.PRD) + "\n" +
+		"tickets: " + strings.TrimSpace(c.Tickets) + "\n" +
 		"stages: " + c.StagesLine() + "\n" +
-		closeTag + "\n"
+		closeTag
 }
 
 // Result is what Load found.
@@ -184,6 +187,61 @@ func Load(dir string) (Result, error) {
 		return Result{}, err
 	}
 	return parse(string(raw), validStages), nil
+}
+
+// New returns an all-pending cursor using the stage order declared by dir's
+// WORKFLOW.md. Its first stage is current. Empty prd and tickets values are
+// intentional: they are legal early-effort cursor values.
+func New(dir, effort, prd, tickets string) (Cursor, error) {
+	wfRaw, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		return Cursor{}, err
+	}
+	names := parseStagesList(update.ExtractKeys(string(wfRaw))["stages"])
+	if len(names) == 0 {
+		return Cursor{}, fmt.Errorf("WORKFLOW.md has no usable stages: list")
+	}
+	c := Cursor{Effort: effort, PRD: prd, Tickets: tickets, Stages: make([]Stage, len(names))}
+	for i, name := range names {
+		state := Pending
+		if i == 0 {
+			state = Here
+		}
+		c.Stages[i] = Stage{Name: name, State: state}
+	}
+	return c, nil
+}
+
+// Save replaces the first cursor block in dir's working ledger with c's
+// canonical serialization. When no block exists, it creates the ledger (or
+// prepends the block to an existing non-cursor ledger), which is the start
+// verb's seed behavior. It writes only after the complete replacement text is
+// ready, so a partially serialized block is never emitted.
+func Save(dir string, c Cursor) error {
+	path := filepath.Join(dir, filepath.FromSlash(ledgerRel))
+	raw, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	content := string(raw)
+	block := c.Block()
+	if start := strings.Index(content, openTag); start >= 0 {
+		rest := content[start+len(openTag):]
+		if endRel := strings.Index(rest, closeTag); endRel >= 0 {
+			end := start + len(openTag) + endRel + len(closeTag)
+			content = content[:start] + block + content[end:]
+		} else {
+			return fmt.Errorf("cursor block is missing its closing %q marker", closeTag)
+		}
+	} else if content == "" {
+		content = block + "\n"
+	} else {
+		content = block + "\n\n" + content
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return fsutil.WriteFileAtomic(path, []byte(content))
 }
 
 // parse extracts and parses the first cursor block found in content.

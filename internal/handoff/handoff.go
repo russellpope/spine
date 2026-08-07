@@ -64,6 +64,9 @@ func NewWithCursor(dir, topic string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
+	if cursorResult.HasCursor && len(cursorResult.Findings) > 0 {
+		return "", false, fmt.Errorf("cursor block is malformed: %s", strings.Join(cursorResult.Findings, "; "))
+	}
 	today := time.Now().Format("2006-01-02")
 	hdir := filepath.Join(dir, "docs", "handoffs")
 	if err := os.MkdirAll(hdir, 0o755); err != nil {
@@ -80,7 +83,7 @@ func NewWithCursor(dir, topic string) (string, bool, error) {
 		"{{HANDOFF_DATE}}", today,
 	).Replace(string(raw))
 	if cursorResult.HasCursor {
-		content += "\n" + cursorResult.Cursor.Block()
+		content += "\n" + cursorResult.Cursor.Block() + "\n"
 	}
 	if err := fsutil.WriteFileExclusive(path, []byte(content)); err != nil {
 		if errors.Is(err, fs.ErrExist) {
