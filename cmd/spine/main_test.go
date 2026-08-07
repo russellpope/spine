@@ -1297,6 +1297,130 @@ func TestCursorTickTripwireUsesAuditFindingAndForceWritesAtomically(t *testing.T
 	}
 }
 
+// A present derivation artifact must let the ordinary (unforced) write path
+// succeed, retain canonical bytes, and produce a matching non-blocking row.
+func TestCursorTickWithPresentArtifactSucceedsAndAuditsMatching(t *testing.T) {
+	dir := cursorWriteRepo(t, "grill, prd, issues")
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "specs", "ready.md"), []byte("# Ready\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := runCmd(t, "cursor", "start", "--dir", dir, "--effort", "artifact", "--prd", "docs/specs/ready.md"); code != 0 {
+		t.Fatalf("start: code=%d stderr=%q", code, errs)
+	}
+	if code, _, errs := runCmd(t, "cursor", "tick", "--dir", dir, "grill"); code != 0 {
+		t.Fatalf("tick grill: code=%d stderr=%q", code, errs)
+	}
+	code, out, errs := runCmd(t, "cursor", "tick", "--dir", dir, "prd")
+	if code != 0 || out != "cursor ticked: prd\n" || errs != "" {
+		t.Fatalf("unforced artifact-present tick: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	want := "<!-- spine:cursor -->\neffort: artifact\nprd: docs/specs/ready.md\ntickets: \nstages: grill[x] prd[x] issues[<]\n<!-- /spine:cursor -->\n"
+	if got := cursorLedger(t, dir); got != want {
+		t.Fatalf("canonical tick bytes:\n%s\nwant:\n%s", got, want)
+	}
+	if code, _, errs := runCmd(t, "handoff", "new", "--dir", dir, "artifact snapshot"); code != 0 || errs != "" {
+		t.Fatalf("handoff: code=%d stderr=%q", code, errs)
+	}
+	code, auditOut, auditErr := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 0 || auditErr != "" || !strings.Contains(auditOut, "prd") || !strings.Contains(auditOut, "match") || !strings.Contains(auditOut, "1/1 PRD file docs/specs/ready.md present") {
+		t.Fatalf("matching audit row: code=%d out=%q stderr=%q", code, auditOut, auditErr)
+	}
+}
+
+// The newest handoff is a complete state snapshot. Same-effort cursor writes
+// must therefore be visible to audit and doctor's D9, until a fresh handoff
+// preserves the new state without rewriting historical snapshots.
+func TestHandoffSnapshotDetectsSameEffortCursorDriftAndDoctorAdvises(t *testing.T) {
+	dir := cursorWriteRepo(t, "grill, prd, review")
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "specs", "ready.md"), []byte("# Ready\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := runCmd(t, "cursor", "start", "--dir", dir, "--effort", "same-effort", "--prd", "docs/specs/ready.md"); code != 0 {
+		t.Fatalf("start: code=%d stderr=%q", code, errs)
+	}
+	for _, stage := range []string{"grill", "prd"} {
+		if code, _, errs := runCmd(t, "cursor", "tick", "--dir", dir, stage); code != 0 {
+			t.Fatalf("tick %s: code=%d stderr=%q", stage, code, errs)
+		}
+	}
+	if code, _, errs := runCmd(t, "handoff", "new", "--dir", dir, "snapshot 01 initial"); code != 0 || errs != "" {
+		t.Fatalf("initial handoff: code=%d stderr=%q", code, errs)
+	}
+	assertClean := func(label string) {
+		t.Helper()
+		if code, out, errs := runCmd(t, "audit", "stages", "--dir", dir); code != 0 || errs != "" {
+			t.Fatalf("%s audit must be clean: code=%d out=%q stderr=%q", label, code, out, errs)
+		}
+	}
+	assertBlocked := func(label string) {
+		t.Helper()
+		code, out, _ := runCmd(t, "audit", "stages", "--dir", dir)
+		if code != 1 || !strings.Contains(out, "stale cursor snapshot") || !strings.Contains(out, "spine handoff new") {
+			t.Fatalf("%s audit must report actionable stale snapshot: code=%d out=%q", label, code, out)
+		}
+		code, out, _ = runCmd(t, "doctor", "--dir", dir)
+		if code != 1 || !strings.Contains(out, "D9") || !strings.Contains(out, "stale cursor snapshot") {
+			t.Fatalf("%s doctor must advise through D9: code=%d out=%q", label, code, out)
+		}
+	}
+	assertClean("initial")
+
+	if code, _, errs := runCmd(t, "cursor", "here", "--dir", dir, "grill"); code != 0 {
+		t.Fatalf("here: code=%d stderr=%q", code, errs)
+	}
+	assertBlocked("here")
+	if code, _, errs := runCmd(t, "handoff", "new", "--dir", dir, "snapshot 02 here"); code != 0 || errs != "" {
+		t.Fatalf("here refresh: code=%d stderr=%q", code, errs)
+	}
+	assertClean("here refresh")
+
+	if code, _, errs := runCmd(t, "cursor", "set", "--dir", dir, "--tickets", "I058"); code != 0 {
+		t.Fatalf("set: code=%d stderr=%q", code, errs)
+	}
+	assertBlocked("set")
+	if code, _, errs := runCmd(t, "handoff", "new", "--dir", dir, "snapshot 03 set"); code != 0 || errs != "" {
+		t.Fatalf("set refresh: code=%d stderr=%q", code, errs)
+	}
+	assertClean("set refresh")
+
+	if code, _, errs := runCmd(t, "cursor", "tick", "--dir", dir, "review"); code != 0 {
+		t.Fatalf("tick review: code=%d stderr=%q", code, errs)
+	}
+	assertBlocked("tick")
+	if code, _, errs := runCmd(t, "handoff", "new", "--dir", dir, "snapshot 04 tick"); code != 0 || errs != "" {
+		t.Fatalf("tick refresh: code=%d stderr=%q", code, errs)
+	}
+	assertClean("tick refresh")
+}
+
+func TestHandoffSnapshotMalformedBlockBlocksAuditAndDoctor(t *testing.T) {
+	dir := cursorWriteRepo(t, "grill")
+	if code, _, errs := runCmd(t, "cursor", "start", "--dir", dir, "--effort", "malformed"); code != 0 {
+		t.Fatalf("start: code=%d stderr=%q", code, errs)
+	}
+	path := filepath.Join(dir, "docs", "handoffs", "2026-08-06-malformed.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# malformed\n\n<!-- spine:cursor -->\neffort: malformed\n<!-- /spine:cursor -->\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 1 || !strings.Contains(out, "malformed spine:cursor block") || !strings.Contains(out, "spine handoff new") {
+		t.Fatalf("malformed snapshot audit: code=%d out=%q", code, out)
+	}
+	code, out, _ = runCmd(t, "doctor", "--dir", dir)
+	if code != 1 || !strings.Contains(out, "D9") || !strings.Contains(out, "malformed spine:cursor block") {
+		t.Fatalf("malformed snapshot doctor: code=%d out=%q", code, out)
+	}
+}
+
 func TestCursorVerbsMarkerRegressionAndStartGuard(t *testing.T) {
 	dir := cursorWriteRepo(t, "grill, review, verify")
 	if code, _, errs := runCmd(t, "cursor", "start", "--dir", dir, "--effort", "first"); code != 0 {

@@ -392,21 +392,11 @@ func HasBlock(content string) bool {
 	return strings.Contains(content, openTag)
 }
 
-// ParseBlock parses the first spine:cursor block found in content — a
-// handoff document, not necessarily a repo's own progress.md — and returns
-// the resulting Cursor plus whether an opening block was found at all.
-// Exported so callers outside this package (the derivation engine's I025
-// effort-match check) can read a block's effort: (or other fields) without
-// duplicating the grammar. No WORKFLOW.md stages: list is available for a
-// bare document, so stage-name validation does not apply here — pass nil
-// for validStages via the unexported parse. Grammar findings (missing
-// required keys, malformed stage tokens, and so on) are discarded; callers
-// that only need a top-level field like Effort do not need them, and a
-// partially-populated Cursor is still meaningful (an empty Effort simply
-// never matches a live one).
-func ParseBlock(content string) (Cursor, bool) {
-	res := parse(content, nil)
-	return res.Cursor, res.HasCursor
+// ParseBlockResult parses the first spine:cursor block in a handoff document
+// and retains its grammar findings. A handoff has no WORKFLOW.md stages list,
+// so stage-name validation does not apply.
+func ParseBlockResult(content string) Result {
+	return parse(content, nil)
 }
 
 // parseStagesList parses WORKFLOW.md's "stages" value (from

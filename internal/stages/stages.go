@@ -221,7 +221,7 @@ func FromResult(dir string, res cursor.Result) Report {
 	var notes []string
 	rep.Stages, notes = deriveStages(dir, res.Cursor)
 	rep.Notes = notes
-	rep.Handoff = deriveHandoff(dir, res.Cursor.Effort)
+	rep.Handoff = deriveHandoff(dir, res.Cursor)
 	return rep
 }
 
@@ -375,23 +375,17 @@ func namedIDs(missing []string) string {
 	return strings.Join(missing[:maxNamedMissingIDs], ", ") + fmt.Sprintf(" +%d more", len(missing)-maxNamedMissingIDs)
 }
 
-// deriveHandoff applies the I014 newest-handoff backstop, plus I025's
-// effort-match requirement: presence of a `<!-- spine:cursor -->` block is
-// not enough — the block's effort: must match the live cursor's effort
-// (liveEffort, i.e. the effort anchoring the report this check is part of).
-// A stale-effort block (well-formed, but carried over from a previous
-// effort) is treated identically to an absent block — HasBlock false,
-// Blocking() true — because a stale block defeats I014's intent exactly as
-// much as a missing one does; only the Detail differs, naming both efforts
-// so the finding is actionable. Only called when a cursor exists
-// (Applicable is therefore always true on the way in).
+// deriveHandoff applies the newest-handoff backstop. Its snapshot must parse
+// completely and match the complete canonical live cursor, not merely its
+// effort. The stale-effort detail remains distinct because it is the most
+// directly actionable kind of stale snapshot.
 //
 // M4 (I027): a genuine I/O error reading docs/handoffs (handoff.Latest's
 // err) and docs/handoffs legitimately having zero entries (ok false, err
 // nil) both block the same way, but the Detail wording is kept distinct —
 // "unreadable" vs "no ... entries found" — so a transient read failure
 // doesn't masquerade as "you never wrote a handoff."
-func deriveHandoff(dir string, liveEffort string) HandoffCheck {
+func deriveHandoff(dir string, live cursor.Cursor) HandoffCheck {
 	entry, ok, err := handoff.Latest(dir)
 	if err != nil {
 		return HandoffCheck{Applicable: true,
@@ -411,10 +405,18 @@ func deriveHandoff(dir string, liveEffort string) HandoffCheck {
 		return HandoffCheck{Applicable: true, Path: entry.Path, HasBlock: false,
 			Detail: "newest handoff " + entry.Path + " is missing the spine:cursor block"}
 	}
-	blockCursor, _ := cursor.ParseBlock(content)
-	if blockCursor.Effort != liveEffort {
+	block := cursor.ParseBlockResult(content)
+	if len(block.Findings) > 0 {
 		return HandoffCheck{Applicable: true, Path: entry.Path, HasBlock: false,
-			Detail: fmt.Sprintf("newest handoff %s carries a stale effort cursor block: block effort %q, live effort %q", entry.Path, blockCursor.Effort, liveEffort)}
+			Detail: "newest handoff " + entry.Path + " carries a malformed spine:cursor block: " + strings.Join(block.Findings, "; ") + "; run `spine handoff new` to capture a complete current snapshot"}
+	}
+	if block.Cursor.Effort != live.Effort {
+		return HandoffCheck{Applicable: true, Path: entry.Path, HasBlock: false,
+			Detail: fmt.Sprintf("newest handoff %s carries a stale effort cursor block: block effort %q, live effort %q; run `spine handoff new` to capture a fresh snapshot", entry.Path, block.Cursor.Effort, live.Effort)}
+	}
+	if block.Cursor.Block() != live.Block() {
+		return HandoffCheck{Applicable: true, Path: entry.Path, HasBlock: false,
+			Detail: "newest handoff " + entry.Path + " carries a stale cursor snapshot: snapshot state differs from the live cursor; run `spine handoff new` to capture a fresh snapshot"}
 	}
 	return HandoffCheck{Applicable: true, Path: entry.Path, HasBlock: true,
 		Detail: "newest handoff " + entry.Path + " carries the spine:cursor block"}
