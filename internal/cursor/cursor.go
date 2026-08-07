@@ -149,12 +149,21 @@ type Result struct {
 	// Findings are grammar violations in a block that was found. Never a
 	// panic; Cursor may be partially populated when Findings is non-empty.
 	Findings []string
+	// NonCanonical reports a grammatically valid cursor block whose original
+	// bytes differ from Cursor.Block(). It is deliberately separate from
+	// Findings: formatting drift is a sole-writer violation, not a grammar
+	// violation, so audit and doctor can report the two conditions distinctly.
+	NonCanonical bool
 }
 
 const (
 	ledgerRel = ".superpowers/sdd/progress.md"
 	openTag   = "<!-- spine:cursor -->"
 	closeTag  = "<!-- /spine:cursor -->"
+	// NonCanonicalRemediation is shared by the audit gate and doctor advisory.
+	// Every cursor write verb rewrites the block, while a flagless `cursor set`
+	// is the explicit no-op recovery path.
+	NonCanonicalRemediation = "cursor block is non-canonical — run any `spine cursor` write verb (or no-op `spine cursor set`) to rewrite it canonically"
 )
 
 var requiredKeys = []string{"effort", "prd", "tickets", "stages"}
@@ -257,7 +266,13 @@ func parse(content string, validStages []string) Result {
 			Findings: []string{"cursor block missing its closing `" + closeTag + "` marker"}}
 	}
 	c, findings := parseBody(rest[:endRel], validStages)
-	return Result{Cursor: c, HasCursor: true, Findings: findings}
+	blockEnd := start + len(openTag) + endRel + len(closeTag)
+	return Result{
+		Cursor:       c,
+		HasCursor:    true,
+		Findings:     findings,
+		NonCanonical: len(findings) == 0 && content[start:blockEnd] != c.Block(),
+	}
 }
 
 // parseBody parses the key: value lines between the cursor markers.

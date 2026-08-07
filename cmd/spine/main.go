@@ -667,15 +667,14 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 // cursor stage's derivation verdict (like audit routing's ticket table),
 // plus the newest-handoff backstop line. Exit 1 when Report.Blocking() — a
 // ticked-but-missing or present-but-unticked stage, or a missing/stale
-// newest-handoff cursor block — OR when the cursor block itself failed to
-// parse (HasCursor && len(CursorFindings) > 0): a malformed stages: line
-// parses to zero stage rows, which would otherwise sail through this gate
-// at exit 0 with the grammar problems demoted to stderr-only warnings.
-// audit stages is the ONLY caller where cursor grammar findings block —
-// `spine cursor` stays exit-0-always (read-only printer) and doctor's D9
-// stays warn-only; neither is changed by this. No cursor at all is a
-// warning, never a failure (exit 0) — see internal/stages' package doc for
-// the three quiet cases this collapses.
+// newest-handoff cursor block — OR when the cursor block itself is malformed
+// or valid-but-non-canonical. The latter is the sole-writer gate: parse then
+// canonical reserialize comparison detects a hand edit without treating it
+// as a grammar failure. Audit stages is the ONLY caller where either cursor
+// condition blocks — `spine cursor` stays exit-0-always (read-only printer)
+// and doctor's D9 stays warn-only; neither is changed by this. No cursor at
+// all is a warning, never a failure (exit 0) — see internal/stages' package
+// doc for the three quiet cases this collapses.
 func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("audit stages", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -699,28 +698,32 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	cursorMalformed := len(rep.CursorFindings) > 0
-	const malformedName, malformedState, malformedVerdict = "cursor", "n/a", "blocking"
+	cursorNonCanonical := rep.CursorNonCanonical
+	const cursorName, cursorState, cursorVerdict = "cursor", "n/a", "blocking"
 	wName, wState, wVerdict := len("stage"), len("state"), len("verdict")
 	for _, s := range rep.Stages {
 		wName = max(wName, len(s.Name))
 		wState = max(wState, len(s.StateLabel()))
 		wVerdict = max(wVerdict, len(string(s.Verdict)))
 	}
-	if cursorMalformed {
-		wName = max(wName, len(malformedName))
-		wState = max(wState, len(malformedState))
-		wVerdict = max(wVerdict, len(malformedVerdict))
+	if cursorMalformed || cursorNonCanonical {
+		wName = max(wName, len(cursorName))
+		wState = max(wState, len(cursorState))
+		wVerdict = max(wVerdict, len(cursorVerdict))
 	}
 	fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, "stage", wState, "state", wVerdict, "verdict", "detail")
 	if cursorMalformed {
-		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, malformedName, wState, malformedState, wVerdict, malformedVerdict,
+		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, cursorName, wState, cursorState, wVerdict, cursorVerdict,
 			"malformed cursor block — grammar findings: "+strings.Join(rep.CursorFindings, "; "))
+	}
+	if cursorNonCanonical {
+		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, cursorName, wState, cursorState, wVerdict, cursorVerdict, cursor.NonCanonicalRemediation)
 	}
 	for _, s := range rep.Stages {
 		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, s.Name, wState, s.StateLabel(), wVerdict, string(s.Verdict), s.Detail)
 	}
 	fmt.Fprintf(stdout, "handoff: applicable=%v blocking=%v — %s\n", rep.Handoff.Applicable, rep.Handoff.Blocking(), rep.Handoff.Detail)
-	if rep.Blocking() || cursorMalformed {
+	if rep.Blocking() || cursorMalformed || cursorNonCanonical {
 		return 1
 	}
 	return 0

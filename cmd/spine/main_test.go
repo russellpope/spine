@@ -857,6 +857,48 @@ func TestAuditStagesCleanExitsZero(t *testing.T) {
 	}
 }
 
+// I059: formatting a valid cursor block by hand is a sole-writer violation,
+// not malformed grammar. Audit stages must block it and name the built-in
+// rewrite path; the canonical clean fixture above remains an exit-0 control.
+func TestAuditStagesNonCanonicalCursorBlocksWithRewriteRemediation(t *testing.T) {
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", stagesFixture("noncanonical-cursor"))
+	if code != 1 {
+		t.Fatalf("want exit 1 for a valid but non-canonical cursor, got %d, out=%q errs=%q", code, out, errs)
+	}
+	for _, want := range []string{"non-canonical", "spine cursor", "spine cursor set"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("want remediation %q in audit finding, out=%q", want, out)
+		}
+	}
+	if strings.Contains(out, "malformed cursor block") {
+		t.Errorf("valid formatting drift must remain distinct from malformed grammar, out=%q", out)
+	}
+}
+
+// I059: doctor consumes the same fixture at its CLI boundary. It stays a
+// warning (and therefore preserves the normal doctor non-zero health exit),
+// rather than becoming a second blocking gate with different remediation.
+func TestDoctorAdvisesOnNonCanonicalCursor(t *testing.T) {
+	code, out, errs := runCmd(t, "doctor", "--dir", stagesFixture("noncanonical-cursor"))
+	if code != 1 {
+		t.Fatalf("doctor warnings must retain the usual exit 1, got %d, out=%q errs=%q", code, out, errs)
+	}
+	for _, want := range []string{"D9 warn", "non-canonical", "spine cursor set"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("want doctor advisory %q, out=%q errs=%q", want, out, errs)
+		}
+	}
+}
+
+// The canonical control fixture may have unrelated scaffold-health findings,
+// but its cursor must not acquire a D9 warning from this gate.
+func TestDoctorLeavesCanonicalCursorWithoutD9(t *testing.T) {
+	_, out, errs := runCmd(t, "doctor", "--dir", stagesFixture("clean"))
+	if strings.Contains(out, "D9 ") || strings.Contains(errs, "D9 ") {
+		t.Fatalf("canonical cursor must not produce a D9 finding, out=%q errs=%q", out, errs)
+	}
+}
+
 func TestAuditStagesTickedMissingBlocks(t *testing.T) {
 	code, out, _ := runCmd(t, "audit", "stages", "--dir", stagesFixture("ticked-missing"))
 	if code != 1 {
@@ -912,6 +954,9 @@ func TestAuditStagesMalformedCursorBlocks(t *testing.T) {
 	}
 	if !strings.Contains(out, "malformed") {
 		t.Errorf("want the blocking cursor-malformed finding surfaced in the report table, out=%q", out)
+	}
+	if strings.Contains(out, "non-canonical") {
+		t.Errorf("malformed cursor must retain its distinct finding, out=%q", out)
 	}
 }
 

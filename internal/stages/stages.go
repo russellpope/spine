@@ -171,6 +171,11 @@ type Report struct {
 	// CursorFindings passes through cursor.Result.Findings verbatim —
 	// grammar problems, never blocking here (Task 1's concern).
 	CursorFindings []string
+	// CursorNonCanonical is a valid cursor whose source bytes differ from its
+	// canonical serialization. It is kept separate from Blocking so the
+	// read-only `spine cursor` command remains advisory; audit stages is the
+	// sole blocking consumer and doctor reports D9 warn-only.
+	CursorNonCanonical bool
 	// Notes carries advisory explanations, never gating (Blocking() does
 	// not consult it). When HasCursor is false: which of the three quiet
 	// cases applies. When HasCursor is true: non-blocking warnings such as
@@ -208,7 +213,7 @@ func Derive(dir string) (Report, error) {
 // caller that has already called cursor.Load (cmd/spine's cursor command)
 // need not read the repo twice.
 func FromResult(dir string, res cursor.Result) Report {
-	rep := Report{HasCursor: res.HasCursor, Cursor: res.Cursor, CursorFindings: res.Findings}
+	rep := Report{HasCursor: res.HasCursor, Cursor: res.Cursor, CursorFindings: res.Findings, CursorNonCanonical: res.NonCanonical}
 	if !res.HasCursor {
 		rep.Notes = []string{noCursorNote(dir)}
 		return rep

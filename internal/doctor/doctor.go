@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/russellpope/spine/internal/adr"
+	"github.com/russellpope/spine/internal/cursor"
 	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/handoff"
 	"github.com/russellpope/spine/internal/stages"
@@ -90,6 +91,9 @@ func stagesCheck(dir string) []Finding {
 		// every other check this function reports.
 		findings = append(findings, Finding{"D9", "warn", ".superpowers/sdd/progress.md",
 			"cursor block malformed — grammar findings: " + strings.Join(rep.CursorFindings, "; ")})
+	}
+	if rep.CursorNonCanonical {
+		findings = append(findings, Finding{"D9", "warn", ".superpowers/sdd/progress.md", cursor.NonCanonicalRemediation})
 	}
 	for _, n := range rep.Notes {
 		// F1 (final whole-branch review, I024-I027 batch): rep.Notes (e.g.
