@@ -218,6 +218,15 @@ func New(dir, effort, prd, tickets string) (Cursor, error) {
 // verb's seed behavior. It writes only after the complete replacement text is
 // ready, so a partially serialized block is never emitted.
 func Save(dir string, c Cursor) error {
+	for name, value := range map[string]string{
+		"effort":  c.Effort,
+		"prd":     c.PRD,
+		"tickets": c.Tickets,
+	} {
+		if strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("cursor %s value contains a newline", name)
+		}
+	}
 	path := filepath.Join(dir, filepath.FromSlash(ledgerRel))
 	raw, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
