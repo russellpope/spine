@@ -124,6 +124,17 @@ func (c Cursor) StagesLine() string {
 	return strings.Join(parts, " ")
 }
 
+// Block renders c as the canonical, complete spine cursor block. It is used
+// when a handoff captures the cursor's committed snapshot.
+func (c Cursor) Block() string {
+	return openTag + "\n" +
+		"effort: " + c.Effort + "\n" +
+		"prd: " + c.PRD + "\n" +
+		"tickets: " + c.Tickets + "\n" +
+		"stages: " + c.StagesLine() + "\n" +
+		closeTag + "\n"
+}
+
 // Result is what Load found.
 type Result struct {
 	Cursor Cursor

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/russellpope/spine/internal/cursor"
 	"github.com/russellpope/spine/internal/fsutil"
 	"github.com/russellpope/spine/internal/meta"
 	"github.com/russellpope/spine/templates"
@@ -45,35 +46,49 @@ func ParseName(filename string) (date time.Time, topic string, ok bool) {
 
 // New scaffolds docs/handoffs/<today>-<slug>.md. It never overwrites.
 func New(dir, topic string) (string, error) {
+	path, _, err := NewWithCursor(dir, topic)
+	return path, err
+}
+
+// NewWithCursor scaffolds a handoff and captures the current parsed cursor
+// block when one exists. The bool reports whether that snapshot was embedded.
+func NewWithCursor(dir, topic string) (string, bool, error) {
 	slug := meta.Slugify(topic)
 	if slug == "" {
-		return "", fmt.Errorf("topic %q produces an empty slug — use at least one ASCII letter or digit", topic)
+		return "", false, fmt.Errorf("topic %q produces an empty slug — use at least one ASCII letter or digit", topic)
 	}
 	if strings.ContainsAny(topic, "\n\r") {
-		return "", fmt.Errorf("topic %q contains a newline, which would inject fake front matter", topic)
+		return "", false, fmt.Errorf("topic %q contains a newline, which would inject fake front matter", topic)
+	}
+	cursorResult, err := cursor.Load(dir)
+	if err != nil {
+		return "", false, err
 	}
 	today := time.Now().Format("2006-01-02")
 	hdir := filepath.Join(dir, "docs", "handoffs")
 	if err := os.MkdirAll(hdir, 0o755); err != nil {
-		return "", err
+		return "", false, err
 	}
 	path := filepath.Join(hdir, today+"-"+slug+".md")
 	raw, err := templates.FS.ReadFile("current/handoff.tmpl.md")
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	content := strings.NewReplacer(
 		"{{HANDOFF_TITLE_YAML}}", strconv.Quote(topic),
 		"{{HANDOFF_TITLE}}", topic,
 		"{{HANDOFF_DATE}}", today,
 	).Replace(string(raw))
+	if cursorResult.HasCursor {
+		content += "\n" + cursorResult.Cursor.Block()
+	}
 	if err := fsutil.WriteFileExclusive(path, []byte(content)); err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return "", fmt.Errorf("%s already exists — pick a more specific topic", path)
+			return "", false, fmt.Errorf("%s already exists — pick a more specific topic", path)
 		}
-		return "", err
+		return "", false, err
 	}
-	return path, nil
+	return path, cursorResult.HasCursor, nil
 }
 
 // List returns entries newest-first (date desc, filename desc as tiebreak).

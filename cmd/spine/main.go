@@ -291,12 +291,15 @@ func cmdHandoff(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, `usage: spine handoff new [--dir D] "Topic" (flags before topic)`)
 			return 2
 		}
-		path, err := handoff.New(*dir, fs.Arg(0))
+		path, embeddedCursor, err := handoff.NewWithCursor(*dir, fs.Arg(0))
 		if err != nil {
 			fmt.Fprintln(stderr, "handoff new:", err)
 			return 2
 		}
 		fmt.Fprintln(stdout, path)
+		if !embeddedCursor {
+			fmt.Fprintln(stdout, "note: no spine cursor found; scaffolded handoff without a cursor block")
+		}
 		return 0
 	case "list":
 		fs := flag.NewFlagSet("handoff list", flag.ContinueOnError)

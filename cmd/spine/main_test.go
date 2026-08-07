@@ -329,6 +329,17 @@ func TestHandoffEndToEnd(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "-spine-v2-wrap.md") {
 		t.Fatalf("new: code=%d out=%q err=%q", code, out, errs)
 	}
+	if !strings.Contains(out, "note: no spine cursor found") {
+		t.Fatalf("new without cursor must explain the omitted block: out=%q", out)
+	}
+	path := strings.Split(strings.TrimSpace(out), "\n")[0]
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "<!-- spine:cursor -->") {
+		t.Fatalf("new without cursor must not add a cursor block:\n%s", raw)
+	}
 	code, out, _ = runCmd(t, "handoff", "list", "--dir", dir)
 	if code != 0 || !strings.Contains(out, "spine-v2-wrap") {
 		t.Fatalf("list: code=%d out=%q", code, out)
@@ -344,6 +355,45 @@ func TestHandoffEndToEnd(t *testing.T) {
 	code, _, _ = runCmd(t, "handoff", "latest", "--dir", t.TempDir())
 	if code != 1 {
 		t.Fatalf("latest on empty repo: want exit 1, got %d", code)
+	}
+}
+
+func TestHandoffNewEmbedsCurrentCursorSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte("stages: [grill, prd]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	block := "<!-- spine:cursor -->\n" +
+		"effort: handoff-embed\n" +
+		"prd: docs/specs/2026-08-06-handoff-embed-design.md\n" +
+		"tickets: \n" +
+		"stages: grill[x] prd[<]\n" +
+		"<!-- /spine:cursor -->\n"
+	if err := os.WriteFile(filepath.Join(dir, ".superpowers", "sdd", "progress.md"), []byte(block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errs := runCmd(t, "handoff", "new", "--dir", dir, "cursor snapshot")
+	if code != 0 || errs != "" {
+		t.Fatalf("new: code=%d out=%q err=%q", code, out, errs)
+	}
+	if strings.Contains(out, "note:") {
+		t.Fatalf("new with a cursor must not report it missing: out=%q", out)
+	}
+	path := strings.TrimSpace(out)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), block) {
+		t.Fatalf("created handoff must embed the current cursor block verbatim:\n%s", raw)
+	}
+	code, auditOut, auditErr := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 0 {
+		t.Fatalf("embedded snapshot must leave the pair fresh: code=%d out=%q err=%q", code, auditOut, auditErr)
 	}
 }
 
