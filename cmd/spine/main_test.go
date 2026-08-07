@@ -1298,6 +1298,21 @@ func TestCursorVerbsMarkerRegressionAndStartGuard(t *testing.T) {
 	if got := cursorLedger(t, dir); !strings.Contains(got, "grill[<] review[x] verify[x]") {
 		t.Fatalf("here did not regress completed stage: %q", got)
 	}
+	if code, _, errs := runCmd(t, "cursor", "start", "--dir", dir, "--effort", "cyclic", "--force"); code != 0 {
+		t.Fatalf("cyclic start: code=%d stderr=%q", code, errs)
+	}
+	if code, _, errs := runCmd(t, "cursor", "here", "--dir", dir, "verify"); code != 0 {
+		t.Fatalf("forward here: code=%d stderr=%q", code, errs)
+	}
+	if code, _, errs := runCmd(t, "cursor", "tick", "--dir", dir, "verify"); code != 0 {
+		t.Fatalf("terminal tick with earlier pending stages: code=%d stderr=%q", code, errs)
+	}
+	if got := cursorLedger(t, dir); !strings.Contains(got, "grill[<] review[ ] verify[x]") {
+		t.Fatalf("terminal tick did not cycle to the next unticked stage: %q", got)
+	}
+	if code, out, errs := runCmd(t, "cursor", "--dir", dir); code != 0 || strings.Contains(out, "finding:") {
+		t.Fatalf("cyclic marker result did not parse cleanly: code=%d out=%q stderr=%q", code, out, errs)
+	}
 }
 
 func TestCursorSetNormalizesMessyValidBlockAndEditsFields(t *testing.T) {
@@ -1310,8 +1325,15 @@ func TestCursorSetNormalizesMessyValidBlockAndEditsFields(t *testing.T) {
 	if err := os.WriteFile(ledgerPath, []byte(messy), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if code, _, errs := runCmd(t, "cursor", "set", "--dir", dir); code != 0 {
+		t.Fatalf("initial no-op set: code=%d stderr=%q", code, errs)
+	}
+	canonicalOld := "<!-- spine:cursor -->\neffort: old-effort\nprd: docs/specs/old.md\ntickets: I001\nstages: grill[x] prd[<]\n<!-- /spine:cursor -->\n\nnotes stay below\n"
+	if got := cursorLedger(t, dir); got != canonicalOld {
+		t.Fatalf("no-op set did not canonicalize messy input:\n%s\nwant:\n%s", got, canonicalOld)
+	}
 	if code, _, errs := runCmd(t, "cursor", "set", "--dir", dir, "--prd", "docs/specs/new.md", "--tickets", "I002-I003"); code != 0 {
-		t.Fatalf("set: code=%d stderr=%q", code, errs)
+		t.Fatalf("field set: code=%d stderr=%q", code, errs)
 	}
 	want := "<!-- spine:cursor -->\neffort: old-effort\nprd: docs/specs/new.md\ntickets: I002-I003\nstages: grill[x] prd[<]\n<!-- /spine:cursor -->\n\nnotes stay below\n"
 	if got := cursorLedger(t, dir); got != want {
@@ -1322,6 +1344,30 @@ func TestCursorSetNormalizesMessyValidBlockAndEditsFields(t *testing.T) {
 	}
 	if got := cursorLedger(t, dir); got != want {
 		t.Fatalf("no-op set was not canonical: %q", got)
+	}
+}
+
+func TestCursorWritersRejectNewlineValuesWithoutWriting(t *testing.T) {
+	startDir := cursorWriteRepo(t, "grill, prd")
+	code, _, errs := runCmd(t, "cursor", "start", "--dir", startDir, "--effort", "bad\neffort")
+	if code == 0 || !strings.Contains(errs, "contains a newline") {
+		t.Fatalf("newline start: code=%d stderr=%q", code, errs)
+	}
+	if _, err := os.Stat(filepath.Join(startDir, ".superpowers", "sdd", "progress.md")); !os.IsNotExist(err) {
+		t.Fatalf("rejected start wrote a ledger: %v", err)
+	}
+
+	setDir := cursorWriteRepo(t, "grill, prd")
+	if code, _, errs := runCmd(t, "cursor", "start", "--dir", setDir, "--effort", "valid"); code != 0 {
+		t.Fatalf("setup start: code=%d stderr=%q", code, errs)
+	}
+	before := cursorLedger(t, setDir)
+	code, _, errs = runCmd(t, "cursor", "set", "--dir", setDir, "--prd", "docs/specs/bad\rpath.md")
+	if code == 0 || !strings.Contains(errs, "contains a newline") {
+		t.Fatalf("newline set: code=%d stderr=%q", code, errs)
+	}
+	if got := cursorLedger(t, setDir); got != before {
+		t.Fatalf("rejected set changed ledger:\n%s", got)
 	}
 }
 

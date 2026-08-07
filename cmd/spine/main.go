@@ -951,7 +951,11 @@ func cmdCursorTick(args []string, stdout, stderr io.Writer) int {
 	wasHere := candidate.Stages[idx].State == cursor.Here
 	candidate.Stages[idx].State = cursor.Done
 	if wasHere {
-		for next := idx + 1; next < len(candidate.Stages); next++ {
+		// Search cyclically so a marker moved forward with `here` cannot strand
+		// earlier pending stages. Drop the marker only when every other stage is
+		// already done.
+		for offset := 1; offset < len(candidate.Stages); offset++ {
+			next := (idx + offset) % len(candidate.Stages)
 			if candidate.Stages[next].State != cursor.Done {
 				candidate.Stages[next].State = cursor.Here
 				break
