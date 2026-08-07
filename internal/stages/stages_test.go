@@ -246,7 +246,7 @@ func TestHereStageNeverBlocks(t *testing.T) {
 	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
 		"effort: x\nprd: docs/specs/x.md\ntickets: I001\nstages: grill[x] prd[<] issues[ ] implement[ ]\n"+
 		"<!-- /spine:cursor -->\n")
-	writeFile(t, dir, "docs/handoffs/2026-01-02-x.md", "<!-- spine:cursor -->\neffort: x\n<!-- /spine:cursor -->\n")
+	writeFile(t, dir, "docs/handoffs/2026-01-02-x.md", "<!-- spine:cursor -->\neffort: x\nprd: docs/specs/x.md\ntickets: I001\nstages: grill[x] prd[<] issues[ ] implement[ ]\n<!-- /spine:cursor -->\n")
 	rep, err := stages.Derive(dir)
 	if err != nil {
 		t.Fatal(err)
