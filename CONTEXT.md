@@ -96,6 +96,27 @@ declares exactly one.
   (`spine audit routing`). Required at the verify stage: reasoned
   escalations advisory, silent descent blocking.
 
+## Stage cursor (decided 2026-08-06, cursor-writes grill)
+
+- **stage cursor** — the machine-parseable record of where an effort stands:
+  effort name, PRD, ticket range, and per-stage state (done / here / pending).
+  The single source of truth for "where are we"; every resume reads it first.
+- **working home** — the cursor's live, mutable location (the effort ledger
+  head). Uncommitted by convention; reflects the current moment.
+- **committed snapshot** — the cursor copy captured inside a handoff at the
+  moment of its creation. Historical, never retro-mutated; the newest
+  snapshot is required to match the working home.
+- **sole-writer rule** — only the spine tool mutates the cursor; hand-editing
+  the block is a workflow violation. Rationale: cursor mistakes (duplicate
+  here-markers, stale fields, unearned ticks) came from hand edits under
+  context pressure.
+- **canonical form** — the byte-deterministic serialization the tool emits.
+  A valid-but-non-canonical block is evidence of a hand edit and fails the
+  stage audit.
+- **write-time tripwire** — stage-completion claims are checked against
+  artifact derivation at the moment of the write, not only at audit time; a
+  forced write defers the reckoning to the audit, never waives it.
+
 ## Audit evidence (decided 2026-07-26, codex-audit grill)
 
 - **dispatch record** — an entry in an orchestrator's transcript declaring a
