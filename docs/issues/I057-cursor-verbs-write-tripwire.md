@@ -2,7 +2,7 @@
 id: I057
 title: "Cursor writes: four verbs + write-time tripwire"
 severity: med
-status: open
+status: fixed
 affects: [cli, cursor]
 blocked-by: []
 execution-mode: subagent-driven
@@ -45,18 +45,25 @@ through its whole lifecycle from the command line.
 
 ## Acceptance criteria
 
-- [ ] Fixture-repo tests at the CLI command boundary (stages/audit/doctor
+- [x] Fixture-repo tests at the CLI command boundary (stages/audit/doctor
       testdata style): exit codes, printed findings, resulting file bytes only
-- [ ] `tick` without artifacts refuses with text identical to the
+- [x] `tick` without artifacts refuses with text identical to the
       `audit stages` finding for that stage; `--force` writes
-- [ ] Marker advance / drop-when-complete / stay-on-non-marker-tick and
+- [x] Marker advance / drop-when-complete / stay-on-non-marker-tick and
       `here`-on-done regression all covered
-- [ ] `start` guard: refuses mid-flight, `--force` supersedes; seeded block
+- [x] `start` guard: refuses mid-flight, `--force` supersedes; seeded block
       is canonical and parses clean
-- [ ] A messy-but-valid hand-written block is rewritten canonically by a
+- [x] A messy-but-valid hand-written block is rewritten canonically by a
       no-op `set`
-- [ ] `go test ./...` green
+- [x] `go test ./...` green
 
 ## Blocked by
 
 - None — can start immediately.
+
+## Resolution
+
+Fixed in `0ef3c55`, `0f5e8de`, and the final review correction `bacbdf7`.
+The four CLI verbs now own canonical cursor writes, share the audit derivation
+tripwire, preserve marker grammar across regressions and completion, reject
+newline injection, and cover both refusing and artifact-present tick paths.

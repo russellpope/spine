@@ -2,7 +2,7 @@
 id: I061
 title: "Cursor writes: gen 10 fleet sweep + handoff skills to verbs-only procedure"
 severity: med
-status: open
+status: fixed
 affects: [fleet, skills]
 blocked-by: [I060]
 execution-mode: subagent-driven
@@ -37,14 +37,22 @@ I029):
 
 ## Acceptance criteria
 
-- [ ] Every estate repo swept to gen 10; per-repo commits; drift (if any)
+- [x] Every estate repo swept to gen 10; per-repo commits; drift (if any)
       resolved with owner-reviewed diffs
-- [ ] Both skills contain no hand-edit or manual-embed instruction; procedure
+- [x] Both skills contain no hand-edit or manual-embed instruction; procedure
       references the verbs and automatic embed
-- [ ] Live-verify evidence pasted: verb write + handoff embed + clean
+- [x] Live-verify evidence pasted: verb write + handoff embed + clean
       `spine audit stages` in a swept repo
-- [ ] No repo left mixed-rule (old embed-verbatim text alongside new tooling)
+- [x] No repo left mixed-rule (old embed-verbatim text alongside new tooling)
 
 ## Blocked by
 
 - [I060] — the gen 10 template the sweep distributes.
+
+## Resolution
+
+Fixed across all 17 primary estate repositories with one local workflow
+commit per repo and no pushes: every rule triple is `old=0 sole=1 auto=1`.
+Deepthought commits `722f19e` and `7e1fa93` carry its workflow migration and
+the two verbs-only, automatic-embed handoff skills. Objectstudio received an
+owner-reviewed two-rule reconciliation that preserved its custom VFB gate.

@@ -2,7 +2,7 @@
 id: I060
 title: "Cursor writes: gen 10 template — sole-writer rule text, embed rule superseded"
 severity: med
-status: open
+status: fixed
 affects: [templates, update, workflow-md]
 blocked-by: [I057, I058]
 execution-mode: subagent-driven
@@ -34,14 +34,21 @@ procedures.
 
 ## Acceptance criteria
 
-- [ ] Gen 9→10 migration test proves the old embed-verbatim line is gone and
+- [x] Gen 9→10 migration test proves the old embed-verbatim line is gone and
       the sole-writer + auto-embed text is present — replaced, not duplicated
-- [ ] A gen 9 repo with hand-customized surrounding sections upgrades cleanly
+- [x] A gen 9 repo with hand-customized surrounding sections upgrades cleanly
       via plain `spine update --write` (prior-art fixture pattern)
-- [ ] `spine version` reports gen 10; init/adopt emit gen 10 text
-- [ ] `go test ./...` green
+- [x] `spine version` reports gen 10; init/adopt emit gen 10 text
+- [x] `go test ./...` green
 
 ## Blocked by
 
 - [I057] — the verbs the text mandates must exist.
 - [I058] — the automatic embed the text describes must exist.
+
+## Resolution
+
+Fixed in `a080f31` and swept into spine at `cef7166`. Generation 10 replaces
+the superseded manual-copy rule with one sole-writer rule and one automatic
+handoff rule, preserves customized surrounding configuration, and is covered
+through update, init, adopt, and version tests.

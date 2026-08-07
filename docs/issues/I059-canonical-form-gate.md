@@ -2,7 +2,7 @@
 id: I059
 title: "Cursor writes: canonical-form gate in audit stages + doctor advisory"
 severity: med
-status: open
+status: fixed
 affects: [cli, audit, doctor, cursor]
 blocked-by: [I057]
 execution-mode: subagent-driven
@@ -28,14 +28,21 @@ canonically — which is why this ticket sits behind I057.
 
 ## Acceptance criteria
 
-- [ ] New fixtures in the existing audit/doctor testdata style:
+- [x] New fixtures in the existing audit/doctor testdata style:
       valid-but-non-canonical block → audit blocking finding, doctor advisory
-- [ ] Canonical block (as any I057 verb emits) passes both untouched
-- [ ] Malformed-block behavior unchanged (still blocking, distinct finding)
-- [ ] Finding text points at the verb-based remediation
-- [ ] `go test ./...` green
+- [x] Canonical block (as any I057 verb emits) passes both untouched
+- [x] Malformed-block behavior unchanged (still blocking, distinct finding)
+- [x] Finding text points at the verb-based remediation
+- [x] `go test ./...` green
 
 ## Blocked by
 
 - [I057] — the remediation path the finding names must exist before the gate
   can flag.
+
+## Resolution
+
+Fixed in `3ca18eb` and integrated on main. Valid non-canonical working cursors
+are a distinct blocking `audit stages` condition with verb-based remediation;
+doctor reports the same condition as D9 advisory, while malformed grammar and
+the bare read command retain their separate behavior.

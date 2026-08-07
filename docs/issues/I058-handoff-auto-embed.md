@@ -2,7 +2,7 @@
 id: I058
 title: "Cursor writes: handoff new auto-embeds the committed snapshot"
 severity: med
-status: open
+status: fixed
 affects: [cli, handoff]
 blocked-by: []
 execution-mode: subagent-driven
@@ -34,13 +34,20 @@ parser, not the I057 verbs.
 
 ## Acceptance criteria
 
-- [ ] Fixture with a cursor: created handoff carries the block verbatim;
+- [x] Fixture with a cursor: created handoff carries the block verbatim;
       `spine audit stages` accepts the pair as fresh
-- [ ] Fixture without a cursor: note printed, exit zero, no block in the file
-- [ ] Existing `handoff new` behavior (naming, listing, --fleet) unchanged
-- [ ] Tests at the existing handoff command seam, external behavior only
-- [ ] `go test ./...` green
+- [x] Fixture without a cursor: note printed, exit zero, no block in the file
+- [x] Existing `handoff new` behavior (naming, listing, --fleet) unchanged
+- [x] Tests at the existing handoff command seam, external behavior only
+- [x] `go test ./...` green
 
 ## Blocked by
 
 - None — can start immediately.
+
+## Resolution
+
+Fixed in `c4266f2`, `0ef3c55`, and `bacbdf7`. `spine handoff new` embeds the
+current canonical cursor automatically, refuses malformed input before file
+creation, and the shared stage/doctor derivation now rejects malformed or
+stale full-state snapshots while preserving historical handoffs.
