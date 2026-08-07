@@ -73,6 +73,19 @@ func TestAdoptPraxisShape(t *testing.T) {
 	if !strings.Contains(string(raw), "spine:begin") || !strings.Contains(string(raw), "Repo invariants") {
 		t.Fatalf("claim failed: %q", raw)
 	}
+	wf, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"template_version: 10",
+		"**Sole-writer rule:** `spine` is the only legal cursor writer.",
+		"`spine handoff new` automatically embeds the current cursor block",
+	} {
+		if !strings.Contains(string(wf), want) {
+			t.Errorf("adopted WORKFLOW.md missing %q", want)
+		}
+	}
 	res, err = Run(Options{Dir: dir})
 	if err != nil {
 		t.Fatal(err)

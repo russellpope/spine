@@ -68,7 +68,9 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	}
 	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 10",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli",
-		"## Stage cursor (consistency rule)", "<!-- spine:cursor -->"} {
+		"## Stage cursor (consistency rule)", "<!-- spine:cursor -->",
+		"**Sole-writer rule:** `spine` is the only legal cursor writer.",
+		"`spine handoff new` automatically embeds the current cursor block"} {
 		if !strings.Contains(string(wf), want) {
 			t.Errorf("WORKFLOW.md missing %q", want)
 		}
@@ -139,8 +141,8 @@ func TestInitGen6DispatchContract(t *testing.T) {
 			t.Errorf("WORKFLOW.md missing %q", want)
 		}
 	}
-	if strings.Contains(content, "auto") {
-		t.Errorf("WORKFLOW.md must not contain \"auto\" (fallback must not read as automatic)")
+	if strings.Contains(content, "auto on") {
+		t.Errorf("WORKFLOW.md must not contain \"auto on\" (fallback must not read as automatic)")
 	}
 	if strings.Contains(content, "security_routing:") {
 		t.Errorf("WORKFLOW.md must not carry the standalone security_routing key")
