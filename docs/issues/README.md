@@ -13,7 +13,9 @@ Optional model-routing annotation fields (build tickets only; plain bug issues s
 without them — `spine audit routing` reports unannotated tickets, never judges them):
 
 - `execution-mode` — inline | subagent-driven | ultracode; how the work runs
-- `tier` — primary | routine | mechanical | fallback; the model tier the work is dispatched at
+- `tier` — primary | routine | mechanical | fallback; the model tier the work is dispatched at.
+  Pre-convention tickets may carry `tier: n/a` to opt out of routing judgment entirely —
+  `spine audit routing` reports them exempt, distinct from unannotated
 - `effort` — override of the tier's default effort; set only on deviation
 - `risk-triggers` — zero or more of cross-task-integration, concurrency-subtle-state,
   security-surface, plan-flagged-ambiguity; any present forces primary-tier review
