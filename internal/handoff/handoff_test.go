@@ -71,6 +71,161 @@ func TestNewListLatest(t *testing.T) {
 	}
 }
 
+// I062: two handoffs created on the same day must use the persisted creation
+// ordinal, not their filename, to decide which snapshot is newest.
+func TestNewSameDateNewerCreationOutranksFilename(t *testing.T) {
+	dir := t.TempDir()
+	older, err := New(dir, "zeta older")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := New(dir, "alpha newer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{older: "handoff_ordinal: 1", newer: "handoff_ordinal: 2"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("%s missing %q:\n%s", path, want, raw)
+		}
+	}
+	latest, ok, err := Latest(dir)
+	if err != nil || !ok || latest.Path != newer {
+		t.Fatalf("Latest = %#v, %v, %v; want newer-created %q", latest, ok, err, newer)
+	}
+}
+
+// I062: date remains the primary ordering key even when an older handoff has
+// a greater persisted ordinal from a later repository-wide creation.
+func TestListDifferentDatesRemainPrimaryOverOrdinal(t *testing.T) {
+	dir := t.TempDir()
+	hdir := filepath.Join(dir, "docs", "handoffs")
+	if err := os.MkdirAll(hdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	older := filepath.Join(hdir, "2026-08-08-zeta.md")
+	newer := filepath.Join(hdir, "2026-08-09-alpha.md")
+	if err := os.WriteFile(older, []byte("---\nhandoff_ordinal: 99\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newer, []byte("---\nhandoff_ordinal: 1\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	latest, ok, err := Latest(dir)
+	if err != nil || !ok || latest.Path != newer {
+		t.Fatalf("Latest = %#v, %v, %v; want later-date %q", latest, ok, err, newer)
+	}
+}
+
+// I062: existing handoffs have no persisted ordinal. Their same-date order
+// retains the former filename rule, rather than inheriting checkout mtimes.
+func TestListLegacySameDateFallsBackToFilenameDeterministically(t *testing.T) {
+	dir := t.TempDir()
+	hdir := filepath.Join(dir, "docs", "handoffs")
+	if err := os.MkdirAll(hdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	older := filepath.Join(hdir, "2026-08-09-alpha.md")
+	newer := filepath.Join(hdir, "2026-08-09-zeta.md")
+	for _, path := range []string{older, newer} {
+		if err := os.WriteFile(path, []byte("# legacy\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	latest, ok, err := Latest(dir)
+	if err != nil || !ok || latest.Path != newer {
+		t.Fatalf("Latest = %#v, %v, %v; want legacy filename fallback %q", latest, ok, err, newer)
+	}
+}
+
+// I062: ordinals compare numerically, and every absent or malformed ordinal
+// takes the deterministic legacy filename fallback rather than an mtime path.
+func TestListOrdinalNumericAndFallbackOrdering(t *testing.T) {
+	write := func(t *testing.T, dir, name, ordinal string) string {
+		t.Helper()
+		path := filepath.Join(dir, "docs", "handoffs", name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "---\nhandoff_ordinal: " + ordinal + "\n---\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	t.Run("numeric 10 beats 9", func(t *testing.T) {
+		dir := t.TempDir()
+		want := write(t, dir, "2026-08-09-alpha-ten.md", "10")
+		write(t, dir, "2026-08-09-zeta-nine.md", "9")
+		got, ok, err := Latest(dir)
+		if err != nil || !ok || got.Path != want {
+			t.Fatalf("Latest = %#v, %v, %v; want numeric ordinal winner %q", got, ok, err, want)
+		}
+	})
+	t.Run("equal ordinals fall back to filename", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "2026-08-09-alpha.md", "7")
+		want := write(t, dir, "2026-08-09-zeta.md", "7")
+		got, ok, err := Latest(dir)
+		if err != nil || !ok || got.Path != want {
+			t.Fatalf("Latest = %#v, %v, %v; want filename fallback %q", got, ok, err, want)
+		}
+	})
+	for _, malformed := range []string{"", "0", "-1", "1.5", "junk", "18446744073709551616"} {
+		t.Run("malformed "+strconv.Quote(malformed)+" falls back to filename", func(t *testing.T) {
+			dir := t.TempDir()
+			write(t, dir, "2026-08-09-alpha.md", malformed)
+			want := write(t, dir, "2026-08-09-zeta.md", malformed)
+			got, ok, err := Latest(dir)
+			if err != nil || !ok || got.Path != want {
+				t.Fatalf("Latest = %#v, %v, %v; want malformed fallback %q", got, ok, err, want)
+			}
+		})
+	}
+}
+
+// I062: a fresh clone has no reliable mtime history. Re-reading identical
+// committed frontmatter must retain the same same-date answer regardless of
+// the files' checkout mtimes.
+func TestListSameDateOrdinalIsFreshCloneDeterministic(t *testing.T) {
+	makeClone := func(t *testing.T, root string, newerMtime time.Time) string {
+		t.Helper()
+		hdir := filepath.Join(root, "docs", "handoffs")
+		if err := os.MkdirAll(hdir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		newer := filepath.Join(hdir, "2026-08-09-alpha-newer.md")
+		older := filepath.Join(hdir, "2026-08-09-zeta-older.md")
+		if err := os.WriteFile(newer, []byte("---\nhandoff_ordinal: 42\n---\n# newer\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(older, []byte("---\nhandoff_ordinal: 41\n---\n# older\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(older, newerMtime, newerMtime); err != nil {
+			t.Fatal(err)
+		}
+		return newer
+	}
+
+	first := t.TempDir()
+	firstNewer := makeClone(t, first, time.Date(2026, 8, 10, 1, 0, 0, 0, time.UTC))
+	second := t.TempDir()
+	secondNewer := makeClone(t, second, time.Date(2020, 1, 1, 1, 0, 0, 0, time.UTC))
+	for _, tc := range []struct {
+		dir  string
+		want string
+	}{{first, firstNewer}, {second, secondNewer}} {
+		latest, ok, err := Latest(tc.dir)
+		if err != nil || !ok || latest.Path != tc.want {
+			t.Fatalf("fresh-clone Latest(%q) = %#v, %v, %v; want %q", tc.dir, latest, ok, err, tc.want)
+		}
+	}
+}
+
 func TestNewRefusesWhenStatFails(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation may require privileges on Windows")

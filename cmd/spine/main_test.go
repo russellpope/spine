@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/russellpope/spine/internal/handoff"
 	"github.com/russellpope/spine/internal/tmpl"
 )
 
@@ -394,6 +396,159 @@ func TestHandoffNewEmbedsCurrentCursorSnapshot(t *testing.T) {
 	code, auditOut, auditErr := runCmd(t, "audit", "stages", "--dir", dir)
 	if code != 0 {
 		t.Fatalf("embedded snapshot must leave the pair fresh: code=%d out=%q err=%q", code, auditOut, auditErr)
+	}
+}
+
+// I062: both the public latest command and the stages newest-handoff
+// backstop must select the handoff that was created later on the same day,
+// even when its filename sorts earlier.
+func TestSameDateHandoffOrdinalDrivesLatestAndStagesAudit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte("stages: [grill]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	block := "<!-- spine:cursor -->\n" +
+		"effort: i062\n" +
+		"prd: \n" +
+		"tickets: I062\n" +
+		"stages: grill[<]\n" +
+		"<!-- /spine:cursor -->\n"
+	ledger := filepath.Join(dir, ".superpowers", "sdd", "progress.md")
+	if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledger, []byte(block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hdir := filepath.Join(dir, "docs", "handoffs")
+	if err := os.MkdirAll(hdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	older := filepath.Join(hdir, "2026-08-09-zeta-older.md")
+	newer := filepath.Join(hdir, "2026-08-09-alpha-newer.md")
+	if err := os.WriteFile(older, []byte("---\nhandoff_ordinal: 7\n---\n# stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newer, []byte("---\nhandoff_ordinal: 8\n---\n# current\n\n"+block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errs := runCmd(t, "handoff", "latest", "--dir", dir)
+	if code != 0 || errs != "" || strings.TrimSpace(out) != newer {
+		t.Fatalf("latest: code=%d out=%q stderr=%q; want %q", code, out, errs, newer)
+	}
+	code, out, errs = runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 0 || errs != "" || !strings.Contains(out, newer) || !strings.Contains(out, "carries the spine:cursor block") {
+		t.Fatalf("audit stages: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCmd(t, "handoff", "latest", "--dir", dir, "--json")
+	if code != 0 || errs != "" {
+		t.Fatalf("latest --json: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	var got map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("latest --json must be valid JSON: %v; out=%q", err, out)
+	}
+	if got["path"] != newer || got["date"] != "2026-08-09" || got["topic"] != "alpha-newer" || got["title"] != "alpha-newer" || len(got) != 4 {
+		t.Fatalf("latest --json schema/selection = %#v, want existing four-field schema for %q", got, newer)
+	}
+}
+
+// I062: when ordinal selection picks a higher-ordinal stale handoff, both
+// consumers must name that same path; audit blocks and doctor remains D9 warn.
+func TestSameDateHandoffOrdinalAuditAndDoctorInverseAgree(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte("stages: [grill]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	block := "<!-- spine:cursor -->\n" +
+		"effort: i062\n" +
+		"prd: \n" +
+		"tickets: I062\n" +
+		"stages: grill[<]\n" +
+		"<!-- /spine:cursor -->\n"
+	ledger := filepath.Join(dir, ".superpowers", "sdd", "progress.md")
+	if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledger, []byte(block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hdir := filepath.Join(dir, "docs", "handoffs")
+	if err := os.MkdirAll(hdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	validOlder := filepath.Join(hdir, "2026-08-09-zeta-valid.md")
+	staleNewer := filepath.Join(hdir, "2026-08-09-alpha-stale.md")
+	if err := os.WriteFile(validOlder, []byte("---\nhandoff_ordinal: 7\n---\n"+block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staleNewer, []byte("---\nhandoff_ordinal: 8\n---\n# stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 1 || errs != "" || !strings.Contains(out, staleNewer) || !strings.Contains(out, "missing the spine:cursor block") {
+		t.Fatalf("audit inverse: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCmd(t, "doctor", "--dir", dir)
+	if code != 1 || errs != "" || !strings.Contains(out, "D9 warn") || !strings.Contains(out, staleNewer) || !strings.Contains(out, "missing the spine:cursor block") {
+		t.Fatalf("doctor inverse: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+// I062 child helper. Each child executes the public CLI command in a distinct
+// process after the parent releases its common start barrier.
+func TestI062HandoffNewSubprocessHelper(t *testing.T) {
+	if os.Getenv("I062_HANDOFF_NEW_CHILD") != "1" {
+		return
+	}
+	for {
+		if _, err := os.Stat(os.Getenv("I062_HANDOFF_NEW_START")); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			os.Exit(2)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	os.Exit(run([]string{"handoff", "new", "--dir", os.Getenv("I062_HANDOFF_NEW_DIR"), os.Getenv("I062_HANDOFF_NEW_TOPIC")}, os.Stdout, os.Stderr))
+}
+
+// I062: allocation must be collision-safe across independent CLI processes,
+// not merely callers sharing an in-process mutex.
+func TestHandoffNewConcurrentCLIProcessesReserveUniqueOrdinals(t *testing.T) {
+	const creators = 32
+	dir := t.TempDir()
+	start := filepath.Join(dir, "start")
+	cmds := make([]*exec.Cmd, 0, creators)
+	for i := 0; i < creators; i++ {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestI062HandoffNewSubprocessHelper$")
+		cmd.Env = append(os.Environ(), "I062_HANDOFF_NEW_CHILD=1", "I062_HANDOFF_NEW_START="+start, "I062_HANDOFF_NEW_DIR="+dir, fmt.Sprintf("I062_HANDOFF_NEW_TOPIC=concurrent-%03d", i))
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		cmds = append(cmds, cmd)
+	}
+	if err := os.WriteFile(start, []byte("go\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range cmds {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("concurrent handoff new failed: %v", err)
+		}
+	}
+	entries, err := handoff.List(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != creators {
+		t.Fatalf("created %d handoffs, want %d", len(entries), creators)
+	}
+	seen := map[uint64]bool{}
+	for _, entry := range entries {
+		if entry.Ordinal == 0 || seen[entry.Ordinal] {
+			t.Fatalf("ordinal collision or invalid ordinal in %#v", entries)
+		}
+		seen[entry.Ordinal] = true
 	}
 }
 

@@ -23,10 +23,11 @@ import (
 // Entry is one handoff file. Title comes from front matter when present
 // (spine-scaffolded files); legacy handoffs fall back to the filename topic.
 type Entry struct {
-	Date  time.Time
-	Topic string
-	Title string
-	Path  string
+	Date    time.Time
+	Topic   string
+	Title   string
+	Path    string
+	Ordinal uint64 // persisted handoff_ordinal; zero is the legacy fallback
 }
 
 var nameRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})-(.+)\.md$`)
@@ -77,10 +78,16 @@ func NewWithCursor(dir, topic string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
+	ordinal, releaseOrdinal, err := reserveNextOrdinal(dir, hdir)
+	if err != nil {
+		return "", false, err
+	}
+	defer releaseOrdinal()
 	content := strings.NewReplacer(
 		"{{HANDOFF_TITLE_YAML}}", strconv.Quote(topic),
 		"{{HANDOFF_TITLE}}", topic,
 		"{{HANDOFF_DATE}}", today,
+		"{{HANDOFF_ORDINAL}}", strconv.FormatUint(ordinal, 10),
 	).Replace(string(raw))
 	if cursorResult.HasCursor {
 		content += "\n" + cursorResult.Cursor.Block() + "\n"
@@ -94,7 +101,100 @@ func NewWithCursor(dir, topic string) (string, bool, error) {
 	return path, cursorResult.HasCursor, nil
 }
 
-// List returns entries newest-first (date desc, filename desc as tiebreak).
+const ordinalReservationDir = ".spine-handoff-ordinal-reservations"
+
+// reserveNextOrdinal atomically reserves a repository-wide ordinal before a
+// handoff is written. The O_EXCL reservation file makes concurrent CLI
+// processes retry with the next value instead of assigning the same one. A
+// normal return releases the marker; a crash can leave it behind, intentionally
+// consuming that ordinal so it can never be reused.
+func reserveNextOrdinal(dir, hdir string) (uint64, func(), error) {
+	reservationDir := filepath.Join(hdir, ordinalReservationDir)
+	if err := os.MkdirAll(reservationDir, 0o755); err != nil {
+		return 0, nil, err
+	}
+	for {
+		ordinal, err := nextOrdinal(dir, reservationDir)
+		if err != nil {
+			return 0, nil, err
+		}
+		reservation := filepath.Join(reservationDir, strconv.FormatUint(ordinal, 10))
+		file, err := os.OpenFile(reservation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return 0, nil, err
+		}
+		if err := file.Close(); err != nil {
+			_ = os.Remove(reservation)
+			return 0, nil, err
+		}
+		inUse, err := ordinalInUse(dir, ordinal)
+		if err != nil {
+			_ = os.Remove(reservation)
+			return 0, nil, err
+		}
+		if inUse {
+			_ = os.Remove(reservation)
+			continue
+		}
+		return ordinal, func() { _ = os.Remove(reservation) }, nil
+	}
+}
+
+// ordinalInUse closes the scan-then-reserve race: another caller may commit
+// and release an ordinal after we took our initial maximum snapshot but before
+// we create its now-vacant reservation marker.
+func ordinalInUse(dir string, ordinal uint64) (bool, error) {
+	entries, err := List(dir)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.Ordinal == ordinal {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// nextOrdinal returns the next repository-wide persisted creation ordinal.
+// Legacy handoffs without handoff_ordinal have ordinal zero, so the first
+// handoff created with this mechanism receives one. Active or crash-left
+// reservation files participate in the maximum, preventing reuse.
+func nextOrdinal(dir, reservationDir string) (uint64, error) {
+	entries, err := List(dir)
+	if err != nil {
+		return 0, err
+	}
+	var max uint64
+	for _, e := range entries {
+		if e.Ordinal > max {
+			max = e.Ordinal
+		}
+	}
+	reservations, err := os.ReadDir(reservationDir)
+	if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	for _, reservation := range reservations {
+		if reservation.IsDir() {
+			continue
+		}
+		if ordinal := parseOrdinal(reservation.Name()); ordinal > max {
+			max = ordinal
+		}
+	}
+	if max == ^uint64(0) {
+		return 0, fmt.Errorf("handoff ordinal exhausted")
+	}
+	return max + 1, nil
+}
+
+// List returns entries newest-first by date, then persisted creation ordinal,
+// then filename. Missing or invalid legacy ordinals are zero, preserving a
+// deterministic filename fallback for existing handoffs and duplicate values.
 // A missing docs/handoffs dir lists as empty, not an error.
 func List(dir string) ([]Entry, error) {
 	hdir := filepath.Join(dir, "docs", "handoffs")
@@ -119,11 +219,14 @@ func List(dir string) ([]Entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		if kv, has := meta.Parse(string(raw)); has && kv["title"] != "" {
-			// Gen-4 templates YAML-quote the title (strconv.Quote in New).
-			// UnquoteScalar unquotes for display; unquoted pre-gen-4 titles
-			// pass through verbatim.
-			e.Title = meta.UnquoteScalar(kv["title"])
+		if kv, has := meta.Parse(string(raw)); has {
+			if kv["title"] != "" {
+				// Gen-4 templates YAML-quote the title (strconv.Quote in New).
+				// UnquoteScalar unquotes for display; unquoted pre-gen-4 titles
+				// pass through verbatim.
+				e.Title = meta.UnquoteScalar(kv["title"])
+			}
+			e.Ordinal = parseOrdinal(kv["handoff_ordinal"])
 		}
 		out = append(out, e)
 	}
@@ -131,9 +234,20 @@ func List(dir string) ([]Entry, error) {
 		if !out[i].Date.Equal(out[j].Date) {
 			return out[i].Date.After(out[j].Date)
 		}
+		if out[i].Ordinal != out[j].Ordinal {
+			return out[i].Ordinal > out[j].Ordinal
+		}
 		return out[i].Path > out[j].Path
 	})
 	return out, nil
+}
+
+func parseOrdinal(raw string) uint64 {
+	ordinal, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || ordinal == 0 {
+		return 0
+	}
+	return ordinal
 }
 
 // Latest returns the newest entry; ok is false when there are none.

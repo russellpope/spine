@@ -2,7 +2,7 @@
 id: I062
 title: "Handoff ordering: same-date newest resolution is lexicographic on filename"
 severity: low
-status: open
+status: fixed
 affects: [cli, handoff, audit]
 blocked-by: []
 execution-mode: subagent-driven
@@ -46,15 +46,47 @@ never to nondeterminism), and leave different-date ordering untouched.
 
 ## Acceptance criteria
 
-- [ ] Two same-date handoffs where the lexicographically-earlier name is the
+- [x] Two same-date handoffs where the lexicographically-earlier name is the
       newer creation: `spine handoff latest` and the `audit stages`
       newest-handoff check both pick the newer one
-- [ ] Different-date ordering unchanged; existing handoff fixtures pass
+- [x] Different-date ordering unchanged; existing handoff fixtures pass
       untouched
-- [ ] Fresh-clone determinism covered by test or by documented degradation
+- [x] Fresh-clone determinism covered by test or by documented degradation
       (per the chosen mechanism)
-- [ ] `go test ./...` green
+- [x] `go test ./...` green
 
 ## Blocked by
 
 - None — can start immediately.
+
+## Resolution
+
+- Mechanism: persisted `handoff_ordinal` frontmatter. `spine handoff new`
+  assigns the next repository-wide positive ordinal; `handoff.List` orders by
+  date first, then this ordinal descending, then filename descending.
+- Allocation: `handoff new` atomically creates an exclusive reservation file
+  for the candidate ordinal under
+  `docs/handoffs/.spine-handoff-ordinal-reservations/`, rechecks that the
+  ordinal was not committed while its initial scan was stale, and holds the
+  reservation through the existing exclusive handoff-file write. Separate CLI
+  processes therefore retry rather than share an ordinal; normal failures and
+  successes release the reservation, preserving the never-overwrite contract.
+- Crash behavior: a crash can leave a reservation marker behind. Future
+  creators include such markers when finding the maximum and permanently skip
+  that ordinal; this intentionally favors a harmless sequence gap over reuse.
+  Independently created branches cannot share a reservation directory, so a
+  merge can still produce equal ordinals and uses the documented filename
+  fallback deterministically.
+- Rationale: the ordinal records creation order in committed content, so the
+  same-date answer is stable across fresh clones and unaffected by checkout
+  mtimes. A repository-wide counter also avoids resetting the sequence every
+  day while keeping the filename date as the primary ordering key.
+- Compatibility: handoffs without a valid positive ordinal, including all
+  historical handoffs, receive ordinal zero and retain the previous
+  deterministic filename tiebreak. Duplicate ordinals (for example from
+  independently created branches) also fall back to filename deterministically.
+- Acceptance coverage: command-level text/JSON latest plus `audit stages`
+  selection and blocking inverse, doctor D9 warn agreement, same-date creation
+  order, numeric/malformed/equal ordinal fallback, separate-process concurrent
+  uniqueness, different-date precedence, legacy fallback, and fresh-clone
+  mtime independence are covered by the Go tests.
