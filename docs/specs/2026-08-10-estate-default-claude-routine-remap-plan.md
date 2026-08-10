@@ -26,8 +26,8 @@
 - **functional-test:** exercise the real CLI update path against disposable
   current-generation repositories for stale inherited, deliberate override,
   and already-current cases.
-- **review:** independent routine-tier blind review against the PRD; no
-  implementer report is supplied.
+- **review:** independent primary-tier final whole-branch blind review against
+  the PRD; no implementer report is supplied.
 - **verify:** fresh primary whole-branch acceptance verification, full Go
   suite, doctor, stage/routing audits, and diff integrity checks.
 - **ship/docs/handoff:** record the no-generation-bump decision and evidence in
