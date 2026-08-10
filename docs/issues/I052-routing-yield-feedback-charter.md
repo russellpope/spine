@@ -2,7 +2,7 @@
 id: I052
 title: "Charter: measured yield per (flavor, tier) as routing-table feedback"
 severity: low
-status: open
+status: fixed
 affects: [audit]
 blocked-by: []
 execution-mode: subagent-driven
@@ -44,3 +44,18 @@ escalation frequency. Key questions:
 
 Output of this charter is a feasibility note (docs/specs or a research note)
 with a build/no-build recommendation, not an implementation.
+
+## Resolution
+
+(2026-08-10) Charter answered by
+`docs/research/2026-08-05-routing-yield-feasibility.md` (committed with the
+I066 wayfinder map). Verdict: **build-differently** — retrospective harvesting
+over dispatch/review/rereview files is unreliable (demonstrated filename false
+negatives, flavor structurally absent from files, no historical cell clears an
+honest sample floor). The forward-looking half — one review-time REVIEW record
+line in the ledger grammar + `spine yield` (per-repo and `--fleet`, counts
+always, rates only above a floor) — is mapped as
+[I076](I076-routing-yield-review-record-and-yield-verb.md) under the
+[I066](I066-claude-harness-3p-models-wayfinder-map.md) map, amended to key on
+actual model id for heterogeneous pools. Escalation frequency was already
+derivable from existing ESCALATION/FALLBACK records with no new artifact.
