@@ -13,9 +13,10 @@
         "history": []
       },
       "routine": {
-        "id": "claude-sonnet-5",
-        "aliases": ["claude-sonnet-5", "sonnet"],
-        "history": []
+        "id": "claude-opus-5",
+        "effort": "low",
+        "aliases": ["claude-opus-5", "opus"],
+        "history": [{"id": "claude-sonnet-5"}]
       },
       "mechanical": {
         "id": "claude-haiku-4-5",

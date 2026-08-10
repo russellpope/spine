@@ -22,7 +22,7 @@ func TestResolve_NoRepoContext_ReturnsDefaultsForEveryFlavorTier(t *testing.T) {
 	want := map[string]map[string]struct{ id, effort string }{
 		"claude": {
 			"primary":    {"claude-fable-5", "high"},
-			"routine":    {"claude-sonnet-5", "medium"},
+			"routine":    {"claude-opus-5", "low"},
 			"mechanical": {"claude-haiku-4-5", "low"},
 			"fallback":   {"claude-opus-5", "high"},
 		},
@@ -131,6 +131,31 @@ func TestResolve_ValueMatchingHistory_ReportsInherited(t *testing.T) {
 	}
 	if entry.ID != "claude-opus-4-8" {
 		t.Errorf("ID = %q, want claude-opus-4-8", entry.ID)
+	}
+}
+
+// Claude routine's displaced Sonnet default is historical at medium effort,
+// while its current Opus default is explicitly low. The same historical id
+// at low must remain a deliberate override rather than a refresh candidate.
+func TestResolve_ClaudeRoutineHistoryIsPairAware(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		value      string
+		provenance Provenance
+	}{
+		{"shipped medium pair", "claude-sonnet-5", Inherited},
+		{"unshipped low pair", "claude-sonnet-5 @ low", Override},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeWorkflow(t, "model_routing:\n  claude.routine: "+tc.value+"\n")
+			entry, err := Resolve(dir, "claude", "routine")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.Provenance != tc.provenance {
+				t.Errorf("Provenance = %s, want %s for %q", entry.Provenance, tc.provenance, tc.value)
+			}
+		})
 	}
 }
 
@@ -531,6 +556,9 @@ func TestMirrorRows_CoverEveryFlavorTierAndRoundTrip(t *testing.T) {
 	rows := MirrorRows()
 	if want := len(Flavors()) * len(Tiers); len(rows) != want {
 		t.Fatalf("MirrorRows() = %d rows, want %d (every flavor x tier)", len(rows), want)
+	}
+	if !strings.Contains(strings.Join(rows, "\n"), "claude.routine:    claude-opus-5 @ low") {
+		t.Errorf("MirrorRows() = %q, want explicit low-effort Claude routine row", rows)
 	}
 	content := "model_routing:\n"
 	for _, row := range rows {

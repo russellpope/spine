@@ -561,7 +561,7 @@ func TestCodexMixedClaudeAndCodexEvidenceJudgedPerFlavor(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I048": "routine"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, dir, tdir, map[string]string{"I048": "sonnet"})
+	writeDispatchTranscript(t, dir, tdir, map[string]string{"I048": "opus"})
 	codexDir := t.TempDir()
 	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
 		codexSessionMetaLine("root-8", "root-8", "", dir, "user", topLevelSource),
@@ -576,10 +576,10 @@ func TestCodexMixedClaudeAndCodexEvidenceJudgedPerFlavor(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := rowsByID(t, rep)["I048"]
-	// writeDispatchTranscript issues its dispatch on the alias "sonnet"
+	// writeDispatchTranscript issues its dispatch on the current alias "opus"
 	// (no linked subagent transcript to supersede it, unlike
 	// TestSubagentTranscriptIsTheActual) — dedupSorted sorts alphabetically.
-	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra,sonnet" {
+	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra,opus" {
 		t.Fatalf("I048 actuals = %q, want both flavors' evidence", got)
 	}
 	if r.Verdict != VerdictMatch {

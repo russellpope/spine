@@ -1,1 +1,1 @@
-{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_301","name":"Agent","input":{"description":"I301: mechanical fix","model":"sonnet","prompt":"You are implementing ticket I301 for the degraded fixture repo dir."}}]}}
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_301","name":"Agent","input":{"description":"I301: mechanical fix","model":"claude-sonnet-5","prompt":"You are implementing ticket I301 for the degraded fixture repo dir."}}]}}

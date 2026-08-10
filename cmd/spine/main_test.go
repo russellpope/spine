@@ -170,8 +170,8 @@ func TestUpdateItemizesModelRefreshAndOverride(t *testing.T) {
 	// and pin the claude routine to a value no default ever shipped
 	// (override) — value-only replacements, so the dotted mirror rows'
 	// alignment padding (I036) is irrelevant.
-	content := strings.Replace(string(raw), "claude-opus-5", "claude-opus-4-8", 1)
-	content = strings.Replace(content, "claude-sonnet-5", "local-llama-70b", 1)
+	content := strings.Replace(string(raw), "claude.fallback:   claude-opus-5", "claude.fallback:   claude-opus-4-8", 1)
+	content = strings.Replace(content, "claude.routine:    claude-opus-5 @ low", "claude.routine:    local-llama-70b", 1)
 	if content == string(raw) {
 		t.Fatal("could not stage fallback/routine values in scaffolded WORKFLOW.md")
 	}

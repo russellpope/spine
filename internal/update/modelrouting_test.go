@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/russellpope/spine/internal/scaffold"
 )
 
 // modelRefreshDiffLines are the diff-line bodies (TrimSpace'd, matching the
@@ -55,11 +57,32 @@ func stageGen8Repo(t *testing.T, mutate func(string) string) string {
 	return dir
 }
 
-// AC (I035): a repo whose bare-key fallback carries the previous shipped
-// default is refreshed to the current default, and the refresh is itemized
-// with old value, new value, and inherited provenance — not left to be
-// inferred from the content diff.
-func TestInheritedBareFallbackRefreshedAndItemized(t *testing.T) {
+// stageCurrentRepo starts with a generation-10 mirror so current-table
+// refresh behavior is exercised without modifying historical fixtures.
+func stageCurrentRepo(t *testing.T, mutate func(string) string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if mutate != nil {
+		content = mutate(content)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// The captured bare-key rows carry both historical Claude defaults. Update
+// refreshes each inherited pair to its current pair and itemizes both.
+func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 	dir := stageGen8Repo(t, nil)
 	reports, err := Run(Options{Dir: dir})
 	if err != nil {
@@ -69,10 +92,14 @@ func TestInheritedBareFallbackRefreshedAndItemized(t *testing.T) {
 	if wf.State != Pending {
 		t.Fatalf("want Pending, got state=%v unrec=%v", wf.State, wf.Unrecognized)
 	}
-	if len(wf.ModelRefreshes) != 1 {
-		t.Fatalf("ModelRefreshes = %+v, want exactly the fallback refresh", wf.ModelRefreshes)
+	if len(wf.ModelRefreshes) != 2 {
+		t.Fatalf("ModelRefreshes = %+v, want routine and fallback refreshes", wf.ModelRefreshes)
 	}
-	m := wf.ModelRefreshes[0]
+	routine := wf.ModelRefreshes[0]
+	if routine.Key != "model_routing.claude.routine" || routine.Old != "claude-sonnet-5" || routine.New != "claude-opus-5 @ low" {
+		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5 @ low}", routine)
+	}
+	m := wf.ModelRefreshes[1]
 	// I036: refreshes itemize under the flavor-qualified dotted key.
 	if m.Key != "model_routing.claude.fallback" || m.Old != "claude-opus-4-8" || m.New != "claude-opus-5" {
 		t.Errorf("refresh item = %+v, want {model_routing.claude.fallback claude-opus-4-8 claude-opus-5}", m)
@@ -82,6 +109,9 @@ func TestInheritedBareFallbackRefreshedAndItemized(t *testing.T) {
 	}
 	if !strings.Contains(wf.Diff, "claude.fallback:   claude-opus-5") {
 		t.Errorf("diff does not carry the refreshed value:\n%s", wf.Diff)
+	}
+	if !strings.Contains(wf.Diff, "claude.routine:    claude-opus-5 @ low") {
+		t.Errorf("diff does not carry the refreshed routine value:\n%s", wf.Diff)
 	}
 
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
@@ -96,6 +126,9 @@ func TestInheritedBareFallbackRefreshedAndItemized(t *testing.T) {
 	}
 	if strings.Contains(string(got), "claude-opus-4-8") {
 		t.Error("written file still carries the stale inherited default")
+	}
+	if strings.Contains(string(got), "claude-sonnet-5") {
+		t.Error("written file still carries the stale inherited routine default")
 	}
 }
 
@@ -117,8 +150,8 @@ func TestOverrideBareFallbackPreservedAndReported(t *testing.T) {
 	if wf.State == SkippedUnrecognized {
 		t.Fatalf("override misread as unrecognized local edit: %v", wf.Unrecognized)
 	}
-	if len(wf.ModelRefreshes) != 0 {
-		t.Errorf("override wrongly scheduled for refresh: %+v", wf.ModelRefreshes)
+	if len(wf.ModelRefreshes) != 1 || wf.ModelRefreshes[0].Key != "model_routing.claude.routine" {
+		t.Errorf("ModelRefreshes = %+v, want only the inherited routine refresh", wf.ModelRefreshes)
 	}
 	if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Key != "model_routing.claude.fallback" ||
 		wf.ModelOverrides[0].Value != "claude-opus-3-pinned" {
@@ -135,8 +168,95 @@ func TestOverrideBareFallbackPreservedAndReported(t *testing.T) {
 	if !strings.Contains(string(got), "claude.fallback: claude-opus-3-pinned") {
 		t.Error("deliberate override did not survive the update")
 	}
-	if strings.Contains(string(got), "claude-opus-5") {
-		t.Error("override was clobbered by the current default")
+	if strings.Contains(string(got), "claude.fallback:   claude-opus-5") {
+		t.Error("fallback override was clobbered by the current default")
+	}
+}
+
+func TestCurrentMirrorStaleRoutineRefreshesAndIsItemized(t *testing.T) {
+	dir := stageCurrentRepo(t, func(content string) string {
+		return mustReplace(t, content, "claude.routine:    claude-opus-5 @ low", "claude.routine:    claude-sonnet-5")
+	})
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := report(t, reports, "WORKFLOW.md")
+	if wf.State != Pending || len(wf.Unrecognized) != 0 {
+		t.Fatalf("state=%v unrecognized=%v, want clean pending refresh", wf.State, wf.Unrecognized)
+	}
+	if len(wf.ModelRefreshes) != 1 {
+		t.Fatalf("ModelRefreshes = %+v, want exactly routine refresh", wf.ModelRefreshes)
+	}
+	if got := wf.ModelRefreshes[0]; got.Key != "model_routing.claude.routine" || got.Old != "claude-sonnet-5" || got.New != "claude-opus-5 @ low" {
+		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5 @ low}", got)
+	}
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "claude.routine:    claude-opus-5 @ low") {
+		t.Error("written current mirror did not refresh Claude routine to Opus low")
+	}
+}
+
+func TestCurrentMirrorRoutineOverrideIsPreserved(t *testing.T) {
+	dir := stageCurrentRepo(t, func(content string) string {
+		return mustReplace(t, content, "claude.routine:    claude-opus-5 @ low", "claude.routine:    local-llama-70b")
+	})
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := report(t, reports, "WORKFLOW.md")
+	if len(wf.ModelRefreshes) != 0 {
+		t.Errorf("ModelRefreshes = %+v, want none for a routine override", wf.ModelRefreshes)
+	}
+	if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Key != "model_routing.claude.routine" || wf.ModelOverrides[0].Value != "local-llama-70b" {
+		t.Errorf("ModelOverrides = %+v, want preserved routine override", wf.ModelOverrides)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), "claude.routine: local-llama-70b") {
+		t.Error("write update did not preserve the current-mirror routine override")
+	}
+	reports, err = Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf = report(t, reports, "WORKFLOW.md")
+	if wf.State != UpToDate || len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Value != "local-llama-70b" {
+		t.Errorf("second pass state=%v overrides=%+v, want an unchanged preserved routine override", wf.State, wf.ModelOverrides)
+	}
+}
+
+func TestCurrentMirrorOpusLowIsIdempotent(t *testing.T) {
+	dir := stageCurrentRepo(t, nil)
+	before, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		reports, err := Run(Options{Dir: dir, Write: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wf := report(t, reports, "WORKFLOW.md")
+		if wf.State != UpToDate || len(wf.ModelRefreshes) != 0 || len(wf.ModelOverrides) != 0 {
+			t.Errorf("run %d: state=%v refreshes=%+v overrides=%+v, want unchanged current mirror", i+1, wf.State, wf.ModelRefreshes, wf.ModelOverrides)
+		}
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Error("already-current Opus-low mirror changed across write updates")
 	}
 }
 

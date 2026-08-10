@@ -92,11 +92,12 @@ func TestAuditRefusesNewerGeneration(t *testing.T) {
 func TestSubstringTokenNoLongerMaps(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, gen9DefaultWorkflow,
-		map[string]string{"I811": "routine", "I812": "routine"})
+		map[string]string{"I811": "routine", "I812": "routine", "I813": "routine"})
 	tdir := t.TempDir()
 	writeDispatchTranscript(t, dir, tdir, map[string]string{
-		"I811": "claude-sonnet", // substring of claude-sonnet-5, not an alias
-		"I812": "sonnet",        // declared alias
+		"I811": "claude-sonnet",   // substring of claude-sonnet-5, not an alias
+		"I812": "opus",            // current routine alias
+		"I813": "claude-sonnet-5", // exact historical id
 	})
 	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
@@ -112,6 +113,9 @@ func TestSubstringTokenNoLongerMaps(t *testing.T) {
 	}
 	if r := rows["I812"]; r.Verdict != VerdictMatch {
 		t.Errorf("I812 verdict = %s (%s), want match via the declared alias", r.Verdict, r.Detail)
+	}
+	if r := rows["I813"]; r.Verdict != VerdictMatch {
+		t.Errorf("I813 verdict = %s (%s), want match via the exact historical id", r.Verdict, r.Detail)
 	}
 }
 

@@ -89,15 +89,27 @@ func applyModelRouting(repoDir, content string, extracted map[string]string) (st
 					refreshes = append(refreshes, ModelRefresh{Key: key, Old: model.MirrorValue(live), New: model.MirrorValue(def)})
 				}
 			}
-			// Skip the suffix when the migrated effort IS this tier's
-			// default: MirrorValue canonicalizes such a pair back to the
-			// bare id, so minting it would strip silently — without a
-			// refresh item — on the very next run (task review Important 1).
+			// A customized legacy effort overrides the table-rendered effort
+			// for inherited Claude rows. Compare the fully rendered candidate
+			// with the current default rather than just the tier default: the
+			// routine tier's customized "medium" is a real override now that
+			// its shipped pair is claude-opus-5 @ low, even though medium is
+			// also the tier default. Existing explicit per-entry effort
+			// overrides keep winning, as before.
 			migrated := false
 			if effortMigration != "" && flavor == "claude" &&
-				effortMigration != model.TierDefaultEffort(tier) && !strings.Contains(target, "@") {
-				target += " @ " + effortMigration
-				migrated = true
+				(live.Provenance != model.Override || !strings.Contains(target, "@")) {
+				id, _, _ := strings.Cut(target, " @ ")
+				candidate := model.MirrorValue(model.Entry{
+					Flavor: flavor,
+					Tier:   tier,
+					ID:     id,
+					Effort: effortMigration,
+				})
+				if candidate != target {
+					target = candidate
+					migrated = true
+				}
 			}
 			if live.Provenance == model.Override || migrated {
 				overrides = append(overrides, ModelOverride{Key: key, Value: target, Migrated: migrated})
