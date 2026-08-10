@@ -260,6 +260,38 @@ func TestCurrentMirrorOpusLowIsIdempotent(t *testing.T) {
 	}
 }
 
+// I063 AC5: spine itself carried the owner-selected Opus-low row before it
+// became the estate default. Keep the checked-in WORKFLOW model mirror
+// byte-stable under the real update path, so a future table change cannot be
+// declared idempotent using only a freshly scaffolded, already-canonical repo.
+func TestSpineOwnWorkflowModelMirrorIsByteStable(t *testing.T) {
+	before, err := os.ReadFile(filepath.Join("..", "..", "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		reports, err := Run(Options{Dir: dir, Write: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wf := report(t, reports, "WORKFLOW.md")
+		if wf.State != UpToDate || len(wf.ModelRefreshes) != 0 || len(wf.ModelOverrides) != 0 {
+			t.Errorf("run %d: state=%v refreshes=%+v overrides=%+v, want spine WORKFLOW unchanged", i+1, wf.State, wf.ModelRefreshes, wf.ModelOverrides)
+		}
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Error("spine WORKFLOW changed across write updates")
+	}
+}
+
 // AC (I035): nothing is written without the write flag — the refresh is
 // plan-only until --write.
 func TestRefreshWritesNothingWithoutWriteFlag(t *testing.T) {
