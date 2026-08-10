@@ -23,13 +23,21 @@ cursor carrier; the build crew then had to pick their shipped handoff's name
 to out-sort that in turn. Filename choice silently decides which snapshot the
 newest-handoff backstop judges — a gate input decided by alphabet.
 
+Second live occurrence: I031 filed the same defect after the 2026-07-16
+derivation-polish rename. This ticket supersedes I031 (now wontfix, pointer
+here) and absorbs its candidates.
+
 ## What to build
 
 A same-date tiebreak that tracks creation recency instead of filename, so the
 most recently created handoff wins "newest" regardless of topic name. Candidate
 orderings (implementer picks one, records the choice in the ticket resolution):
-file modification time as the secondary key, or an explicit monotonic ordinal
-in handoff frontmatter written by `spine handoff new`. Whatever is chosen must
+file modification time as the secondary key, an explicit monotonic ordinal
+in handoff frontmatter written by `spine handoff new`, or I031's candidate:
+prefer the doc whose cursor block matches the live effort over pure filename
+order when selecting "newest" for the backstop (with the discoverability
+fallback of naming the tiebreak in the stale-effort finding). Whatever is
+chosen must
 be deterministic for the audit gate (the complete-snapshot check reads
 `Latest`), keep cross-machine behavior sane for committed files (git does not
 preserve mtimes on fresh clones — a frontmatter ordinal survives cloning, an

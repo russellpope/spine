@@ -2,7 +2,7 @@
 id: I031
 title: Same-day handoff filename-DESC tiebreak makes second same-day handoff naming load-bearing
 severity: low
-status: open
+status: wontfix
 affects: [I014, I025]
 blocked-by: []
 execution-mode:
@@ -36,3 +36,10 @@ live rename plus a gotcha line in two handoffs/PICKUPs.
   but sorts earlier: <file> — same-day handoffs order by filename DESC").
 - Or: `/handoff` skill guard only (check the new filename sorts after existing same-day docs) — weakest, fixes
   the author path but not the reader's confusion.
+
+## Resolution
+
+Superseded by I062 (2026-08-09), filed independently after the tiebreak cost a
+second live rename (2026-08-06, sole-writer effort). I062 carries this
+ticket's candidate fixes forward plus the cross-machine determinism
+constraint; work happens there.
