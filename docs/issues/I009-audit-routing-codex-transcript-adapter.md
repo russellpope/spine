@@ -2,7 +2,7 @@
 id: I009
 title: audit routing — no Codex transcript adapter; routing gate is toothless on Codex-driven builds
 severity: high
-status: closed
+status: fixed
 affects: [I008]
 blocked-by: []
 execution-mode:

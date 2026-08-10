@@ -2,7 +2,7 @@
 id: I053
 title: "Mutation battery: checklist doc in docs/ + ADR 0013 (packaging)"
 severity: med
-status: open
+status: fixed
 affects: [docs]
 blocked-by: []
 execution-mode: subagent-driven
@@ -38,3 +38,12 @@ normative home. The checklist must live in spine `docs/` — **not** `templates/
 Design-doc criterion 1: docs-only diff (`git diff --stat` shows no `templates/`, no
 Go changes); provenance marks present verbatim; ADR indexed per `docs/adr/README.md`
 convention.
+
+## Resolution
+
+Shipped 2026-08-06 (mutation-battery effort, spine main `86cf362`):
+`docs/mutation-battery-checklist.md` and `docs/adr/0013-mutation-battery-packaging.md`
+(amended in place per owner ratification R2) landed as a docs-only diff. Evidence:
+`docs/handoffs/2026-08-06-mutation-battery-shipped.md`; both files verified present
+2026-08-09. Status flipped in the 2026-08-09 ledger hygiene sweep — the flip had
+lagged the ship.

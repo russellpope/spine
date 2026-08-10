@@ -2,7 +2,7 @@
 id: I055
 title: "Do-not-regress block: template + dispatch-prep instruction in /model-eval"
 severity: med
-status: open
+status: fixed
 affects: [model-eval skill]
 blocked-by: [I054]
 execution-mode: subagent-driven
@@ -37,3 +37,13 @@ blocked-by). Add to the `/model-eval` skill:
 
 Design-doc criterion 5: template present; a sample block generated from the Laguna
 round history renders correctly.
+
+## Resolution
+
+Shipped 2026-08-06 (mutation-battery effort, deepthought main `4c06342`): DNR
+template (`references/do-not-regress-template.md`, both fixed closing lines per
+amendment RA1) plus the Laguna sample block
+(`references/do-not-regress-example-laguna.md`) and the dispatch-prep instruction
+in the `/model-eval` skill sections. Live skill files re-verified present
+2026-08-09. Evidence: `docs/handoffs/2026-08-06-mutation-battery-shipped.md`.
+Status flipped in the 2026-08-09 ledger hygiene sweep.

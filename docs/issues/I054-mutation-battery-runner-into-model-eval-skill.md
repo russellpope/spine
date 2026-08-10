@@ -2,7 +2,7 @@
 id: I054
 title: "Mutation battery: bundle runner into /model-eval skill + record convention"
 severity: med
-status: open
+status: fixed
 affects: [model-eval skill]
 blocked-by: []
 execution-mode: subagent-driven
@@ -38,3 +38,13 @@ Design-doc criteria 2–4, including the **negative control**: corrupt one spec
 string → the run reports a `NO-SITE` row as excluded-and-disclosed, proving the
 literal-match guard fires from the skill-bundled path. Note: the skill dir is
 outside spine's git — verification checks the live skill files.
+
+## Resolution
+
+Shipped 2026-08-06 (mutation-battery effort, deepthought main `4c06342`): runner
+(`mutate.py` with `report_only` + dual rates, `sites.sh`, manifest-driven
+`run-battery.sh`) bundled into the `/model-eval` skill, live via the
+`~/.claude/skills/model-eval` symlink. Live skill files re-verified present
+2026-08-09. Build/verify record: `docs/handoffs/2026-08-06-mutation-battery-shipped.md`
+and the effort ledger `.superpowers/sdd/progress.md`. Status flipped in the
+2026-08-09 ledger hygiene sweep.

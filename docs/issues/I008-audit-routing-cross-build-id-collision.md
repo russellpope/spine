@@ -2,7 +2,7 @@
 id: I008
 title: audit routing — cross-build ticket-id collision in shared controller project dirs
 severity: med
-status: closed
+status: fixed
 affects: []
 blocked-by: []
 execution-mode:
