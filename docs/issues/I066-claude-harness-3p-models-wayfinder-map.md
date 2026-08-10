@@ -75,6 +75,9 @@ gateways; the codex harness is untouched.
 
 - Symmetric design — the codex harness proxying non-OpenAI families. Claude-
   harness-first was ratified; revisit only if a concrete need appears.
-- Retiring the codex harness. It remains first-class as-is.
+- Retiring the codex harness — **permanently out**, not deferred (owner,
+  2026-08-10): codex will always be here, and its workflow is expected to be
+  unchanged by this batch. The claude-harness path is an additive option on
+  hosts that need it (e.g. the work laptop), never a replacement track.
 - Building or operating gateways/proxies themselves — spine consumes what a
   host declares reachable; it does not provide the plumbing.
