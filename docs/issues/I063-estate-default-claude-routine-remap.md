@@ -35,3 +35,6 @@ keys is prior art). Decide whether unedited estate WORKFLOW.md files pick the
 new default up via the normal sweep refresh or need a generation bump per
 ADR 0004. Owner ratifies before build — only worth doing if the sonnet-5 ban
 is permanent.
+
+**Ratified 2026-08-10:** owner confirmed the sonnet-5 ban is permanent and
+approved the build. Ticket is dispatchable; frontier once claimed.
