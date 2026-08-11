@@ -2,12 +2,12 @@
 id: I071
 title: claude-auto invocation contract — selecting model and effort per dispatch
 severity: med
-status: open
+status: in-progress
 affects: [workflow, fleet]
 blocked-by: []
 labels: [wayfinder:research]
 parent: I066
-assignee:
+assignee: codex-team
 ---
 
 ## Question

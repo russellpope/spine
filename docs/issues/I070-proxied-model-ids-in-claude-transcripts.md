@@ -2,12 +2,12 @@
 id: I070
 title: What do proxied 3rd-party model ids look like in Claude Code transcripts?
 severity: med
-status: open
+status: in-progress
 affects: [audit, model]
 blocked-by: []
 labels: [wayfinder:research]
 parent: I066
-assignee:
+assignee: codex-team
 ---
 
 ## Question
