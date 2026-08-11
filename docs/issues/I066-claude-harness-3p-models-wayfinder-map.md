@@ -50,6 +50,12 @@ gateways; the codex harness is untouched.
 - [Attribution stance](I069-attribution-declare-then-confirm.md) —
   declare-then-confirm: the dispatch names (harness, model, effort) going in;
   audit confirms against the subagent's transcript/work product.
+- [Proxied transcript ids](I070-proxied-model-ids-in-claude-transcripts.md) —
+  the empirical LM Studio/Claude Code path persisted the selected
+  `google/gemma-4-12b` identifier verbatim in `message.model` on two assistant
+  events. Exact raw-id confirmation is conditionally inferred for a linked subagent, but no
+  `models/defaults.json` alias is justified; a differing production gateway
+  alias needs a later host-scoped mapping.
 - Routing-yield: I052's charter is answered by the committed feasibility note;
   recommendation is build-differently (review-time record, not retrospective
   file mining) — the forward build is mapped as [I076](I076-routing-yield-review-record-and-yield-verb.md),
@@ -57,8 +63,6 @@ gateways; the codex harness is untouched.
 
 ## Not yet specified
 
-- [I070](I070-proxied-model-ids-in-claude-transcripts.md) — what proxied model
-  ids look like in Claude Code transcripts; alias rows.
 - [I071](I071-claude-auto-invocation-contract.md) — the claude-auto invocation
   contract for model + effort selection; cmux/herdr skill changes.
 - [I072](I072-host-config-schema-and-precedence.md) — host config schema and
