@@ -64,8 +64,9 @@ gateways; the codex harness is untouched.
   keyed to carry the actual model id heterogeneous pools require.
 - [Claude Code invocation boundary](I071-claude-auto-invocation-contract.md)
   — stock Claude Code selects per-dispatch model/effort with explicit flags;
-  gateway transport is `ANTHROPIC_BASE_URL`, not model selection; raw
-  OpenAI-compatible endpoints need an adapter; every `claude-auto` wrapper
+  gateway transport is `ANTHROPIC_BASE_URL`, not model selection; record any
+  `modelOverrides` provider-facing effective ID and its redacted provenance;
+  raw OpenAI-compatible endpoints need an adapter; every `claude-auto` wrapper
   contract remains owner-verified before cmux/herdr changes land.
 
 ## Not yet specified

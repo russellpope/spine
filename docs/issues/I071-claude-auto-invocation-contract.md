@@ -57,6 +57,13 @@ touchpoints that must change.
    model is known to accept it; this is not a safe universal default.
    *Resolution:* do not add that variable speculatively.  The owner must prove
    the selected gateway/model receives and accepts the requested effort level.
+5. **The requested Claude model and provider-facing model ID can differ.**
+   `modelOverrides` maps an Anthropic model ID to a provider-specific ID, and a
+   managed mapping may not be visible in the user settings file. *Resolution:*
+   record both the requested `$MODEL` and the effective provider-facing ID,
+   plus redacted mapping provenance. If the effective mapping cannot be read
+   or observed at the provider, it is **unconfirmable / OWNER VERIFY**—never
+   assumed equal to `$MODEL`.
 
 ### Evidence collected (2026-08-11; secrets omitted)
 
@@ -82,12 +89,18 @@ $ claude --help
 $ jq -r '"settings.schema=" + (."$schema" // "<absent>"),
   "settings.model=" + (.model // "<absent>"),
   "settings.effortLevel=" + (.effortLevel // "<absent>"),
-  "settings.env.keys=" + ((.env // {} | keys | join(",")) // "<none>")' \
+  "settings.has.env=" + (has("env")|tostring),
+  "settings.env.keys=" + (if has("env") then (.env | keys | join(",")) else "<absent>" end),
+  "settings.has.modelOverrides=" + (has("modelOverrides")|tostring),
+  "settings.modelOverrides.keys=" + (if has("modelOverrides") then (.modelOverrides | keys | join(",")) else "<absent>" end)' \
   ~/.claude/settings.json
 settings.schema=<absent>
 settings.model=claude-fable-5[1m]
 settings.effortLevel=high
+settings.has.env=true
 settings.env.keys=
+settings.has.modelOverrides=false
+settings.modelOverrides.keys=<absent>
 
 $ printenv | cut -d= -f1 | rg '^(ANTHROPIC|CLAUDE|AWS_|VERTEX|GOOGLE_)' | sort
 # no matching names
@@ -98,10 +111,12 @@ $ spine model --dir /private/tmp/spine-i071 -effort claude primary
 high
 ```
 
-The installed settings file demonstrably contains the `model`, `effortLevel`,
-and `env` keys; no project or local settings file exists in this worktree.
-That does not prove an absence of managed settings, so dispatch evidence must
-still capture the effective launch environment and in-session `/status`.
+The installed **user** settings file demonstrably contains `model`,
+`effortLevel`, and `env` (`has("env")=true`), and it has no
+`modelOverrides` key. No project or local settings file exists in this
+worktree. That does not prove an absence of managed settings or a managed
+`modelOverrides` mapping, so dispatch evidence must still capture effective
+settings-source provenance and the provider-observed ID where available.
 
 The [official model configuration](https://code.claude.com/docs/en/model-config)
 states that startup model precedence is `--model`, then `ANTHROPIC_MODEL`, then
@@ -129,6 +144,16 @@ claude --permission-mode auto --model "$MODEL" --effort "$EFFORT" "$PROMPT"
   (for example, `spine model --dir <sdd-cwd> claude <tier>`), not an implicit
   user-setting default. `ANTHROPIC_BASE_URL` chooses the request destination;
   it does **not** choose the answering model.
+- `$MODEL` is the requested Claude Code model, not automatically the
+  provider-facing ID. `modelOverrides` maps Anthropic model IDs to
+  provider-specific IDs. If an applicable effective mapping is known, record
+  its output as `$EFFECTIVE_PROVIDER_MODEL`; if none applies, it is `$MODEL`.
+  Record non-secret provenance as `modelOverrides: applied|none|unavailable`,
+  its settings scope/source (`user`, `project`, `local`, `managed`, or
+  `unknown`), and `$EFFECTIVE_PROVIDER_MODEL`. The current user file reports
+  `none`, but managed settings are not observable here: without an observable
+  source or provider/gateway confirmation, the effective provider ID is
+  **unconfirmable / OWNER VERIFY**, not presumed to be `$MODEL`.
 - `$EFFORT` is the exact effort string resolved for that same tier
   (`spine model --dir <sdd-cwd> -effort claude <tier>`). Before launch, the
   controller must detect and either unset or deliberately record
@@ -143,11 +168,14 @@ claude --permission-mode auto --model "$MODEL" --effort "$EFFORT" "$PROMPT"
   required `anthropic-beta` and `anthropic-version` headers. Optional gateway
   model discovery is `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`; discovery
   does not prove a model/effort pair is runnable.
-- Record the executable path/version, redacted environment *names* and
-  endpoint host, resolved model/effort, complete non-secret argv, and the
-  resulting `/status`/model-and-effort display. This is the evidence that can
-  connect I069's declaration to a later transcript audit; it is not a
-  substitute for the gateway's own model-selection logs.
+- Record the executable path/version; redacted environment *names* and endpoint
+  host; declared model; requested `$MODEL`; effective provider model ID (when
+  observed); redacted `modelOverrides` provenance; requested/effective effort;
+  complete non-secret argv; and the resulting `/status`/model-and-effort
+  display. `/status` identifies setting sources but does not name the source
+  of each setting, so it cannot by itself prove an effective mapping. This is
+  evidence that can connect I069's declaration to a later transcript audit;
+  it is not a substitute for the gateway's own model-selection logs.
 
 ### Invocation matrix
 
@@ -155,13 +183,14 @@ claude --permission-mode auto --model "$MODEL" --effort "$EFFORT" "$PROMPT"
 may claim the cell. The cells are deliberately not filled with plausible
 `claude-auto` syntax.
 
-| Harness/path | Harness invocation | Model selection | Effort selection |
-| --- | --- | --- | --- |
-| Stock `claude`, first-party or supported provider | **Verified:** invoke `claude --permission-mode auto --model "$MODEL" --effort "$EFFORT" "$PROMPT"`. | **Verified:** `--model "$MODEL"`; it wins over `ANTHROPIC_MODEL` and `settings.model` for startup. | **Verified:** `--effort "$EFFORT"`; first ensure `CLAUDE_CODE_EFFORT_LEVEL` is absent/recorded because that environment variable wins. |
-| Stock `claude` through an Anthropic-Messages gateway | **Verified contract, endpoint untested here:** same argv, with a protected launch environment containing the gateway's `ANTHROPIC_BASE_URL` and appropriate auth. | **Verified Claude Code surface:** same `--model`; the gateway must accept that exact ID. `ANTHROPIC_BASE_URL` is transport only. | **Verified Claude Code surface; gateway acceptance unverified:** same `--effort`; use `CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1` only after the owner proves the custom model accepts it. |
-| Stock `claude` against a raw local OpenAI-compatible endpoint | **Not a supported stock invocation.** An Anthropic-Messages/Bedrock/Vertex adapter is a prerequisite. | N/A until an adapter supplies and documents an accepted model ID. | N/A until the adapter/model proves effort behavior. |
-| Work-laptop `claude-auto` through its custom gateway | **OWNER VERIFY:** exact executable path, argv grammar, whether it delegates to stock `claude`, and endpoint/auth source. | **OWNER VERIFY:** does it forward `--model`, rewrite it, select by another flag/env, or override it? Capture gateway-observed ID. | **OWNER VERIFY:** does it forward `--effort`; does any wrapper environment override it; and does the selected model accept the resulting request? |
-| Work-laptop `claude-auto` toward a local OpenAI-compatible endpoint | **OWNER VERIFY:** exact wrapper/adapter command. A raw OpenAI endpoint is not enough for the stock contract. | **OWNER VERIFY:** adapter-visible model-ID mapping and any wrapper default/override. | **OWNER VERIFY:** wrapper-to-adapter effort mapping/acceptance; no contract may be inferred from the stock flag. |
+| Harness/path | Harness invocation | Requested model selection | Effective provider model / mapping | Effort selection |
+| --- | --- | --- | --- | --- |
+| Stock `claude`, first-party or supported provider | **Verified:** invoke `claude --permission-mode auto --model "$MODEL" --effort "$EFFORT" "$PROMPT"`. | **Verified:** `--model "$MODEL"`; it wins over `ANTHROPIC_MODEL` and `settings.model` for startup. | **Verified semantics:** an applicable `modelOverrides` entry can map `$MODEL` to `$EFFECTIVE_PROVIDER_MODEL`. This host's user file has none; a managed mapping is **unconfirmable / OWNER VERIFY** until its source or provider-observed ID is available. | **Verified:** `--effort "$EFFORT"`; first ensure `CLAUDE_CODE_EFFORT_LEVEL` is absent/recorded because that environment variable wins. |
+| Stock `claude` through an Anthropic-Messages gateway | **Verified contract, endpoint untested here:** same argv, with a protected launch environment containing the gateway's `ANTHROPIC_BASE_URL` and appropriate auth. | **Verified Claude Code surface:** same `--model`; the gateway must accept that exact ID. `ANTHROPIC_BASE_URL` is transport only. | **Verified semantics; endpoint-specific result unverified:** record the effective ID and `modelOverrides` provenance. If managed mapping cannot be inspected or the gateway cannot show the received ID, it is **unconfirmable / OWNER VERIFY**. | **Verified Claude Code surface; gateway acceptance unverified:** same `--effort`; use `CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1` only after the owner proves the custom model accepts it. |
+| Stock `claude` against a raw local OpenAI-compatible endpoint | **Not a supported stock invocation.** An Anthropic-Messages/Bedrock/Vertex adapter is a prerequisite. | N/A until an adapter supplies and documents an accepted model ID. | N/A until an adapter documents the provider-facing mapping. | N/A until the adapter/model proves effort behavior. |
+| Plain SDD Agent-tool subagent | **Verified installed-artifact boundary:** this is an Agent-tool dispatch, not a `claude` argv invocation. | **Verified installed template:** it requires an explicit `model` field. | **OWNER VERIFY:** the installed templates do not show whether CLI settings or `modelOverrides` are applied, nor an effective provider ID. Record platform/settings provenance and provider-observed ID; do not infer a CLI mapping. | **Verified stock Claude Code sources:** skill/subagent Markdown frontmatter may set `effort`, and `CLAUDE_CODE_EFFORT_LEVEL` overrides it. **OWNER VERIFY:** the installed Agent-tool templates expose no effort field, and whether the platform accepts/propagates either stock source is unknown. Do not invent an Agent-tool effort parameter. |
+| Work-laptop `claude-auto` through its custom gateway | **OWNER VERIFY:** exact executable path, argv grammar, whether it delegates to stock `claude`, and endpoint/auth source. | **OWNER VERIFY:** does it forward `--model`, rewrite it, select by another flag/env, or override it? | **OWNER VERIFY:** wrapper/config mapping, mapping provenance, and gateway-observed effective provider ID. | **OWNER VERIFY:** does it forward `--effort`; does any wrapper environment override it; and does the selected model accept the resulting request? |
+| Work-laptop `claude-auto` toward a local OpenAI-compatible endpoint | **OWNER VERIFY:** exact wrapper/adapter command. A raw OpenAI endpoint is not enough for the stock contract. | **OWNER VERIFY:** adapter-visible requested-model mapping and any wrapper default/override. | **OWNER VERIFY:** adapter-visible effective provider ID and mapping provenance; no mapping may be inferred from the stock CLI. | **OWNER VERIFY:** wrapper-to-adapter effort mapping/acceptance; no contract may be inferred from the stock flag. |
 
 ### Dispatch touchpoints and required follow-up
 
@@ -172,8 +201,8 @@ may claim the cell. The cells are deliberately not filled with plausible
 | Same file — herdr worker launch at line 114 | The worker uses `--kind claude` with explicit `--model` and `--effort`. | Apply the same verified executable-selection mechanism as the lead, while passing model and effort separately and retaining the fresh-process rule. |
 | `/Users/ldh/Projects/github.com/deepthought/skills/lib/frontend-preflight.sh` | Validates the `claude` herdr integration after frontend detection; it does not select an executable. | Keep this integration check, and add a distinct wrapper/capability check only once the owner defines what `claude-auto` is and how herdr exposes it. |
 | `/Users/ldh/Projects/github.com/deepthought/skills/lib/test-no-hardcoded-models.sh` | Guards that claude-team resolves IDs through `spine model`; it passed here (15 pass, 0 fail). | Extend only after the host config is specified: test the selected transport receives both resolved values and no bare/default model path is introduced. Do not hard-code wrapper syntax in the test. |
-| Installed plain SDD transport: `/Users/ldh/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/subagent-driven-development/SKILL.md` and its `implementer-prompt.md` / `task-reviewer-prompt.md` | The templates require an explicit Agent-tool `model`; they specify no CLI executable, gateway, or effort parameter. | Plain Agent-tool dispatches must continue to set an explicit model. The installed artifact does not establish an effort or external-harness pass-through contract, so those fields require owner/platform verification before I069 can claim an exact invocation. |
-| Host Claude settings: `~/.claude/settings.json`; future host capability config in I072 | This host's observable defaults are `model=claude-fable-5[1m]`, `effortLevel=high`, and an empty settings `env` map. | Keep gateway URL/token out of versioned dispatch artifacts. I072 must define the authoritative host capability/config source, precedence, validation, and how a dispatch records the resolved harness executable plus non-secret environment provenance. |
+| Installed plain SDD transport: `/Users/ldh/.claude/plugins/cache/claude-plugins-official/superpowers/6.2.0/skills/subagent-driven-development/SKILL.md` and its `implementer-prompt.md` / `task-reviewer-prompt.md` | The templates require an explicit Agent-tool `model`; they specify no CLI executable, gateway, or effort parameter. | Keep the explicit model field. Stock Claude Code documents `effort` in skill/subagent frontmatter and `CLAUDE_CODE_EFFORT_LEVEL` precedence, but whether this platform propagates either source—and whether it applies `modelOverrides`—is **OWNER VERIFY**. The Agent matrix row is the binding boundary; do not invent an Agent parameter. |
+| Host Claude settings: `~/.claude/settings.json`; future host capability config in I072 | This host's observable user defaults are `model=claude-fable-5[1m]`, `effortLevel=high`, `env` present but empty, and no user `modelOverrides`. | Keep gateway URL/token out of versioned dispatch artifacts. Record requested/effective provider IDs plus redacted mapping provenance. I072 must define the authoritative host capability/config source, precedence, validation, and how a dispatch records the resolved harness executable and non-secret configuration provenance; until then a managed mapping is **unconfirmable / OWNER VERIFY**. |
 
 `sh /Users/ldh/Projects/github.com/deepthought/skills/lib/test-frontend-preflight.sh`
 also passed (16 pass, 0 fail). These checks validate the currently inspected
