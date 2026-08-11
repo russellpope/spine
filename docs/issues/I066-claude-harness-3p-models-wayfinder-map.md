@@ -62,11 +62,14 @@ gateways; the codex harness is untouched.
   recommendation is build-differently (review-time record, not retrospective
   file mining) — the forward build is mapped as [I076](I076-routing-yield-review-record-and-yield-verb.md),
   keyed to carry the actual model id heterogeneous pools require.
+- [Claude Code invocation boundary](I071-claude-auto-invocation-contract.md)
+  — stock Claude Code selects per-dispatch model/effort with explicit flags;
+  gateway transport is `ANTHROPIC_BASE_URL`, not model selection; raw
+  OpenAI-compatible endpoints need an adapter; every `claude-auto` wrapper
+  contract remains owner-verified before cmux/herdr changes land.
 
 ## Not yet specified
 
-- [I071](I071-claude-auto-invocation-contract.md) — the claude-auto invocation
-  contract for model + effort selection; cmux/herdr skill changes.
 - [I072](I072-host-config-schema-and-precedence.md) — host config schema and
   the estate-default → repo-override → host-constraint precedence story.
 - [I073](I073-flavor-to-harness-rename-migration.md) — the rename migration.
