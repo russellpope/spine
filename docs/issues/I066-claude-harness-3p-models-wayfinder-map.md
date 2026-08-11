@@ -53,9 +53,11 @@ gateways; the codex harness is untouched.
 - [Proxied transcript ids](I070-proxied-model-ids-in-claude-transcripts.md) —
   the empirical LM Studio/Claude Code path persisted the selected
   `google/gemma-4-12b` identifier verbatim in `message.model` on two assistant
-  events. Exact raw-id confirmation is conditionally inferred for a linked subagent, but no
-  `models/defaults.json` alias is justified; a differing production gateway
-  alias needs a later host-scoped mapping.
+  events. The raw field is future-confirmation-capable only after I072 supplies
+  the host pin/mapping and I074 supplies heterogeneous verdict/correlation;
+  current routing audit cannot judge this unannotated controller-only session.
+  No `models/defaults.json` alias is justified; a differing production gateway
+  alias needs that later host-scoped mapping.
 - Routing-yield: I052's charter is answered by the committed feasibility note;
   recommendation is build-differently (review-time record, not retrospective
   file mining) — the forward build is mapped as [I076](I076-routing-yield-review-record-and-yield-verb.md),

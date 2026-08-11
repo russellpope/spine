@@ -54,8 +54,11 @@ is recorded rather than silently assuming an answer.
    `internal/audit/audit.go` parses each assistant event's `message.model`, but
    deliberately excludes main-session assistant models from ticket evidence;
    only a linked subagent transcript's actuals are used. *Resolution:* this
-   controlled controller session proves field shape; a ticket-shaped subagent
-   run is still required to validate the audit correlation path for a gateway.
+   controlled, unannotated controller session proves field shape only. Current
+   `spine audit routing` cannot confirm it: the model has no host-resolved pin
+   or observed-id mapping (I072), this ticket has no `tier:`, and no
+   ticket-shaped dispatch or linked subagent exists. A future gateway audit
+   additionally needs I074's heterogeneous verdict/correlation support.
 4. **One successful run cannot prove "stable enough."** A gateway may expose a
    provider id, a configured alias, or change either after a configuration or
    version change. *Resolution:* accept exact equality as a confirmation only
@@ -103,11 +106,16 @@ $ ANTHROPIC_BASE_URL=http://127.0.0.1:1234 \\
   -p 'Reply exactly: I070-proxy-smoke.'
 I070-proxy-smoke.
 
+$ run_dir=/private/tmp/i070-claude-proxy.9Rv9fS
+$ session_file=/Users/ldh/.claude/projects/-private-tmp-i070-claude-proxy-9Rv9fS/f5fa24e8-1c86-43eb-b19c-bd85270fa6bb.jsonl
+$ test -d "$run_dir" && test -f "$session_file" && printf '%s\n' "$session_file"
+/Users/ldh/.claude/projects/-private-tmp-i070-claude-proxy-9Rv9fS/f5fa24e8-1c86-43eb-b19c-bd85270fa6bb.jsonl
+
 $ jq -c 'select(.type == "assistant") |
   {type, cwd: (if .cwd then "present" else "absent" end),
    model: .message.model,
    content_types: [.message.content[].type]}' \\
-  ~/.claude/projects/<throwaway-project>/<session>.jsonl
+  "$session_file"
 {"type":"assistant","cwd":"present","model":"google/gemma-4-12b","content_types":["thinking"]}
 {"type":"assistant","cwd":"present","model":"google/gemma-4-12b","content_types":["text"]}
 
@@ -133,12 +141,13 @@ $ jq -c 'select(.type == "assistant") |
 {"type":"assistant","cwd":"present","model":"claude-opus-4-8","content_types":["text"]}
 ```
 
-The exhaustive local Claude transcript model-field survey (content not read)
-contained the listed Claude-shaped ids, `<synthetic>`, and exactly these two
+The exhaustive local Claude transcript model-field survey did parse JSONL event
+structure, but message content was not printed or recorded. It contained the
+listed Claude-shaped ids, `<synthetic>`, and exactly these two
 `google/gemma-4-12b` records. It contains no evidence for a separate
 work-laptop gateway path. A real local subagent sample has the same
-`type: "assistant"` / `message.model` shape. Source inspection confirms
-the parser behavior, but not a proxied-subagent result:
+`type: "assistant"` / `message.model` shape. Source inspection confirms the
+parser behavior, but not a proxied-subagent result:
 
 ```text
 $ rg -n 'Main-session assistant models are never ticket evidence|message.model is the actual' internal/audit/audit.go
@@ -184,16 +193,18 @@ host/gateway rather than infer it from provider identity.
   design (I072/I074), with exact-match tests; do not add a global table alias
   speculatively.
 - **Declare then confirm:** conditionally viable for **model identity**. A
-  dispatch that declares `harness=claude`, canonical model
-  `google/gemma-4-12b`, and effort `low` can have its model confirmed when a
-  linked subagent's raw `message.model` is exactly that id (or an approved
-  host-scoped mapping). That linked-subagent conclusion follows from the parser
-  source and has not been observed through this proxy. The transcript field
-  does not independently prove the upstream provider behind an alias, nor does
-  this evidence prove effort; the declaration remains the authority for those
-  claims. Until the work-laptop gateway and a linked subagent are sampled, its
-  alias and correlation result must remain **unconfirmable**, not assumed
-  matched.
+  raw field is only future-confirmation-capable, not current audit evidence.
+  I072 must first supply a host-resolved pin and exact observed-id mapping; I074
+  must then supply the heterogeneous declared-vs-observed verdict and
+  ticket/subagent correlation. Only after those dependencies exist can a
+  tier-annotated ticket's primary-repo-qualified dispatch carrying its ticket
+  token be compared with its meta-linked subagent's raw `message.model`.
+  This controller-only I070 experiment has none of those inputs, and current
+  `spine audit routing` reports it `unannotated — no tier annotation — not
+  judged`. The field does not independently prove the upstream provider behind
+  an alias, nor does this evidence prove effort; the declaration remains the
+  authority for those claims. The work-laptop alias and correlation result stay
+  **unconfirmable**, not assumed matched.
 
 ### Owner repro for the unobserved work-laptop gateway
 
@@ -205,7 +216,11 @@ without printing any token. Capture the new
 subagent files, run the redacted-field query above, then correlate the
 subagent through its adjacent `agent-*.meta.json` `toolUseId`. Record the
 declared model, transcript-observed `message.model`, gateway/version, and
-whether the raw strings exactly match. If a dispatch-shaped subagent is present, run
-`spine audit routing --transcripts ~/.claude/projects/<escaped-cwd>` against
-the ticket repo. A mismatch or a missing subagent is an unconfirmable result
-for I069/I074, not license to add an alias row.
+whether the raw strings exactly match. Do **not** treat an exact raw-string
+comparison as a current routing-audit confirmation. Run
+`spine audit routing --transcripts ~/.claude/projects/<escaped-cwd>` only after
+I072 supplies the host pin/mapping and I074 supplies the correlation/verdict
+path, with a tier-annotated ticket and a primary-repo-qualified dispatch bearing
+that ticket token. Until then, a mismatch, missing subagent, or controller-only
+session is an unconfirmable result for I069/I074, not license to add an alias
+row.
