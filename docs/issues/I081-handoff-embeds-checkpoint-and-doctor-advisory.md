@@ -2,7 +2,7 @@
 id: I081
 title: "Handoff embeds newest checkpoint; doctor advisory for checkpoints"
 severity: med
-status: open
+status: fixed
 affects: [handoff, doctor, checkpoint]
 blocked-by: [I080]
 execution-mode: subagent-driven
@@ -43,3 +43,19 @@ Advisory only — no `audit stages` change in this ticket.
 ## Blocked by
 
 - I080 (checkpoint document + commands).
+
+## Resolution
+
+Fixed 2026-08-18 on branch `local-harness-conventions` (commit 3444832).
+`spine handoff new` embeds the newest checkpoint after the cursor block when
+the working home is non-empty (`internal/handoff/checkpoint.go`): heading
+`## Checkpoint (newest): NNN-<slug>.md`, facts region with its markers
+(interior bytes unchanged), then `### Prior narrative (model-authored, not
+evidence)` + model region; facts-only → "narrative: missing — reconstruct
+intent from facts"; a malformed newest checkpoint never fails the handoff;
+without checkpoints the handoff is unchanged. Doctor D11 (advisory, `warn`,
+no audit-stages effect; `internal/doctor/checkpoint.go`): malformed or
+non-canonical facts region per file, ordinal gaps, `.superpowers/` not
+gitignored (only when it exists; silent outside a git repo). Negative
+controls at the CLI seam. Ruling: the spec's two heading spellings resolve to
+the Implementation Decisions form. Review clean, no fix round.
