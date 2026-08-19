@@ -2,7 +2,7 @@
 id: I084
 title: "Gate classes: deferred-cleanup-errcheck, dead-code-callgraph, n-plus-one"
 severity: med
-status: open
+status: fixed
 affects: [gate]
 blocked-by: [I082]
 execution-mode: subagent-driven
@@ -44,3 +44,28 @@ fixture pair, findings with file:line and `code = go@1/<check>`.
 ## Blocked by
 
 - I082 (gate skeleton + emitter).
+
+## Resolution
+
+Fixed 2026-08-18 on branch `local-harness-conventions` (commits 5747276,
+f741c98). **Dependency decision (ADR 0001): stdlib only — no
+`golang.org/x/tools`.** Loading is one `go list -deps -export -test -e -json
+./...` (`internal/gate/load.go`) + `go/parser` + `go/types` with
+`importer.ForCompiler(fset, "gc", …)` over the export files; `CgoFiles`
+included with `FakeImportC`. Loader errors are split into "cannot load the
+module under --dir" vs "--dir does not type-check" (both exit 2, one CLI-seam
+fixture each; the cgo path itself is untested — needs a C toolchain).
+`deferred-cleanup-errcheck`: `defer` directly calling Close/Remove/RemoveAll/
+Flush/Sync (or names in env-only `SPINE_GATE_CLEANUP_FUNCS` — not a
+`gate_pack_config` key, the spec's key set is closed) whose error result is
+discarded. `dead-code-callgraph`: roots = main, init, Test*/Benchmark*/
+Example*/Fuzz*, exported identifiers of non-main packages in a library module,
+plus every method whose name is in the method set of any interface visible in
+the module or its direct imports (universe `error` included) — "when in doubt
+reachable"; residual limitation (interfaces from packages the module does not
+directly import) documented in usage. `n-plus-one`: syntactic call-in-loop
+against required `SPINE_GATE_N_PLUS_ONE_CLIENTS`. Positive-control pairs and
+the AC2 root-rule fixture at the CLI seam. Observation: the class finds two
+real deferred-cleanup violations in spine itself (internal/audit/audit.go,
+internal/gate/binaryhygiene.go) — left for the repo's own gate enablement.
+Review + scoped re-review clean.
