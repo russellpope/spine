@@ -138,9 +138,16 @@ type historyEntry struct {
 }
 
 type table struct {
-	TierDefaultEffort map[string]string                `json:"tierDefaultEffort"`
-	EffortVocabulary  map[string][]string              `json:"effortVocabulary"`
-	Flavors           map[string]map[string]tableEntry `json:"flavors"`
+	TierDefaultEffort map[string]string `json:"tierDefaultEffort"`
+	// TierDefaultEffortByFlavor overrides TierDefaultEffort for one flavor
+	// (I079 fix round 1): the global map's primary/fallback "high" is a word
+	// the pi harness's effort vocabulary does not have, so a bare-id pi
+	// mirror row would inherit an effort pi cannot run. A flavor listed here
+	// supplies the tier defaults for its own cells; every tier it omits, and
+	// every flavor absent from the map, falls back to the global map.
+	TierDefaultEffortByFlavor map[string]map[string]string     `json:"tierDefaultEffortByFlavor"`
+	EffortVocabulary          map[string][]string              `json:"effortVocabulary"`
+	Flavors                   map[string]map[string]tableEntry `json:"flavors"`
 }
 
 var defaults = mustLoadDefaults()
@@ -200,7 +207,13 @@ func validateTable(t table) {
 			// A shipped cell must speak its own flavor's effort vocabulary,
 			// so a data edit that ships (say) a pi cell at "high" fails the
 			// build's tests rather than erroring at every resolution.
-			for _, effort := range shippedEfforts(tiers[tier]) {
+			// The effort a cell INHERITS must be speakable too (I079 fix
+			// round 1): without this, a flavor whose vocabulary excludes the
+			// global tier default ships a table where a bare-id mirror row
+			// is unresolvable, which is exactly the bug the per-flavor
+			// tierDefaultEffortByFlavor override exists to prevent.
+			efforts := append(shippedEfforts(tiers[tier]), tierDefaultEffortOf(t, flavor, tier))
+			for _, effort := range efforts {
 				if err := checkEffort(t, flavor, effort); err != nil {
 					panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q: %v", flavor, tier, err))
 				}
@@ -292,7 +305,7 @@ func resolveFrom(t table, repoDir, flavor, tier string) (Entry, error) {
 	if def.ID == "" {
 		return Entry{}, fmt.Errorf("flavor %q has no %s entry", flavor, tier)
 	}
-	tierDefaultEffort := t.TierDefaultEffort[tier]
+	tierDefaultEffort := tierDefaultEffortOf(t, flavor, tier)
 
 	entry := Entry{
 		Flavor: flavor, Tier: tier,
@@ -394,13 +407,26 @@ func everShipped(def tableEntry, tierDefaultEffort string, ov override) bool {
 	return false
 }
 
-// TierDefaultEffort returns the effort a tier resolves to when an entry
-// omits one (design D3) — the same table MirrorValue canonicalizes against.
-// Exposed so the update path's effort migration (D16) can skip minting a
-// per-entry override that only restates the tier default, which the mirror
-// rendering would canonicalize away on the next run.
-func TierDefaultEffort(tier string) string {
-	return defaults.TierDefaultEffort[tier]
+// tierDefaultEffortOf is the effort (flavor, tier) resolves to when a cell
+// or a mirror row omits one (design D3): the flavor's own override first,
+// the global map second (I079 fix round 1). Every effort comparison —
+// resolution, everShipped, the update path's refresh check — goes through
+// here, so a harness with its own vocabulary never inherits a word it
+// cannot speak.
+func tierDefaultEffortOf(t table, flavor, tier string) string {
+	if e := t.TierDefaultEffortByFlavor[flavor][tier]; e != "" {
+		return e
+	}
+	return t.TierDefaultEffort[tier]
+}
+
+// TierDefaultEffort returns the effort (flavor, tier) resolves to when an
+// entry omits one (design D3). Exposed so the update path's effort
+// migration (D16) can skip minting a per-entry override that only restates
+// the tier default, which the mirror rendering would canonicalize away on
+// the next run.
+func TierDefaultEffort(flavor, tier string) string {
+	return tierDefaultEffortOf(defaults, flavor, tier)
 }
 
 // MirrorValue renders a resolved entry as the value half of a gen-10 mirror
@@ -408,6 +434,13 @@ func TierDefaultEffort(tier string) string {
 // entry's effective effort deviates from its tier's default. An effort equal
 // to the tier default is omitted so the common case stays a bare id and the
 // suffix always signals a real deviation.
+// The threshold here is deliberately the GLOBAL tier default, not a
+// flavor's own override (I079 fix round 1): the mirror is read by humans who
+// cannot see a per-harness default table, so a pi row rendered bare would
+// leave "what effort does this actually run at" unanswerable on the page.
+// Rendering is an economy, not a comparison — resolution, everShipped, and
+// the refresh check all consult the flavor-scoped default, and both
+// spellings of a pi row (bare id and "@ xhigh") resolve to the same pair.
 // A cell with an alternate appends " alt: <id> @ <effort>" on the same line
 // (I079). The alternate's effort is always spelled out — it is a deliberate
 // tuning knob, and a bare id there would read as "same effort as the cell"
@@ -442,7 +475,7 @@ func MirrorRows() []string {
 			def := defaults.Flavors[flavor][tier]
 			e := Entry{Flavor: flavor, Tier: tier, ID: def.ID, Effort: def.Effort, Alternate: def.Alternate}
 			if e.Effort == "" {
-				e.Effort = defaults.TierDefaultEffort[tier]
+				e.Effort = tierDefaultEffortOf(defaults, flavor, tier)
 			}
 			k := flavor + "." + tier + ":"
 			if len(k) > width {

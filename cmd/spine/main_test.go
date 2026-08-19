@@ -1921,3 +1921,44 @@ func TestModelPiAlternateProvenance(t *testing.T) {
 		}
 	}
 }
+
+// I079 fix round 1: a bare-id pi mirror row — a plausible hand edit that
+// just pins an id — inherits pi's OWN tier default (xhigh on primary and
+// fallback), not the global "high" its vocabulary has no word for, so the
+// row resolves instead of erroring. It reports override because dropping
+// the cell's alternate is itself a deliberate edit.
+func TestModelPiBareIDRowInheritsPiTierDefault(t *testing.T) {
+	dir := writeModelWorkflow(t, "model_routing:\n  pi.primary: qwen3.8-27b-q8_0\n  pi.fallback: qwen3.8-27b-q8_0\n")
+	for _, tier := range []string{"primary", "fallback"} {
+		code, out, errs := runCmd(t, "model", "--dir", dir, "--effort", "pi", tier)
+		if code != 0 || out != "xhigh\n" {
+			t.Errorf("pi %s --effort: code=%d out=%q stderr=%q", tier, code, out, errs)
+		}
+		code, out, errs = runCmd(t, "model", "--dir", dir, "--json", "pi", tier)
+		if code != 0 {
+			t.Fatalf("pi %s --json: code=%d stderr=%q", tier, code, errs)
+		}
+		var got struct {
+			ID         string `json:"id"`
+			Effort     string `json:"effort"`
+			Provenance string `json:"provenance"`
+		}
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("out=%q not valid JSON: %v", out, err)
+		}
+		if got.ID != "qwen3.8-27b-q8_0" || got.Effort != "xhigh" || got.Provenance != "override" {
+			t.Errorf("pi %s: got=%+v (want xhigh/override — the row dropped the cell's alternate)", tier, got)
+		}
+	}
+}
+
+// I079 fix round 1 negative control: claude has no per-flavor tier default,
+// so a bare-id claude row still inherits the global "high" — the override is
+// scoped to the flavor that declares one.
+func TestModelClaudeBareIDRowStillInheritsGlobalTierDefault(t *testing.T) {
+	dir := writeModelWorkflow(t, "model_routing:\n  claude.primary: claude-custom-model\n")
+	code, out, errs := runCmd(t, "model", "--dir", dir, "--effort", "claude", "primary")
+	if code != 0 || out != "high\n" {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+}

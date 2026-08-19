@@ -5,6 +5,14 @@
     "mechanical": "low",
     "fallback": "high"
   },
+  "tierDefaultEffortByFlavor": {
+    "pi": {
+      "primary": "xhigh",
+      "routine": "medium",
+      "mechanical": "low",
+      "fallback": "xhigh"
+    }
+  },
   "effortVocabulary": {
     "pi": ["low", "medium", "xhigh"]
   },
