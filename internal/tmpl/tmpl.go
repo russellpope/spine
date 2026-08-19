@@ -87,7 +87,8 @@ func ProfileOwns(profile, relPath string) bool {
 	}
 	switch relPath {
 	case "docs/harness-interface.md", "docs/issues/README.md", "docs/issues/_template.md",
-		"docs/remediation/README.md":
+		"docs/remediation/README.md", "docs/remediation/_hitlist.template.md",
+		"docs/remediation/_round.template.md":
 		return false
 	}
 	return true

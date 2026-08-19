@@ -844,6 +844,13 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 	for _, n := range rep.Notes {
 		fmt.Fprintln(stderr, "warning:", n)
 	}
+	// The remediation round-budget advisory (I087): printed here only, and
+	// never consulted by Blocking() — a round beyond budget advises, it does
+	// not gate. Kept out of rep.Notes so doctor's D9 pass-through (a warn,
+	// which does set doctor's exit code) cannot turn it into a gate.
+	for _, n := range rep.RoundBudget {
+		fmt.Fprintln(stderr, "warning:", n)
+	}
 	if !rep.HasCursor {
 		fmt.Fprintln(stdout, "no spine cursor — nothing to audit")
 		return 0

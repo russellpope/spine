@@ -78,6 +78,8 @@ var simpleFiles = []struct {
 	{"issue.tmpl.md", "docs/issues/_template.md", false, false},
 	{"adr-README.md", "docs/adr/README.md", false, true},
 	{"remediation-README.md", "docs/remediation/README.md", false, false},
+	{"hitlist.tmpl.md", "docs/remediation/_hitlist.template.md", false, false},
+	{"remediation-round.tmpl.md", "docs/remediation/_round.template.md", false, false},
 }
 
 // Run plans (and with opts.Write, applies) regeneration of every managed file.

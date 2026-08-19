@@ -2053,3 +2053,183 @@ func TestGatePackRegionAtCLISeam(t *testing.T) {
 		t.Errorf("doctor on a canonical region: code=%d out=%q", code, out)
 	}
 }
+
+// remediationRepo stages a repo whose cursor names effort E, plus a newest
+// handoff carrying the same cursor block so the stages backstop is satisfied
+// — the fixture the round-budget advisory tests measure exit codes against.
+func remediationRepo(t *testing.T, effort, prd, stages string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte("stages: [grill, prd]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	block := "<!-- spine:cursor -->\n" +
+		"effort: " + effort + "\n" +
+		"prd: " + prd + "\n" +
+		"tickets: \n" +
+		"stages: " + stages + "\n" +
+		"<!-- /spine:cursor -->\n"
+	ledger := filepath.Join(dir, ".superpowers", "sdd", "progress.md")
+	if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledger, []byte(block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	handoffs := filepath.Join(dir, "docs", "handoffs")
+	if err := os.MkdirAll(handoffs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(handoffs, "2026-08-18-"+effort+".md"), []byte("# handoff\n\n"+block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeRoundRecord(t *testing.T, dir, effort, name, frontmatter string) {
+	t.Helper()
+	roundDir := filepath.Join(dir, "docs", "remediation", effort)
+	if err := os.MkdirAll(roundDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\n" + frontmatter + "hitlist: docs/remediation/" + effort + "/hitlist-1.md\n---\n\n# round\n"
+	if err := os.WriteFile(filepath.Join(roundDir, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// AC (I087): audit stages reports a round-4 record without ratification, and
+// the exit code is identical to the same repo without the file — the rule is
+// advisory and can never gate. Both a non-blocking and a blocking cursor are
+// measured, so "unchanged" is proved in both directions.
+func TestAuditStagesRoundBudgetAdvisoryNeverChangesExitCode(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		prd      string
+		stages   string
+		wantCode int
+	}{
+		{"non-blocking", "", "grill[<] prd[ ]", 0},
+		{"blocking", "docs/specs/missing.md", "grill[x] prd[x]", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := remediationRepo(t, "budget-"+tc.name, tc.prd, tc.stages)
+			baseCode, _, _ := runCmd(t, "audit", "stages", "--dir", base)
+			if baseCode != tc.wantCode {
+				t.Fatalf("fixture without the round record: code=%d want %d", baseCode, tc.wantCode)
+			}
+
+			dir := remediationRepo(t, "budget-"+tc.name, tc.prd, tc.stages)
+			writeRoundRecord(t, dir, "budget-"+tc.name, "round-4.md", "round: 4\ndose: findings-only\n")
+			code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+			if code != baseCode {
+				t.Errorf("advisory changed the exit code: %d vs %d (out=%q err=%q)", code, baseCode, out, errs)
+			}
+			for _, want := range []string{
+				"warning:",
+				"docs/remediation/budget-" + tc.name + "/round-4.md",
+				"beyond the 3-round remediation budget",
+				"add `extension-ratified-by: <owner>` to its frontmatter",
+			} {
+				if !strings.Contains(errs, want) {
+					t.Errorf("stderr missing %q: %q", want, errs)
+				}
+			}
+		})
+	}
+}
+
+// AC (I087) negative controls: rounds 1-3, a ratified round-4+, and no
+// remediation directory at all are all silent.
+func TestAuditStagesRoundBudgetNegativeControls(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, frontmatter string
+	}{
+		{"round-3-is-within-budget", "round-3.md", "round: 3\ndose: findings-only\n"},
+		{"round-4-ratified", "round-4.md", "round: 4\ndose: prescriptive\nextension-ratified-by: someone\n"},
+		{"round-5-ratified", "round-5.md", "round: 5\ndose: raw-review\nextension-ratified-by: someone\n"},
+		{"unnumbered-file-ignored", "notes.md", "round: 9\n"},
+		{"commented-out-key-in-round-3", "round-3.md", "round: 3\n# extension-ratified-by: <owner>\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := remediationRepo(t, "quiet", "", "grill[<] prd[ ]")
+			writeRoundRecord(t, dir, "quiet", tc.file, tc.frontmatter)
+			code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+			if code != 0 {
+				t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+			}
+			if strings.Contains(errs, "remediation budget") {
+				t.Errorf("negative control produced an advisory: %q", errs)
+			}
+		})
+	}
+	dir := remediationRepo(t, "no-dir", "", "grill[<] prd[ ]")
+	if code, out, errs := runCmd(t, "audit", "stages", "--dir", dir); code != 0 || strings.Contains(errs, "remediation budget") {
+		t.Errorf("no docs/remediation dir must be silent: code=%d out=%q err=%q", code, out, errs)
+	}
+}
+
+// AC (I087): both templates are scaffolded into docs/remediation/ by init and
+// restored by update — the same machine-owned simple-file ownership as the
+// README — and the README names them and how to instantiate them.
+func TestRemediationTemplatesScaffolded(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	rels := []string{
+		filepath.Join("docs", "remediation", "_hitlist.template.md"),
+		filepath.Join("docs", "remediation", "_round.template.md"),
+	}
+	for _, rel := range rels {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Fatalf("init did not scaffold %s: %v", rel, err)
+		}
+		if err := os.Remove(filepath.Join(dir, rel)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, out, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 0 {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	for _, rel := range rels {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Errorf("update did not restore %s: %v", rel, err)
+		}
+	}
+	readme, err := os.ReadFile(filepath.Join(dir, "docs", "remediation", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"docs/remediation/_hitlist.template.md",
+		"docs/remediation/_round.template.md",
+		"docs/remediation/<effort>/hitlist-N.md",
+		"There is no\n`spine remediation new` verb",
+	} {
+		if !strings.Contains(string(readme), want) {
+			t.Errorf("remediation README missing %q", want)
+		}
+	}
+}
+
+// AC (I087): the advisory fires when extension-ratified-by: is present but
+// empty — the load-bearing half of the ratified negative control — and
+// `spine doctor` stays untouched: the round-budget advisory is not a doctor
+// finding and does not move doctor's exit code.
+func TestRoundBudgetEmptyRatificationAdvisesAndDoctorIsUntouched(t *testing.T) {
+	dir := remediationRepo(t, "empty-ratify", "", "grill[<] prd[ ]")
+	doctorBefore, _, _ := runCmd(t, "doctor", "--dir", dir)
+	writeRoundRecord(t, dir, "empty-ratify", "round-4.md", "round: 4\nextension-ratified-by:   \n")
+	code, _, errs := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 0 || !strings.Contains(errs, "beyond the 3-round remediation budget") {
+		t.Errorf("empty ratification must still advise: code=%d err=%q", code, errs)
+	}
+	doctorAfter, out, _ := runCmd(t, "doctor", "--dir", dir)
+	if doctorAfter != doctorBefore {
+		t.Errorf("doctor exit code moved: %d -> %d (out=%q)", doctorBefore, doctorAfter, out)
+	}
+	if strings.Contains(out, "remediation budget") {
+		t.Errorf("doctor must not report the round-budget advisory: %q", out)
+	}
+}

@@ -29,6 +29,8 @@ var Files = []struct{ TmplName, RelPath string }{
 	{"issue.tmpl.md", "docs/issues/_template.md"},
 	{"adr-README.md", "docs/adr/README.md"},
 	{"remediation-README.md", "docs/remediation/README.md"},
+	{"hitlist.tmpl.md", "docs/remediation/_hitlist.template.md"},
+	{"remediation-round.tmpl.md", "docs/remediation/_round.template.md"},
 }
 
 // DetectProfile inspects dir and returns a profile when signals are

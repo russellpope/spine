@@ -59,7 +59,7 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Created) != 8 || len(res.Skipped) != 0 {
+	if len(res.Created) != 10 || len(res.Skipped) != 0 {
 		t.Fatalf("created=%v skipped=%v", res.Created, res.Skipped)
 	}
 	wf, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
@@ -230,7 +230,7 @@ func TestInitIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Created) != 0 || len(res.Skipped) != 8 {
+	if len(res.Created) != 0 || len(res.Skipped) != 10 {
 		t.Fatalf("second run created=%v skipped=%v", res.Created, res.Skipped)
 	}
 }

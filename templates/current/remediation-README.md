@@ -6,13 +6,25 @@ recorded as a **round record**. This directory is where the records live.
 
 ## Layout
 
+    docs/remediation/_hitlist.template.md
+    docs/remediation/_round.template.md
+    docs/remediation/<effort>/hitlist-N.md
     docs/remediation/<effort>/round-N.md
 
 One directory per effort (the kebab-case effort name the stage cursor uses),
-one file per round, numbered from 1. Records are hand-authored from the
-templates spine ships — `hitlist.tmpl.md` for the hitlist, and
-`remediation-round.tmpl.md` for the round record. spine does not render round
-records: rendering them from run facts is the evidence renderer's job.
+one hitlist and one round record per round, numbered from 1.
+
+The two `_*.template.md` files at the top of the directory are the templates
+spine ships (`hitlist.tmpl.md` and `remediation-round.tmpl.md` in the binary),
+scaffolded here the same way `docs/issues/_template.md` is: machine-owned,
+created by `spine init` and refreshed by `spine update`. There is no
+`spine remediation new` verb — instantiate a record by copying the template:
+
+    cp docs/remediation/_hitlist.template.md docs/remediation/<effort>/hitlist-1.md
+    cp docs/remediation/_round.template.md   docs/remediation/<effort>/round-1.md
+
+then fill it in. spine does not render round records: rendering them from run
+facts is the evidence renderer's job.
 
 ## Round budget
 

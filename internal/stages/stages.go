@@ -181,8 +181,14 @@ type Report struct {
 	// cases applies. When HasCursor is true: non-blocking warnings such as
 	// an unresolvable tickets: value (I026) — empty when there is nothing
 	// to warn about.
-	Notes  []string
-	Stages []StageRow
+	Notes []string
+	// RoundBudget carries the remediation round-budget advisory (I087),
+	// deliberately NOT folded into Notes: doctor surfaces every Notes entry
+	// as a D9 warn, and a warn makes `spine doctor` exit 1 — which would
+	// turn an advisory into a gate. Only `spine audit stages` prints these,
+	// and Blocking() never consults them.
+	RoundBudget []string
+	Stages      []StageRow
 	// Handoff is the zero value (Applicable=false) when HasCursor is
 	// false — nothing to check a handoff against.
 	Handoff HandoffCheck
@@ -221,6 +227,7 @@ func FromResult(dir string, res cursor.Result) Report {
 	var notes []string
 	rep.Stages, notes = deriveStages(dir, res.Cursor)
 	rep.Notes = notes
+	rep.RoundBudget = roundBudgetNotes(dir, res.Cursor.Effort)
 	rep.Handoff = deriveHandoff(dir, res.Cursor)
 	return rep
 }
@@ -587,4 +594,79 @@ func resolveTicketIDs(dir, raw string) ([]string, bool) {
 // operator-visible signal that the degradation happened at all.
 func unresolvableTicketsNote(raw string) string {
 	return fmt.Sprintf("tickets: %q does not resolve (grammar: I0NN | I0NN-I0MM | prefix <str>) — issues/implement evidence not judged", raw)
+}
+
+// roundBudgetNotes implements the round-budget advisory (I087): the
+// remediation budget is 3 rounds per effort, derived by counting nothing
+// more than the presence of the numbered round records under
+// docs/remediation/<effort>/. A record named round-N.md with N >= 4 whose
+// frontmatter lacks a non-empty extension-ratified-by: is reported as a
+// Note. Advisory only — Report.Blocking() never consults Notes, so this can
+// never change an exit code. No directory, rounds 1-3, and a ratified
+// round-4+ are all silent.
+func roundBudgetNotes(dir, effort string) []string {
+	effort = strings.TrimSpace(effort)
+	if effort == "" {
+		return nil
+	}
+	roundDir := filepath.Join(dir, "docs", "remediation", effort)
+	entries, err := os.ReadDir(roundDir)
+	if err != nil {
+		return nil
+	}
+	var notes []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		m := roundFileRe.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil || n <= remediationRoundBudget {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(roundDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if ratifiedBy(string(raw)) != "" {
+			continue
+		}
+		notes = append(notes, fmt.Sprintf(
+			"docs/remediation/%s/%s is round %d, beyond the %d-round remediation budget, and is not ratified: add `extension-ratified-by: <owner>` to its frontmatter",
+			effort, e.Name(), n, remediationRoundBudget))
+	}
+	sort.Strings(notes)
+	return notes
+}
+
+// remediationRoundBudget is the per-effort round budget stated in
+// docs/remediation/README.md.
+const remediationRoundBudget = 3
+
+var roundFileRe = regexp.MustCompile(`^round-([0-9]+)\.md$`)
+
+var ratifiedByRe = regexp.MustCompile(`(?m)^extension-ratified-by:[ \t]*(.*)$`)
+
+// ratifiedBy returns the trimmed extension-ratified-by: value from a round
+// record's frontmatter block, or "" when the key is absent, commented out,
+// or present-but-empty. Only the leading --- fenced block is consulted, so a
+// mention in the body prose never counts as ratification.
+func ratifiedBy(content string) string {
+	body := content
+	if !strings.HasPrefix(body, "---\n") {
+		return ""
+	}
+	rest := body[len("---\n"):]
+	end := strings.Index(rest, "\n---")
+	if end >= 0 {
+		rest = rest[:end]
+	}
+	m := ratifiedByRe.FindStringSubmatch(rest)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }
