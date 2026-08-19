@@ -20,10 +20,12 @@ import (
 //   - every reference made at package level (a var initializer naming a
 //     function, a table of handlers), since that reference is not inside
 //     any function body;
-//   - in a library module — one with any non-main package, i.e. a package
-//     another module can import — every exported function and method of a
-//     non-main package. A library's exported API is its contract; a gate
-//     cannot see the callers and must not call the contract dead.
+//   - every exported function and method of an importable package — a
+//     non-main, non-test package whose import path has no `internal`
+//     element. A library's exported API is its contract; a gate cannot see
+//     the callers and must not call the contract dead. A package under
+//     `internal/` has no such contract: no other module can import it, so
+//     its exported declarations are candidates like any other.
 //
 // The call graph is built from types, not from names: every reference to a
 // function object inside a body is an edge, whether it is a direct call, a
@@ -98,12 +100,6 @@ func newCallGraph(mod *loaded) *callGraph {
 		roots:         map[string]bool{},
 		methodsByName: map[string][]string{},
 	}
-	libraryModule := false
-	for _, u := range mod.units {
-		if !u.isMain && !u.isXTest {
-			libraryModule = true
-		}
-	}
 	for _, u := range mod.units {
 		for _, file := range u.files {
 			path, _ := mod.rel(file.Pos())
@@ -128,7 +124,7 @@ func newCallGraph(mod *loaded) *callGraph {
 				if recvName(fn) != "" {
 					g.methodsByName[fn.Name()] = append(g.methodsByName[fn.Name()], key)
 				}
-				if isRoot(fn, fd, u, inTest, libraryModule) {
+				if isRoot(fn, fd, u, inTest) {
 					g.roots[key] = true
 				}
 				if g.edges[key] == nil {
@@ -263,7 +259,7 @@ func (g *callGraph) candidates() []string {
 }
 
 // isRoot applies the documented root rule to one declaration.
-func isRoot(fn *types.Func, fd *ast.FuncDecl, u *unit, inTest, libraryModule bool) bool {
+func isRoot(fn *types.Func, fd *ast.FuncDecl, u *unit, inTest bool) bool {
 	if fn.Name() == "init" && fd.Recv == nil {
 		return true
 	}
@@ -273,10 +269,27 @@ func isRoot(fn *types.Func, fd *ast.FuncDecl, u *unit, inTest, libraryModule boo
 	if inTest && isTestRootName(fn.Name()) {
 		return true
 	}
-	if libraryModule && !u.isMain && !inTest && fn.Exported() {
+	if !inTest && fn.Exported() && importablePkg(u) {
 		return true
 	}
 	return false
+}
+
+// importablePkg reports whether another module could import u's package,
+// which is what makes its exported API a contract the gate must treat as
+// live. A main package is not importable, an external test package is not
+// code, and a path with an `internal` element is importable only from
+// inside this module — where the call graph can see every caller.
+func importablePkg(u *unit) bool {
+	if u.isMain || u.isXTest || u.pkg == nil {
+		return false
+	}
+	for _, elem := range strings.Split(u.pkg.Path(), "/") {
+		if elem == "internal" {
+			return false
+		}
+	}
+	return true
 }
 
 // isTestRootName reports the four function-name shapes `go test` calls.

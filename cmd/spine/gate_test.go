@@ -126,13 +126,19 @@ func binaryHygieneFixtures() (good, seeded map[string][]byte) {
 		"go.mod":    []byte("module fixture\n\ngo 1.26\n"),
 		"main.go":   []byte("package main\n\nfunc main() {}\n"),
 		"docs/x.md": []byte("notes\n"),
+		// Negative control for the stray-module rule: a testdata module
+		// tree must not be a finding.
+		"testdata/mod/go.mod": []byte("module fixture/testdata/mod\n\ngo 1.26\n"),
 	}
 	seeded = map[string][]byte{
-		"go.mod":       []byte("module fixture\n\ngo 1.26\n"),
-		"main.go":      []byte("package main\n\nfunc main() {}\n"),
-		"bin/tool":     elfBytes(),
-		"data/x.tar":   tarBytes(),
-		"tools/go.mod": []byte("module fixture/tools\n\ngo 1.26\n"),
+		"go.mod":   []byte("module fixture\n\ngo 1.26\n"),
+		"main.go":  []byte("package main\n\nfunc main() {}\n"),
+		"bin/tool": elfBytes(),
+		// A go.mod under testdata is not a subtree `go build ./...`
+		// silently skipped: the toolchain excludes testdata by rule.
+		"testdata/mod/go.mod": []byte("module fixture/testdata/mod\n\ngo 1.26\n"),
+		"data/x.tar":          tarBytes(),
+		"tools/go.mod":        []byte("module fixture/tools\n\ngo 1.26\n"),
 	}
 	return good, seeded
 }
@@ -305,6 +311,7 @@ func TestTestOnly(t *testing.T) {
 import (
 	"fmt"
 
+	"example.com/fixture/internal/priv"
 	"example.com/fixture/lib"
 )
 
@@ -312,7 +319,15 @@ type printed int
 
 func (p printed) String() string { return "printed" }
 
-func main() { fmt.Println(lib.Exported(), printed(1)) }
+func main() { fmt.Println(lib.Exported(), priv.Used(), printed(1)) }
+`),
+		// priv is under internal/: no other module can import it, so its
+		// exported API is not a contract the gate must keep live. Used is
+		// live because main calls it.
+		"internal/priv/priv.go": []byte(`package priv
+
+// Used is exported but internal, and reached from main.
+func Used() string { return "used" }
 `),
 	}
 	seeded = map[string][]byte{}
@@ -322,6 +337,12 @@ func main() { fmt.Println(lib.Exported(), printed(1)) }
 	seeded["lib/dead.go"] = []byte(`package lib
 
 func unreached() string { return "nobody calls me" }
+`)
+	// The internal counterpart of lib.Exported: exported, unreached, and
+	// under internal/, so it must be reported while lib.Exported is not.
+	seeded["internal/priv/dead.go"] = []byte(`package priv
+
+func Unreached() string { return "no module can import me" }
 `)
 	return good, seeded
 }
@@ -414,8 +435,11 @@ func TestGatePositiveControls(t *testing.T) {
 			[]string{"deferred cleanup call discards its error", "f.Close", "os.RemoveAll", "read.go"},
 		},
 		{
-			"dead-code-callgraph", deadGood, deadSeeded, nil, 1,
-			[]string{"unreachable function", "lib.unreached", "lib/dead.go"},
+			"dead-code-callgraph", deadGood, deadSeeded, nil, 2,
+			[]string{
+				"unreachable function", "lib.unreached", "lib/dead.go",
+				"priv.Unreached", "internal/priv/dead.go",
+			},
 		},
 		{
 			"n-plus-one", nplusGood, nplusSeeded,
@@ -684,10 +708,12 @@ func TestGateFixtureManifestMissing(t *testing.T) {
 	}
 }
 
-// TestGateDeadCodeRootRule is the AC2 rule fixture: in a library module,
-// exactly the unreachable unexported function is flagged — a function
-// reached only from a test is live, and an exported function of a library
-// package is live because a library's callers are outside the module.
+// TestGateDeadCodeRootRule is the AC2 rule fixture, plus the importable-API
+// boundary: exactly the unreachable unexported function and the unreachable
+// exported function under internal/ are flagged. A function reached only
+// from a test is live; an exported function of an importable library package
+// is live because a library's callers are outside the module; an exported
+// function under internal/ has no such callers and is a candidate.
 func TestGateDeadCodeRootRule(t *testing.T) {
 	_, seeded := deadCodeFixtures()
 	dir := gateRepo(t, seeded)
@@ -698,12 +724,35 @@ func TestGateDeadCodeRootRule(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 	}
 	r := readResults(t, results)
-	if len(r.Findings) != 1 {
-		t.Fatalf("want exactly the unreachable function, got %+v", r.Findings)
+	want := map[string]string{
+		"lib.unreached":  "lib/dead.go",
+		"priv.Unreached": "internal/priv/dead.go",
 	}
-	f := r.Findings[0]
-	if !strings.Contains(f.Message, "lib.unreached") || f.File != "lib/dead.go" || f.Line != 3 {
-		t.Errorf("finding=%+v", f)
+	if len(r.Findings) != len(want) {
+		t.Fatalf("want exactly %d unreachable functions, got %+v", len(want), r.Findings)
+	}
+	for _, f := range r.Findings {
+		matched := false
+		for name, file := range want {
+			if strings.Contains(f.Message, name) {
+				matched = true
+				if f.File != file || f.Line != 3 {
+					t.Errorf("finding=%+v, want file %s line 3", f, file)
+				}
+				delete(want, name)
+				break
+			}
+		}
+		if !matched {
+			t.Errorf("unexpected finding %+v", f)
+		}
+	}
+	if len(want) != 0 {
+		t.Errorf("missing findings for %v", want)
+	}
+	// The importable exported API must never be reported.
+	if strings.Contains(out, "lib.Exported") {
+		t.Errorf("exported API of an importable package reported dead:\n%s", out)
 	}
 }
 
@@ -1172,4 +1221,74 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+// unparseableTestdata is what Go repos routinely keep under testdata: a
+// template source, and a deliberately broken one. Neither is part of any
+// build — the toolchain excludes testdata by rule — so no syntactic check
+// class may exit 2 on them.
+func unparseableTestdata() map[string][]byte {
+	return map[string][]byte{
+		"pkg/testdata/tmpl_test.go": []byte("package {{.Package}}\n\nfunc Test{{.Name}}(t *testing.T) { t.Skip(\"tmpl\") }\n"),
+		"pkg/testdata/bad.go":       []byte("this is not go at all {\n"),
+	}
+}
+
+// withTestdata returns files plus the unparseable testdata sources.
+func withTestdata(files map[string][]byte) map[string][]byte {
+	out := map[string][]byte{}
+	for k, v := range files {
+		out[k] = v
+	}
+	for k, v := range unparseableTestdata() {
+		out[k] = v
+	}
+	return out
+}
+
+// TestGateSyntacticClassesTolerateTestdata is the positive-control pair for
+// the testdata rule: with an unparseable template and a broken source under
+// testdata, every tree-walking class still passes its known-good fixture
+// (exit 0, not the exit 2 a parse error would have produced) and still fails
+// on the seeded content (exit 1). gitignore-control walks testdata on
+// purpose, so its tolerance is per-file, not per-directory.
+func TestGateSyntacticClassesTolerateTestdata(t *testing.T) {
+	tskipGood, tskipSeeded := tskipFixtures()
+	ignGood, ignSeeded := gitignoreControlFixtures()
+	enumGood, enumSeeded := testEnumVsSpecFixtures()
+	nplusGood, nplusSeeded := nPlusOneFixtures()
+	cases := []struct {
+		check        string
+		good, seeded map[string][]byte
+		env          map[string]string
+	}{
+		{"tskip", tskipGood, tskipSeeded, nil},
+		{"gitignore-control", ignGood, ignSeeded, map[string]string{"SPINE_GATE_BUILD_OUTPUTS": "bin/spine"}},
+		{"test-enum-vs-spec", enumGood, enumSeeded, map[string]string{"SPINE_GATE_TEST_ENUM_SPEC": "docs/spec.md"}},
+		{"n-plus-one", nplusGood, nplusSeeded, map[string]string{"SPINE_GATE_N_PLUS_ONE_CLIENTS": "Query,Fetch"}},
+	}
+	for _, tc := range cases {
+		for _, arm := range []struct {
+			name  string
+			files map[string][]byte
+			want  int
+		}{
+			{"good", tc.good, 0},
+			{"seeded", tc.seeded, 1},
+		} {
+			t.Run(tc.check+"/"+arm.name, func(t *testing.T) {
+				for k, v := range tc.env {
+					t.Setenv(k, v)
+				}
+				dir := gateRepo(t, withTestdata(arm.files))
+				code, out, errs := runCmd(t, "gate", "go", tc.check, "--dir", dir)
+				if code != arm.want {
+					t.Fatalf("code=%d want %d stdout=%q stderr=%q", code, arm.want, out, errs)
+				}
+				if strings.Contains(out, "testdata") || strings.Contains(errs, "testdata") {
+					t.Errorf("testdata named in output: stdout=%q stderr=%q", out, errs)
+				}
+			})
+		}
+	}
 }

@@ -52,7 +52,11 @@ const headerBytes = 512
 // checkBinaryHygiene reports tracked files that are executables or archives
 // by content, plus stray second module trees — a go.mod tracked anywhere
 // other than the repo root, which makes `go build ./...` silently skip a
-// subtree. It reads the tracked set from git, so --dir must be a git repo.
+// subtree. A go.mod under a testdata element is exempt from that rule: the
+// toolchain excludes testdata from a build by rule, so such a tree is not a
+// subtree the build silently skipped. Content detection of committed
+// binaries still applies under testdata. It reads the tracked set from git,
+// so --dir must be a git repo.
 func checkBinaryHygiene(dir string, cfg Config) ([]Finding, error) {
 	tracked, err := gitLsFiles(dir)
 	if err != nil {
@@ -63,7 +67,7 @@ func checkBinaryHygiene(dir string, cfg Config) ([]Finding, error) {
 		if rel == "go.mod" {
 			continue
 		}
-		if filepath.Base(rel) == "go.mod" {
+		if filepath.Base(rel) == "go.mod" && !underTestdata(rel) {
 			findings = append(findings, Finding{
 				Severity: SeverityError,
 				Message:  "stray second module tree: tracked go.mod outside the repo root",

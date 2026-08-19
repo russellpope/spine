@@ -134,9 +134,35 @@ func parseTskipAllow(raw string) (map[string]bool, error) {
 	return allow, nil
 }
 
-// skipDir names directories no check class descends into.
+// skipDir names directories the syntactic check classes do not descend
+// into: the toolchain's own ignore set — testdata and any name starting
+// with "_" or "." — plus vendor and node_modules. Go repos routinely keep
+// template or deliberately broken sources under testdata, and `go build
+// ./...` never sees them; a gate that parsed them would exit 2 on a tree
+// the compiler is perfectly happy with.
 func skipDir(name string) bool {
-	return name == ".git" || name == "vendor" || name == "node_modules"
+	return name == "testdata" || skipDirExceptTestdata(name)
+}
+
+// skipDirExceptTestdata is skipDir minus the testdata rule, for the one
+// walker that must descend into testdata: gitignore-control's entry-point
+// arm, where an ignored testdata entry point is hidden just the same.
+func skipDirExceptTestdata(name string) bool {
+	if name == "vendor" || name == "node_modules" {
+		return true
+	}
+	return len(name) > 1 && (name[0] == '_' || name[0] == '.')
+}
+
+// underTestdata reports whether rel (a slash-separated path) has a testdata
+// element, the paths the toolchain excludes from a build.
+func underTestdata(rel string) bool {
+	for _, elem := range strings.Split(rel, "/") {
+		if elem == "testdata" {
+			return true
+		}
+	}
+	return false
 }
 
 // relSlash reports path relative to dir in slash form, the form every

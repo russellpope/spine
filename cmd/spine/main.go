@@ -649,9 +649,11 @@ checks:  ` + strings.Join(gate.CheckNames(), ", ") + `
                      unreachable from any root. Roots: every main in a
                      package main, every init, every Test/Benchmark/Example/
                      Fuzz function in a _test.go file, every package-level
-                     reference, and — in a library module (one with any
-                     importable non-main package) — every exported function
-                     and method of a non-main package. Interface calls reach
+                     reference, and every exported function and method of
+                     an importable package — non-main, non-test, and with no
+                     "internal" element in its import path. Exported
+                     declarations under internal/ are candidates like any
+                     other: no other module can import them. Interface calls reach
                      every concrete method of that name, and a method is
                      live if its name is a method of any interface declared
                      in the module or in a package it imports (so a String
@@ -691,6 +693,17 @@ checks:  ` + strings.Join(gate.CheckNames(), ", ") + `
                      15m. All three are env-only tuning knobs, not
                      gate_pack_config keys, so spine update never renders
                      them.
+
+The syntactic classes (tskip, n-plus-one, test-enum-vs-spec, gitignore-
+control) walk the tree under --dir and skip what the Go toolchain itself
+ignores: .git, vendor, node_modules, testdata, and any directory whose name
+starts with "_" or ".". gitignore-control's entry-point arm still walks
+testdata, since an ignored testdata entry point is hidden just the same, but
+a testdata file that does not parse is skipped rather than reported as
+misconfiguration. binary-hygiene's stray-module rule likewise exempts paths
+with a testdata element — "go build ./..." never descends there — while its
+content detection of committed binaries applies under testdata as everywhere
+else.
 
 deferred-cleanup-errcheck and dead-code-callgraph type-check the module
 under --dir (go list + go/types, stdlib only). A --dir that does not compile

@@ -82,8 +82,11 @@ func checkGitignoreControl(dir string, cfg Config) ([]Finding, error) {
 
 // mainPackageFiles returns the working-tree .go files under dir whose
 // package clause is `package main`, relative to dir in slash form. Only
-// .git, vendor and node_modules are skipped — testdata is walked on
-// purpose, since an ignored testdata entry point is hidden just the same.
+// The toolchain's ignore set is skipped except testdata, which is walked on
+// purpose, since an ignored testdata entry point is hidden just the same; a
+// testdata file that does not parse is skipped rather than failing the
+// walk, because a template or deliberately broken source under testdata is
+// a normal thing for a Go repo to carry.
 func mainPackageFiles(dir string) ([]string, error) {
 	var mains []string
 	fset := token.NewFileSet()
@@ -92,7 +95,7 @@ func mainPackageFiles(dir string) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			if skipDir(d.Name()) && path != dir {
+			if skipDirExceptTestdata(d.Name()) && path != dir {
 				return filepath.SkipDir
 			}
 			return nil
@@ -103,6 +106,9 @@ func mainPackageFiles(dir string) ([]string, error) {
 		rel := relSlash(dir, path)
 		file, perr := parser.ParseFile(fset, path, nil, parser.PackageClauseOnly)
 		if perr != nil {
+			if underTestdata(rel) {
+				return nil
+			}
 			return fmt.Errorf("parsing %s: %w", rel, perr)
 		}
 		if file.Name != nil && file.Name.Name == "main" {
