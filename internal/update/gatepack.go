@@ -15,10 +15,13 @@ import (
 // the pack must be present inside a file the repo also owns. spine owns the
 // region between these two marker lines and nothing else in the file.
 const (
-	MaipipeFile      = "maipipe.toml"
-	gateRegionBegin  = "# spine:begin gate-pack "
-	gateRegionEnd    = "# spine:end"
-	gatePipelineName = "gate-go"
+	MaipipeFile     = "maipipe.toml"
+	gateRegionBegin = "# spine:begin gate-pack "
+	gateRegionEnd   = "# spine:end"
+	// maipipeSchemaLine is the required top-level key of a maipipe.toml;
+	// spine writes it only when creating the file from scratch (I091).
+	maipipeSchemaLine = "schema = 0\n"
+	gatePipelineName  = "gate-go"
 	// The battery is the pack's advisory lane, so it gets its own pipeline
 	// on maipipe's audit profile rather than a stage in the enforcement
 	// lane (ADR 0015 item 5): a survivor must never block a push.
@@ -111,7 +114,7 @@ func renderGateRegion(s gatePackSettings) string {
 		if s.disabled[check] || check == mutateCheck {
 			continue
 		}
-		b.WriteString("\n[[pipelines." + gatePipelineName + ".stages]]\n")
+		b.WriteString("\n[[pipelines." + gatePipelineName + ".stage]]\n")
 		fmt.Fprintf(&b, "name = %q\n", check)
 		fmt.Fprintf(&b, "run = %q\n", "spine gate "+gate.PackName+" "+check)
 		if key := gateCheckConfig[check]; key != "" {
@@ -122,7 +125,7 @@ func renderGateRegion(s gatePackSettings) string {
 	}
 	if !s.disabled[mutateCheck] {
 		b.WriteString("\n[pipelines." + mutationPipelineName + "]\nprofile = \"audit\"\n")
-		b.WriteString("\n[[pipelines." + mutationPipelineName + ".stages]]\n")
+		b.WriteString("\n[[pipelines." + mutationPipelineName + ".stage]]\n")
 		fmt.Fprintf(&b, "name = %q\n", mutateCheck)
 		fmt.Fprintf(&b, "run = %q\n", "spine gate "+gate.PackName+" "+mutateCheck)
 	}
@@ -152,10 +155,14 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 	path := filepath.Join(dir, MaipipeFile)
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
+		// A file maipipe will load needs its top-level `schema` key before
+		// any table header (I091): created = schema line + region; the
+		// repo adds its lanes below.
+		created := maipipeSchemaLine + "\n" + region
 		report.State = Pending
 		report.Created = true
-		report.Diff = Diff(report.Path, "", region)
-		report.newContent = region
+		report.Diff = Diff(report.Path, "", created)
+		report.newContent = created
 		return report, true, nil
 	}
 	if err != nil {
@@ -254,9 +261,9 @@ func unrecognizedRegionLines(lines []string) []string {
 		case l == "", comments[l]:
 			continue
 		case l == "[pipelines."+gatePipelineName+"]", l == `profile = "full"`,
-			l == "[[pipelines."+gatePipelineName+".stages]]",
+			l == "[[pipelines."+gatePipelineName+".stage]]",
 			l == "[pipelines."+mutationPipelineName+"]", l == `profile = "audit"`,
-			l == "[[pipelines."+mutationPipelineName+".stages]]":
+			l == "[[pipelines."+mutationPipelineName+".stage]]":
 			continue
 		}
 		if v, ok := quotedValue(l, "name = "); ok && checks[v] {

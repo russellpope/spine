@@ -47,8 +47,11 @@ what the region renders.
   tolerate a comment-delimited region it did not write. This is recorded on
   maipipe's side as a cross-product ticket, together with the `spine`-on-
   PATH dependency and the pipeline names.
-- If `maipipe.toml` is absent, `spine update` creates it containing only the
-  region and a note; the repo adds its lanes.
+- If `maipipe.toml` is absent, `spine update` creates it containing
+  maipipe's required top-level `schema = 0` plus the region and a note; the
+  repo adds its lanes. *(Amended 2026-08-19, I091 — the first dogfood
+  `maipipe validate` rejected a region-only file and the plural `stages`
+  array; the render is now `[[pipelines.<name>.stage]]`.)*
 - Region integrity (markers present, canonical content) becomes a doctor
   finding, mirroring D3 for markdown files.
 - Should maipipe later add an include mechanism, moving the region to a

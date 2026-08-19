@@ -30,9 +30,10 @@ func readFile(t *testing.T, path string) string {
 	return string(raw)
 }
 
-// AC (I085): absent maipipe.toml + gate_pack set → the file is created
-// containing only the region, with one stage per enabled check class.
-func TestGatePackCreatesMaipipeWithRegionOnly(t *testing.T) {
+// AC (I085, amended I091): absent maipipe.toml + gate_pack set → the file
+// is created as maipipe's required top-level `schema = 0` followed by the
+// region and nothing else, with one stage per enabled check class.
+func TestGatePackCreatesMaipipeWithSchemaAndRegionOnly(t *testing.T) {
 	dir := gateRepo(t, "[]", nil)
 	reports, err := Run(Options{Dir: dir, Write: true})
 	if err != nil {
@@ -43,9 +44,14 @@ func TestGatePackCreatesMaipipeWithRegionOnly(t *testing.T) {
 		t.Fatalf("want a created maipipe.toml, got state=%v created=%v", mp.State, mp.Created)
 	}
 	got := readFile(t, filepath.Join(dir, MaipipeFile))
-	if !strings.HasPrefix(got, "# spine:begin gate-pack "+gate.PackID()+"\n") ||
+	if !strings.HasPrefix(got, "schema = 0\n\n# spine:begin gate-pack "+gate.PackID()+"\n") ||
 		!strings.HasSuffix(got, "# spine:end\n") {
-		t.Fatalf("created file is not region-only:\n%s", got)
+		t.Fatalf("created file is not schema line + region:\n%s", got)
+	}
+	// maipipe's stage array is the singular `stage` (I091): the plural is a
+	// parse error ("unknown field `stages`"), so it must never render.
+	if strings.Contains(got, ".stages]]") {
+		t.Fatalf("region renders the plural [[…stages]] maipipe rejects:\n%s", got)
 	}
 	if !strings.Contains(got, "[pipelines.gate-go]\nprofile = \"full\"\n") {
 		t.Errorf("missing gate-go pipeline header:\n%s", got)
@@ -56,7 +62,7 @@ func TestGatePackCreatesMaipipeWithRegionOnly(t *testing.T) {
 			t.Errorf("missing stage for check class %q:\n%s", check, got)
 		}
 	}
-	if n := strings.Count(got, "[[pipelines.gate-go.stages]]"); n != len(gate.CheckNames())-1 {
+	if n := strings.Count(got, "[[pipelines.gate-go.stage]]"); n != len(gate.CheckNames())-1 {
 		t.Errorf("stage count = %d, want %d (mutate is the advisory lane, not a gate-go stage)",
 			n, len(gate.CheckNames())-1)
 	}
@@ -75,17 +81,17 @@ func TestGatePackRendersMutationPipeline(t *testing.T) {
 	}
 	got := readFile(t, filepath.Join(dir, MaipipeFile))
 	want := "[pipelines.mutation-go]\nprofile = \"audit\"\n\n" +
-		"[[pipelines.mutation-go.stages]]\nname = \"mutate\"\nrun = \"spine gate go mutate\"\n"
+		"[[pipelines.mutation-go.stage]]\nname = \"mutate\"\nrun = \"spine gate go mutate\"\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("mutation-go pipeline missing or not canonical:\n%s", got)
 	}
-	if n := strings.Count(got, "[[pipelines.mutation-go.stages]]"); n != 1 {
+	if n := strings.Count(got, "[[pipelines.mutation-go.stage]]"); n != 1 {
 		t.Errorf("mutation-go stage count = %d, want 1", n)
 	}
 	if strings.Index(got, "[pipelines.mutation-go]") < strings.Index(got, "[pipelines.gate-go]") {
 		t.Errorf("mutation-go rendered before gate-go:\n%s", got)
 	}
-	if strings.Contains(got, "[[pipelines.gate-go.stages]]\nname = \"mutate\"") {
+	if strings.Contains(got, "[[pipelines.gate-go.stage]]\nname = \"mutate\"") {
 		t.Errorf("mutate rendered as a gate-go stage:\n%s", got)
 	}
 }
@@ -114,7 +120,7 @@ func TestGatePackDisabledMutateOmitsPipeline(t *testing.T) {
 // lanes untouched, and nothing reported as a local edit.
 func TestGatePackPreMutationRegionRefreshes(t *testing.T) {
 	dir := gateRepo(t, "[]", nil)
-	lanes := "[pipelines.full]\n\n[[pipelines.full.stages]]\nname = \"build\"\nrun = \"make build\"\n"
+	lanes := "[pipelines.full]\n\n[[pipelines.full.stage]]\nname = \"build\"\nrun = \"make build\"\n"
 	path := filepath.Join(dir, MaipipeFile)
 	if err := os.WriteFile(path, []byte(lanes+"\n"+preMutationRegion), 0o644); err != nil {
 		t.Fatal(err)
@@ -154,11 +160,11 @@ const preMutationRegion = `# spine:begin gate-pack go@1
 [pipelines.gate-go]
 profile = "full"
 
-[[pipelines.gate-go.stages]]
+[[pipelines.gate-go.stage]]
 name = "binary-hygiene"
 run = "spine gate go binary-hygiene"
 
-[[pipelines.gate-go.stages]]
+[[pipelines.gate-go.stage]]
 name = "tskip"
 run = "spine gate go tskip"
 # spine:end
@@ -174,7 +180,7 @@ func TestGatePackDisabledOmitsStage(t *testing.T) {
 	if strings.Contains(got, "spine gate go tskip") {
 		t.Errorf("disabled check class still rendered:\n%s", got)
 	}
-	if n := strings.Count(got, "[[pipelines.gate-go.stages]]"); n != len(gate.CheckNames())-2 {
+	if n := strings.Count(got, "[[pipelines.gate-go.stage]]"); n != len(gate.CheckNames())-2 {
 		t.Errorf("stage count = %d, want %d", n, len(gate.CheckNames())-2)
 	}
 	if !strings.Contains(got, "spine gate go binary-hygiene") {
@@ -213,7 +219,7 @@ func TestGatePackConfigRendersEnv(t *testing.T) {
 // byte-for-byte; the region is appended, then refreshed in place.
 func TestGatePackPreservesUserLanes(t *testing.T) {
 	dir := gateRepo(t, "[]", nil)
-	lanes := "[pipelines.full]\n\n[[pipelines.full.stages]]\nname = \"build\"\nrun = \"make build\"\n"
+	lanes := "[pipelines.full]\n\n[[pipelines.full.stage]]\nname = \"build\"\nrun = \"make build\"\n"
 	path := filepath.Join(dir, MaipipeFile)
 	if err := os.WriteFile(path, []byte(lanes), 0o644); err != nil {
 		t.Fatal(err)
