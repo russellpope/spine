@@ -19,6 +19,11 @@ const (
 	gateRegionBegin  = "# spine:begin gate-pack "
 	gateRegionEnd    = "# spine:end"
 	gatePipelineName = "gate-go"
+	// The battery is the pack's advisory lane, so it gets its own pipeline
+	// on maipipe's audit profile rather than a stage in the enforcement
+	// lane (ADR 0015 item 5): a survivor must never block a push.
+	mutationPipelineName = "mutation-go"
+	mutateCheck          = "mutate"
 )
 
 // gatePackConfigKeys are the gate_pack_config sub-keys WORKFLOW.md renders,
@@ -46,6 +51,7 @@ var gateRegionComment = []string{
 	"# spine manages this region. Change it through the gate_pack keys in",
 	"# WORKFLOW.md and re-run `spine update`, never by hand.",
 	"# Compose the pack into your own lane with a stage: pipeline = \"" + gatePipelineName + "\"",
+	"# and the advisory battery with: pipeline = \"" + mutationPipelineName + "\"",
 }
 
 // gatePackSettings is the WORKFLOW.md-side input to the region render.
@@ -90,7 +96,10 @@ func parseList(v string) []string {
 
 // renderGateRegion is the canonical region for (pack, disabled, config): a
 // pure function of its inputs, byte-deterministic, ending in a newline.
-// Stages are one per enabled check class in gate.CheckNames() order.
+// gate-go carries one stage per enabled check class in gate.CheckNames()
+// order, except mutate; mutation-go carries mutate alone. Disabling mutate
+// omits the mutation-go pipeline entirely, the same way disabling any other
+// class omits its stage.
 func renderGateRegion(s gatePackSettings) string {
 	var b strings.Builder
 	b.WriteString(gateRegionBegin + s.pack + "\n")
@@ -99,7 +108,7 @@ func renderGateRegion(s gatePackSettings) string {
 	}
 	b.WriteString("\n[pipelines." + gatePipelineName + "]\nprofile = \"full\"\n")
 	for _, check := range gate.CheckNames() {
-		if s.disabled[check] {
+		if s.disabled[check] || check == mutateCheck {
 			continue
 		}
 		b.WriteString("\n[[pipelines." + gatePipelineName + ".stages]]\n")
@@ -110,6 +119,12 @@ func renderGateRegion(s gatePackSettings) string {
 				fmt.Fprintf(&b, "env = { %s = %s }\n", gate.EnvVar(key), strconv.Quote(v))
 			}
 		}
+	}
+	if !s.disabled[mutateCheck] {
+		b.WriteString("\n[pipelines." + mutationPipelineName + "]\nprofile = \"audit\"\n")
+		b.WriteString("\n[[pipelines." + mutationPipelineName + ".stages]]\n")
+		fmt.Fprintf(&b, "name = %q\n", mutateCheck)
+		fmt.Fprintf(&b, "run = %q\n", "spine gate "+gate.PackName+" "+mutateCheck)
 	}
 	b.WriteString(gateRegionEnd + "\n")
 	return b.String()
@@ -239,7 +254,9 @@ func unrecognizedRegionLines(lines []string) []string {
 		case l == "", comments[l]:
 			continue
 		case l == "[pipelines."+gatePipelineName+"]", l == `profile = "full"`,
-			l == "[[pipelines."+gatePipelineName+".stages]]":
+			l == "[[pipelines."+gatePipelineName+".stages]]",
+			l == "[pipelines."+mutationPipelineName+"]", l == `profile = "audit"`,
+			l == "[[pipelines."+mutationPipelineName+".stages]]":
 			continue
 		}
 		if v, ok := quotedValue(l, "name = "); ok && checks[v] {

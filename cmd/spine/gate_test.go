@@ -630,7 +630,7 @@ func TestGateUsageDocumentsPack(t *testing.T) {
 		t.Fatalf("spine help does not mention gate: %q", out)
 	}
 	_, _, errs := runCmd(t, "gate", "go")
-	wants := []string{"go@1", "SPINE_GATE_TSKIP_ALLOW", "SPINE_GATE_BUILD_OUTPUTS", "SPINE_GATE_FIXTURE_MANIFEST", "SPINE_GATE_TEST_ENUM_SPEC", "SPINE_GATE_N_PLUS_ONE_CLIENTS", "SPINE_GATE_CLEANUP_FUNCS", "MAIPIPE_RESULTS", "0 pass, 1 findings, 2 misconfiguration"}
+	wants := []string{"go@1", "SPINE_GATE_TSKIP_ALLOW", "SPINE_GATE_BUILD_OUTPUTS", "SPINE_GATE_FIXTURE_MANIFEST", "SPINE_GATE_TEST_ENUM_SPEC", "SPINE_GATE_N_PLUS_ONE_CLIENTS", "SPINE_GATE_CLEANUP_FUNCS", "SPINE_GATE_MUTATE_SPEC", "SPINE_GATE_MUTATE_VERIFY", "SPINE_GATE_MUTATE_TIMEOUT", "MAIPIPE_RESULTS", "0 pass, 1 findings, 2 misconfiguration"}
 	// The check list is derived from the registry, so a class that ships
 	// without a usage entry is a test failure, not a documentation drift.
 	wants = append(wants, gate.CheckNames()...)
@@ -877,4 +877,252 @@ func TestGateConfigMisconfiguration(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mutateModule is the mutation battery's fixture tree: one tested function
+// (Double, whose behaviour the suite can see) and one untested one (Label,
+// whose behaviour it cannot). That asymmetry is what makes a KILLED and a
+// SURVIVED row happen for real rather than by assertion.
+const mutateModule = `package fixture
+
+func Double(n int) int { return n * 2 }
+
+func Label() string { return "count" }
+`
+
+const mutateModuleTest = `package fixture
+
+import "testing"
+
+func TestDouble(t *testing.T) {
+	if Double(3) != 6 {
+		t.Fatal("double")
+	}
+}
+`
+
+// mutateSpec exercises every outcome the checklist names: a killed probe, a
+// survived one (the blind spot), a site the literal no longer has, a
+// mutation that breaks the build, and a report-only probe excluded from the
+// scorable denominator.
+const mutateSpec = `[
+  {"id": "M1-invocation", "file": "calc.go", "find": "return n * 2", "replace": "return n * 3", "desc": "Double returns the wrong multiple"},
+  {"id": "M2-units", "file": "calc.go", "find": "return \"count\"", "replace": "return \"total\"", "desc": "Label reports a different unit"},
+  {"id": "M3-drift", "file": "calc.go", "find": "return n * 9", "replace": "return n * 8", "desc": "a site the tree no longer has"},
+  {"id": "M4-build", "file": "calc.go", "find": "func Label() string", "replace": "func Label() string int", "desc": "mutation that does not compile"},
+  {"id": "M5-lifecycle", "file": "calc.go", "find": "package fixture", "replace": "package fixture\n\nvar guard = 1", "report_only": true, "desc": "near-untestable class"}
+]`
+
+func mutateFixture(t *testing.T, spec, testFile string) string {
+	t.Helper()
+	return gateRepo(t, map[string][]byte{
+		"go.mod":                  []byte("module fixture\n\ngo 1.26\n"),
+		"calc.go":                 []byte(mutateModule),
+		"calc_test.go":            []byte(testFile),
+		"docs/mutation-spec.json": []byte(spec),
+	})
+}
+
+// TestGateMutatePositiveControl is the mutate class's positive-control pair
+// at the CLI seam: a suite that catches one behaviour change (KILLED) and
+// misses another (SURVIVED), plus the three invalid-probe shapes. The class
+// is advisory, so the pair is in the rows and the two kill rates rather than
+// in the exit code, which is 0 either way.
+func TestGateMutatePositiveControl(t *testing.T) {
+	dir := mutateFixture(t, mutateSpec, mutateModuleTest)
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+
+	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir)
+	if code != 0 {
+		t.Fatalf("survivors must not fail the advisory lane: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	if errs != "" {
+		t.Errorf("stderr not pristine: %q", errs)
+	}
+	r := readResults(t, results)
+	if r.Status != "pass" {
+		t.Errorf("status = %q, want pass (advisory)", r.Status)
+	}
+	type row struct {
+		result, severity string
+		line             int
+	}
+	want := map[string]row{
+		"M1-invocation": {"KILLED", "info", 3},
+		"M2-units":      {"SURVIVED", "warn", 5},
+		"M3-drift":      {"NO-SITE", "info", 0},
+		"M4-build":      {"BUILD-ERR", "info", 5},
+		"M5-lifecycle":  {"SURVIVED", "warn", 1},
+	}
+	seen := map[string]bool{}
+	for _, f := range r.Findings {
+		id, _, _ := strings.Cut(f.Message, " ")
+		w, ok := want[id]
+		if !ok {
+			t.Errorf("unexpected row %+v", f)
+			continue
+		}
+		seen[id] = true
+		if !strings.HasPrefix(f.Message, id+" "+w.result+" ") {
+			t.Errorf("%s: message = %q, want result %s", id, f.Message, w.result)
+		}
+		if f.Severity != w.severity {
+			t.Errorf("%s: severity = %q, want %q", id, f.Severity, w.severity)
+		}
+		if f.Line != w.line {
+			t.Errorf("%s: line = %d, want %d", id, f.Line, w.line)
+		}
+		if f.Code != "go@1/mutate" {
+			t.Errorf("%s: code = %q", id, f.Code)
+		}
+		if f.File != "calc.go" {
+			t.Errorf("%s: file = %q, want the probe's file", id, f.File)
+		}
+		if id == "M5-lifecycle" && !strings.HasSuffix(f.Message, "[report-only]") {
+			t.Errorf("%s: report-only probe not marked: %q", id, f.Message)
+		}
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("rows = %d, want %d: %+v", len(seen), len(want), r.Findings)
+	}
+	// Raw counts every valid probe; scorable drops the report-only one.
+	for _, w := range []string{
+		"kill rate (raw): 1/3 = 33%   (excluded: 1 no-site, 1 build-err)",
+		"kill rate (scorable): 1/2 = 50%   (excluded: 1 report-only, 1 no-site, 1 build-err)",
+	} {
+		if !strings.Contains(r.Summary, w) {
+			t.Errorf("summary missing %q: %q", w, r.Summary)
+		}
+	}
+	// The tree under --dir is never mutated.
+	if got := readFile(t, filepath.Join(dir, "calc.go")); got != mutateModule {
+		t.Errorf("--dir was mutated:\n%s", got)
+	}
+}
+
+// TestGateMutateHumanTable is the no-MAIPIPE_RESULTS path: the table, the
+// two kill rates, and the survivor list the checklist's record format asks
+// for.
+func TestGateMutateHumanTable(t *testing.T) {
+	dir := mutateFixture(t, mutateSpec, mutateModuleTest)
+	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	for _, want := range []string{
+		"severity", "go@1/mutate", "M1-invocation KILLED",
+		"kill rate (raw): 1/3 = 33%", "kill rate (scorable): 1/2 = 50%",
+		"surviving mutations (behaviour the suite cannot see):",
+		"  - M2-units: Label reports a different unit",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestGateMutateControlFails is the battery's own negative control: a tree
+// whose suite is already red makes every probe meaningless, so no probe
+// runs, one error finding is reported, and the stage fails (exit 1) — the
+// one condition under which the advisory lane fails at all.
+func TestGateMutateControlFails(t *testing.T) {
+	red := `package fixture
+
+import "testing"
+
+func TestDouble(t *testing.T) {
+	t.Fatal("this tree is red before any mutation")
+}
+`
+	dir := mutateFixture(t, mutateSpec, red)
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	r := readResults(t, results)
+	if r.Status != "fail" || len(r.Findings) != 1 {
+		t.Fatalf("status=%q findings=%+v", r.Status, r.Findings)
+	}
+	f := r.Findings[0]
+	if f.Severity != "error" || f.Code != "go@1/mutate" ||
+		!strings.Contains(f.Message, "control failed: unmutated tree is not green") {
+		t.Errorf("control finding = %+v", f)
+	}
+	if !strings.Contains(r.Summary, "no probes run") {
+		t.Errorf("summary = %q", r.Summary)
+	}
+}
+
+// TestGateMutateSpecMisconfiguration: no spec at the default path and no
+// override is misconfiguration (exit 2) naming both the variable and the
+// path it looked at; a custom path is honoured.
+func TestGateMutateSpecMisconfiguration(t *testing.T) {
+	bare := gateRepo(t, map[string][]byte{
+		"go.mod":       []byte("module fixture\n\ngo 1.26\n"),
+		"calc.go":      []byte(mutateModule),
+		"calc_test.go": []byte(mutateModuleTest),
+	})
+	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", bare)
+	if code != 2 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	for _, want := range []string{"SPINE_GATE_MUTATE_SPEC", "docs/mutation-spec.json"} {
+		if !strings.Contains(errs, want) {
+			t.Errorf("stderr missing %q: %q", want, errs)
+		}
+	}
+
+	// Unparseable spec at an overridden path: still misconfiguration.
+	broken := gateRepo(t, map[string][]byte{
+		"go.mod":       []byte("module fixture\n\ngo 1.26\n"),
+		"calc.go":      []byte(mutateModule),
+		"calc_test.go": []byte(mutateModuleTest),
+		"probes.json":  []byte("{not json"),
+	})
+	t.Setenv("SPINE_GATE_MUTATE_SPEC", "probes.json")
+	code, _, errs = runCmd(t, "gate", "go", "mutate", "--dir", broken)
+	if code != 2 || !strings.Contains(errs, "probes.json") {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+}
+
+// TestGateMutateCustomVerify: the verify command is overridable, runs with
+// sh -c in the copy, and — being one phase — reports no BUILD-ERR, so a
+// mutation that would not compile reads as SURVIVED under it.
+func TestGateMutateCustomVerify(t *testing.T) {
+	dir := mutateFixture(t, mutateSpec, mutateModuleTest)
+	t.Setenv("SPINE_GATE_MUTATE_VERIFY", `grep -q "n \* 2" calc.go`)
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir)
+	if code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	r := readResults(t, results)
+	want := map[string]string{
+		"M1-invocation": "KILLED", "M2-units": "SURVIVED", "M3-drift": "NO-SITE",
+		"M4-build": "SURVIVED", "M5-lifecycle": "SURVIVED",
+	}
+	for _, f := range r.Findings {
+		id, _, _ := strings.Cut(f.Message, " ")
+		if w := want[id]; w == "" || !strings.HasPrefix(f.Message, id+" "+w+" ") {
+			t.Errorf("row %q, want result %q", f.Message, want[id])
+		}
+	}
+	if strings.Contains(string(mustJSON(t, r)), "BUILD-ERR") {
+		t.Errorf("a one-phase verify command cannot tell BUILD-ERR from KILLED: %+v", r.Findings)
+	}
+}
+
+// readFile is a test-local reader for asserting a fixture file's bytes.
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }

@@ -32,14 +32,20 @@ type jsonFinding struct {
 	Code     string `json:"code"`
 }
 
-// emit reports one check class's findings: the results-contract JSON to the
+// emit reports one check class's outcome: the results-contract JSON to the
 // path in MAIPIPE_RESULTS when that variable is set, otherwise a human table
-// on stdout and no file. Every check class shares this one emitter.
-func emit(check string, findings []Finding, stdout io.Writer) error {
+// on stdout and no file. Every check class shares this one emitter. A class
+// that owns its own judgement (Report.Advisory, Report.Summary) overrides
+// the pack defaults here; Report.Detail is human-only.
+func emit(check string, rep Report, stdout io.Writer) error {
+	findings := rep.Findings
 	status, summary := "pass", fmt.Sprintf("%s: no findings", Code(check))
-	if len(findings) > 0 {
+	if len(findings) > 0 && !rep.Advisory {
 		status = "fail"
 		summary = fmt.Sprintf("%s: %d finding(s)", Code(check), len(findings))
+	}
+	if rep.Summary != "" {
+		summary = rep.Summary
 	}
 	if path, ok := os.LookupEnv(ResultsEnvVar); ok {
 		out := results{MaipipeResults: 0, Status: status, Summary: summary, Findings: []jsonFinding{}}
@@ -57,6 +63,9 @@ func emit(check string, findings []Finding, stdout io.Writer) error {
 	}
 	writeTable(stdout, findings)
 	fmt.Fprintln(stdout, summary)
+	for _, line := range rep.Detail {
+		fmt.Fprintln(stdout, line)
+	}
 	return nil
 }
 

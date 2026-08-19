@@ -56,13 +56,113 @@ func TestGatePackCreatesMaipipeWithRegionOnly(t *testing.T) {
 			t.Errorf("missing stage for check class %q:\n%s", check, got)
 		}
 	}
-	if n := strings.Count(got, "[[pipelines.gate-go.stages]]"); n != len(gate.CheckNames()) {
-		t.Errorf("stage count = %d, want %d", n, len(gate.CheckNames()))
+	if n := strings.Count(got, "[[pipelines.gate-go.stages]]"); n != len(gate.CheckNames())-1 {
+		t.Errorf("stage count = %d, want %d (mutate is the advisory lane, not a gate-go stage)",
+			n, len(gate.CheckNames())-1)
 	}
 	if strings.Contains(got, "env = {") {
 		t.Errorf("env rendered with no gate_pack_config set:\n%s", got)
 	}
 }
+
+// AC (I086): the advisory battery is its own audit-profile pipeline with one
+// stage, rendered after gate-go inside the same region — never a stage in
+// the enforcement lane.
+func TestGatePackRendersMutationPipeline(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, filepath.Join(dir, MaipipeFile))
+	want := "[pipelines.mutation-go]\nprofile = \"audit\"\n\n" +
+		"[[pipelines.mutation-go.stages]]\nname = \"mutate\"\nrun = \"spine gate go mutate\"\n"
+	if !strings.Contains(got, want) {
+		t.Fatalf("mutation-go pipeline missing or not canonical:\n%s", got)
+	}
+	if n := strings.Count(got, "[[pipelines.mutation-go.stages]]"); n != 1 {
+		t.Errorf("mutation-go stage count = %d, want 1", n)
+	}
+	if strings.Index(got, "[pipelines.mutation-go]") < strings.Index(got, "[pipelines.gate-go]") {
+		t.Errorf("mutation-go rendered before gate-go:\n%s", got)
+	}
+	if strings.Contains(got, "[[pipelines.gate-go.stages]]\nname = \"mutate\"") {
+		t.Errorf("mutate rendered as a gate-go stage:\n%s", got)
+	}
+}
+
+// AC (I086): gate_pack_disabled: [mutate] omits the whole mutation-go
+// pipeline — a disabled class has no lane, not an empty one.
+func TestGatePackDisabledMutateOmitsPipeline(t *testing.T) {
+	dir := gateRepo(t, "[mutate]", nil)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, filepath.Join(dir, MaipipeFile))
+	if strings.Contains(got, "[pipelines.mutation-go]") {
+		t.Errorf("mutation-go pipeline rendered for a disabled class:\n%s", got)
+	}
+	if strings.Contains(got, "run = \"spine gate go mutate\"") {
+		t.Errorf("disabled mutate still rendered:\n%s", got)
+	}
+	if !strings.Contains(got, "run = \"spine gate go tskip\"") {
+		t.Error("disabling mutate dropped the gate-go stages too")
+	}
+}
+
+// AC (I086): a repo whose region was rendered before this ticket (gate-go
+// only) refreshes to include mutation-go as an inherited change — its own
+// lanes untouched, and nothing reported as a local edit.
+func TestGatePackPreMutationRegionRefreshes(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	lanes := "[pipelines.full]\n\n[[pipelines.full.stages]]\nname = \"build\"\nrun = \"make build\"\n"
+	path := filepath.Join(dir, MaipipeFile)
+	if err := os.WriteFile(path, []byte(lanes+"\n"+preMutationRegion), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if len(mp.Unrecognized) > 0 {
+		t.Fatalf("a pre-mutation region read as local edits: %v", mp.Unrecognized)
+	}
+	if mp.State != Pending {
+		t.Fatalf("state = %v, want the region refreshed", mp.State)
+	}
+	got := readFile(t, path)
+	if !strings.HasPrefix(got, lanes) {
+		t.Errorf("the refresh disturbed the user lanes:\n%s", got)
+	}
+	if !strings.Contains(got, "[pipelines.mutation-go]") {
+		t.Errorf("refresh did not add mutation-go:\n%s", got)
+	}
+	if n := strings.Count(got, "# spine:begin gate-pack "); n != 1 {
+		t.Errorf("region count = %d, want 1", n)
+	}
+}
+
+// preMutationRegion is the region exactly as I085 rendered it — gate-go
+// only, with the three-line header comment of that generation. It is fixture
+// text on purpose: the point of the test is that a repo pinned before this
+// ticket refreshes rather than reporting drift.
+const preMutationRegion = `# spine:begin gate-pack go@1
+# spine manages this region. Change it through the gate_pack keys in
+# WORKFLOW.md and re-run ` + "`spine update`" + `, never by hand.
+# Compose the pack into your own lane with a stage: pipeline = "gate-go"
+
+[pipelines.gate-go]
+profile = "full"
+
+[[pipelines.gate-go.stages]]
+name = "binary-hygiene"
+run = "spine gate go binary-hygiene"
+
+[[pipelines.gate-go.stages]]
+name = "tskip"
+run = "spine gate go tskip"
+# spine:end
+`
 
 // AC (I085): gate_pack_disabled drops exactly the named class.
 func TestGatePackDisabledOmitsStage(t *testing.T) {
@@ -74,8 +174,8 @@ func TestGatePackDisabledOmitsStage(t *testing.T) {
 	if strings.Contains(got, "spine gate go tskip") {
 		t.Errorf("disabled check class still rendered:\n%s", got)
 	}
-	if n := strings.Count(got, "[[pipelines.gate-go.stages]]"); n != len(gate.CheckNames())-1 {
-		t.Errorf("stage count = %d, want %d", n, len(gate.CheckNames())-1)
+	if n := strings.Count(got, "[[pipelines.gate-go.stages]]"); n != len(gate.CheckNames())-2 {
+		t.Errorf("stage count = %d, want %d", n, len(gate.CheckNames())-2)
 	}
 	if !strings.Contains(got, "spine gate go binary-hygiene") {
 		t.Error("dropping one class dropped others too")

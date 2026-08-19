@@ -243,7 +243,7 @@ func TestGateRegionRenderIsDeterministic(t *testing.T) {
 		!strings.HasSuffix(first, "# spine:end\n") {
 		t.Errorf("region markers wrong:\n%s", first)
 	}
-	if strings.Contains(first, "mutation-go") {
-		t.Error("mutation-go rendered — it belongs to the mutate ticket, not this one")
+	if !strings.Contains(first, "[pipelines.mutation-go]\nprofile = \"audit\"\n") {
+		t.Errorf("mutation-go pipeline missing from the canonical render:\n%s", first)
 	}
 }

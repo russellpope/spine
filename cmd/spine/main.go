@@ -665,13 +665,40 @@ checks:  ` + strings.Join(gate.CheckNames(), ", ") + `
                      a for or range loop body, at any depth, outside
                      _test.go files. The list is required configuration: an
                      unset or empty list is misconfiguration.
+  mutate             the behavioural mutation battery (advisory lane): each
+                     probe of the per-tree mutation spec is applied to a
+                     copy of the tracked tree, the verify command re-run,
+                     and the outcome reported as one row — KILLED (the
+                     suite went red), SURVIVED (a blind spot), NO-SITE (the
+                     literal is not in the file: spec drift), BUILD-ERR
+                     (the mutation broke compilation: an invalid probe).
+                     Severities let a consumer filter without parsing:
+                     SURVIVED is warn, every other row is info, and a
+                     failed control is error. The tree under --dir is never
+                     mutated. The unmutated negative control runs first: a
+                     tree that is not green yields one finding and exit 1
+                     and no probes run; otherwise the exit code is 0
+                     whatever the survivors, and the summary carries both
+                     kill rates (raw, and scorable with report-only probes
+                     excluded). Spec path via ` + gate.MutateSpecVar + `
+                     (relative to --dir or absolute), default ` + gate.DefaultMutateSpec + `;
+                     a missing or unparseable spec is misconfiguration.
+                     Verify command via ` + gate.MutateVerifyVar + ` (run
+                     with sh -c in the copy; exit 0 is green), default
+                     go build ./... then go test ./..., which is what tells
+                     BUILD-ERR from KILLED. Per-command timeout via
+                     ` + gate.MutateTimeoutVar + ` (a Go duration), default
+                     15m. All three are env-only tuning knobs, not
+                     gate_pack_config keys, so spine update never renders
+                     them.
 
 deferred-cleanup-errcheck and dead-code-callgraph type-check the module
 under --dir (go list + go/types, stdlib only). A --dir that does not compile
 is misconfiguration, not a finding: a gate cannot judge code the compiler
 has not agreed to.
 
-exit:    0 pass, 1 findings, 2 misconfiguration
+exit:    0 pass, 1 findings, 2 misconfiguration (mutate is advisory: only a
+         failed control exits 1)
 results: with ` + gate.ResultsEnvVar + ` set, the results contract is written
          there as JSON (maipipe_results, status, summary, findings[] each
          with severity, message, file, line, code = "` + gate.PackID() + `/<check>");

@@ -9,7 +9,9 @@
 //
 // Adding a check class is: write a Check func in its own file, register it
 // in the map below, and ship its positive control pair (a known-good input
-// the check passes and a seeded violation it fails).
+// the check passes and a seeded violation it fails). A class that owns its
+// own stage judgement (only the advisory mutation battery) returns a Report
+// and registers in reportChecks instead.
 package gate
 
 import (
@@ -94,6 +96,28 @@ func (c Config) env(name string) string {
 // A returned error is a misconfiguration (exit 2), not a finding.
 type Check func(dir string, cfg Config) ([]Finding, error)
 
+// A Report is a check class's whole outcome when the class owns its own
+// stage-level judgement rather than taking the pack default (findings mean
+// fail, summary is a finding count). Only the mutation battery needs this
+// seam: it is the pack's advisory lane, so its rows never fail the stage,
+// and its summary is the two kill rates the checklist prescribes.
+type Report struct {
+	Findings []Finding
+	// Summary replaces the emitter's default summary line when non-empty.
+	Summary string
+	// Detail is human-only trailer printed under the table (the survivor
+	// list); it never reaches the results contract, whose finding rows
+	// already carry every row's outcome.
+	Detail []string
+	// Advisory means findings are reported but do not fail the stage:
+	// status stays "pass" and the exit code stays 0.
+	Advisory bool
+}
+
+// A ReportCheck is a check class returning a Report instead of bare
+// findings. See Report for why the seam exists.
+type ReportCheck func(dir string, cfg Config) (Report, error)
+
 // checks is the check-class registry for the go pack: name -> implementation.
 var checks = map[string]Check{
 	"tskip":                     checkTskip,
@@ -106,10 +130,19 @@ var checks = map[string]Check{
 	"n-plus-one":                checkNPlusOne,
 }
 
+// reportChecks is the registry for check classes that own their stage-level
+// judgement. A name lives in exactly one of the two registries.
+var reportChecks = map[string]ReportCheck{
+	"mutate": checkMutate,
+}
+
 // CheckNames returns the registered check classes, sorted.
 func CheckNames() []string {
-	names := make([]string, 0, len(checks))
+	names := make([]string, 0, len(checks)+len(reportChecks))
 	for n := range checks {
+		names = append(names, n)
+	}
+	for n := range reportChecks {
 		names = append(names, n)
 	}
 	sort.Strings(names)
@@ -131,8 +164,9 @@ func Run(pack, check, dir string, stdout, stderr io.Writer, cfg Config) int {
 		fmt.Fprintf(stderr, "gate: unknown pack %q (known: %s)\n", pack, PackName)
 		return 2
 	}
-	fn, ok := checks[check]
-	if !ok {
+	fn, plain := checks[check]
+	rfn, rich := reportChecks[check]
+	if !plain && !rich {
 		fmt.Fprintf(stderr, "gate %s: unknown check %q (known: %s)\n", pack, check, strings.Join(CheckNames(), ", "))
 		return 2
 	}
@@ -150,17 +184,27 @@ func Run(pack, check, dir string, stdout, stderr io.Writer, cfg Config) int {
 		fmt.Fprintf(stderr, "gate %s %s: --dir %s: not a directory\n", pack, check, dir)
 		return 2
 	}
-	findings, err := fn(abs, cfg)
-	if err != nil {
+	var (
+		rep    Report
+		runErr error
+	)
+	if plain {
+		var findings []Finding
+		findings, runErr = fn(abs, cfg)
+		rep = Report{Findings: findings}
+	} else {
+		rep, runErr = rfn(abs, cfg)
+	}
+	if runErr != nil {
+		fmt.Fprintf(stderr, "gate %s %s: %v\n", pack, check, runErr)
+		return 2
+	}
+	sortFindings(rep.Findings)
+	if err := emit(check, rep, stdout); err != nil {
 		fmt.Fprintf(stderr, "gate %s %s: %v\n", pack, check, err)
 		return 2
 	}
-	sortFindings(findings)
-	if err := emit(check, findings, stdout); err != nil {
-		fmt.Fprintf(stderr, "gate %s %s: %v\n", pack, check, err)
-		return 2
-	}
-	if len(findings) > 0 {
+	if len(rep.Findings) > 0 && !rep.Advisory {
 		return 1
 	}
 	return 0
