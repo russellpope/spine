@@ -44,7 +44,13 @@ Minor findings from the 2026-08-19 dogfood (I088–I092), none blocking:
    `--force <path>` or "force only files named" would make the D10 remedy
    safe in a repo that carries other local edits.
 
+5. **D11 is shape-evident, not value-evident.** Editing `gate: pass` →
+   `gate: fail` in a checkpoint's facts region re-renders canonically and
+   doctor stays silent; only malformed/non-canonical edits fire (spec
+   scope). If the facts region should be tamper-evident, a content hash in
+   the frontmatter is the smallest change — owner call.
+
 ## Fix
 
-Four small tickets' worth; batch when convenient. (1) and (2) are code +
+Five small tickets' worth; batch when convenient. (1) and (2) are code +
 test; (3) and (4) need an owner call first.
