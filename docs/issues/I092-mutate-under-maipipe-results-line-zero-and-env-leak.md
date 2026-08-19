@@ -47,5 +47,9 @@ the next:
 - Tests (`cmd/spine/gate_test.go`): `TestGateResultsOmitLineZero`,
   `TestGateMutateVerifyEnvScrubbed`, control-failure raw-key assertion.
   Negative controls: reverting each fix fails its test (3/3).
-- Evidence: `maipipe run mutation-go --wait` on spine → stage `mutate`
-  pass, 3 rows with `code = go@1/mutate` (recorded below after reinstall).
+- Evidence (2026-08-19, after `make install`): `maipipe run mutation-go
+  --wait` on spine → `run verdict: passed`, stage `mutate` pass/0, findings
+  rows `warning|go@1/mutate|225`, `warning|go@1/mutate|388`,
+  `info|go@1/mutate|68`. `maipipe run gate-go --ref scratch/gate-neg2` with
+  a seeded ELF → stage `binary-hygiene` fail/1 (not results_invalid), row
+  `error|go@1/binary-hygiene|zz_scratch.bin|<null line>`.
