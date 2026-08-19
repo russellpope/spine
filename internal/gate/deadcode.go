@@ -32,6 +32,16 @@ import (
 // deliberate over-approximation, because a false positive here accuses
 // working code of being dead.
 //
+// Interface satisfaction is the same over-approximation, one step wider: a
+// method is live if its name is a method of any interface declared in the
+// module or in a package the module imports (and of the universe's error).
+// Most methods reached through an interface are never named by the module
+// that declares them — a String called only by fmt, a ServeHTTP called only
+// by net/http, a Len/Less/Swap called only by sort — and the module's own
+// source shows nothing but the concrete type. The residual limitation: a
+// method reached only through an interface from a package the module does
+// not directly import is still reportable.
+//
 // Only declarations in non-test files are candidates: an unused test helper
 // is the test author's business.
 func checkDeadCode(dir string, cfg Config) ([]Finding, error) {
@@ -130,7 +140,52 @@ func newCallGraph(mod *loaded) *callGraph {
 			}
 		}
 	}
+	for name := range interfaceMethodNames(mod) {
+		g.roots[interfaceMethodKey(name)] = true
+	}
 	return g
+}
+
+// interfaceMethodNames is the name set that makes a concrete method live by
+// interface satisfaction: every method of every interface declared in the
+// module's own packages or in a package one of them imports, plus the
+// universe's error. reach() turns each name into reachability for every
+// concrete method that carries it.
+func interfaceMethodNames(mod *loaded) map[string]bool {
+	names := map[string]bool{}
+	seen := map[*types.Package]bool{}
+	collect := func(pkg *types.Package) {
+		if pkg == nil || seen[pkg] {
+			return
+		}
+		seen[pkg] = true
+		scope := pkg.Scope()
+		for _, name := range scope.Names() {
+			tn, ok := scope.Lookup(name).(*types.TypeName)
+			if !ok {
+				continue
+			}
+			iface, ok := tn.Type().Underlying().(*types.Interface)
+			if !ok {
+				continue
+			}
+			for i := 0; i < iface.NumMethods(); i++ {
+				names[iface.Method(i).Name()] = true
+			}
+		}
+	}
+	if iface, ok := errorType.Underlying().(*types.Interface); ok {
+		for i := 0; i < iface.NumMethods(); i++ {
+			names[iface.Method(i).Name()] = true
+		}
+	}
+	for _, u := range mod.units {
+		collect(u.pkg)
+		for _, imported := range u.pkg.Imports() {
+			collect(imported)
+		}
+	}
+	return names
 }
 
 // referenced returns the identity of every function object referenced

@@ -296,11 +296,23 @@ func TestTestOnly(t *testing.T) {
 	}
 }
 `),
+		// printed is the interface-satisfaction control, and it lives in the
+		// main package on purpose: there the exported-library-API rule does
+		// not apply, so its String is live only because fmt calls it through
+		// fmt.Stringer. Nothing in the module names the method.
 		"cmd/app/main.go": []byte(`package main
 
-import "example.com/fixture/lib"
+import (
+	"fmt"
 
-func main() { println(lib.Exported()) }
+	"example.com/fixture/lib"
+)
+
+type printed int
+
+func (p printed) String() string { return "printed" }
+
+func main() { fmt.Println(lib.Exported(), printed(1)) }
 `),
 	}
 	seeded = map[string][]byte{}
@@ -726,20 +738,70 @@ func TestGateNPlusOneCallSites(t *testing.T) {
 // misconfiguration (exit 2) for the classes that type-check, and the
 // message names the package. The syntactic classes are unaffected.
 func TestGateTypeCheckedClassesRejectNonCompilingRepo(t *testing.T) {
-	dir := gateRepo(t, map[string][]byte{
-		"go.mod":    []byte("module example.com/fixture\n\ngo 1.22\n"),
-		"broken.go": []byte("package fixture\n\nfunc Broken() int { return \"not an int\" }\n"),
-	})
-	for _, check := range []string{"deferred-cleanup-errcheck", "dead-code-callgraph"} {
-		t.Run(check, func(t *testing.T) {
-			code, out, errs := runCmd(t, "gate", "go", check, "--dir", dir)
-			if code != 2 {
-				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
-			}
-			if !strings.Contains(errs, "example.com/fixture") {
-				t.Errorf("stderr does not name the package: %q", errs)
-			}
-		})
+	// The two loader failure shapes an operator has to tell apart: a module
+	// that cannot be loaded at all, and one that loads but does not
+	// type-check. (A cgo package is the third way to reach the loader's
+	// error path; CgoFiles are type-checked with FakeImportC, but a cgo
+	// fixture needs a working C toolchain and so is not hermetic here.)
+	cases := []struct {
+		name  string
+		files map[string][]byte
+		want  []string
+	}{
+		{
+			"does not type-check",
+			map[string][]byte{
+				"go.mod":    []byte("module example.com/fixture\n\ngo 1.22\n"),
+				"broken.go": []byte("package fixture\n\nfunc Broken() int { return \"not an int\" }\n"),
+			},
+			[]string{"does not type-check", "example.com/fixture"},
+		},
+		{
+			"cannot load",
+			map[string][]byte{
+				"go.mod":  []byte("module\n"),
+				"lib.go":  []byte("package fixture\n\nfunc Fine() int { return 1 }\n"),
+				"note.md": []byte("a go.mod with no module path\n"),
+			},
+			[]string{"cannot load the module under --dir", "go.mod"},
+		},
+	}
+	for _, tc := range cases {
+		dir := gateRepo(t, tc.files)
+		for _, check := range []string{"deferred-cleanup-errcheck", "dead-code-callgraph"} {
+			t.Run(tc.name+"/"+check, func(t *testing.T) {
+				code, out, errs := runCmd(t, "gate", "go", check, "--dir", dir)
+				if code != 2 {
+					t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+				}
+				for _, want := range tc.want {
+					if !strings.Contains(errs, want) {
+						t.Errorf("stderr=%q, want %q", errs, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestGateDeadCodeInterfaceSatisfaction is the Important 1 control: a
+// method reached only through an interface held outside the module — a
+// String called by fmt and nothing else — is live. A call graph built from
+// the module's own references alone reports it unreachable.
+func TestGateDeadCodeInterfaceSatisfaction(t *testing.T) {
+	good, _ := deadCodeFixtures()
+	dir := gateRepo(t, good)
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	code, out, errs := runCmd(t, "gate", "go", "dead-code-callgraph", "--dir", dir)
+	if code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	if _, err := os.Stat(results); err == nil {
+		r := readResults(t, results)
+		if len(r.Findings) != 0 {
+			t.Fatalf("findings=%+v", r.Findings)
+		}
 	}
 }
 

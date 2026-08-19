@@ -650,8 +650,13 @@ checks:  ` + strings.Join(gate.CheckNames(), ", ") + `
                      reference, and — in a library module (one with any
                      importable non-main package) — every exported function
                      and method of a non-main package. Interface calls reach
-                     every concrete method of that name; only declarations
-                     outside _test.go files are reported.
+                     every concrete method of that name, and a method is
+                     live if its name is a method of any interface declared
+                     in the module or in a package it imports (so a String
+                     called only by fmt is live). Residual limitation: a
+                     method reached only through an interface from a package
+                     the module does not directly import is still reported.
+                     Only declarations outside _test.go files are reported.
   n-plus-one         a call to one of the client names in
                      ` + gateNPlusOneClientsVar + ` (comma-separated method or
                      function names, e.g. Get,Query,Fetch) lexically inside
