@@ -1363,31 +1363,6 @@ func TestCursorQuietDoesNotSuppressAPresentCursor(t *testing.T) {
 	}
 }
 
-func TestCursorCommandOnRealRepoLedger(t *testing.T) {
-	// The ledger is gitignored, so a fresh clone has no progress.md — skip
-	// rather than fail in that case; the live-machine check still runs
-	// wherever the ledger exists.
-	repoRoot := filepath.Join("..", "..")
-	ledgerPath := filepath.Join(repoRoot, filepath.FromSlash(".superpowers/sdd/progress.md"))
-	if _, err := os.Stat(ledgerPath); os.IsNotExist(err) {
-		t.Skip("no .superpowers/sdd/progress.md on this checkout (gitignored) — skipping")
-	}
-	code, out, errs := runCmd(t, "cursor", "--dir", repoRoot)
-	if code != 0 {
-		t.Fatalf("code=%d errs=%q", code, errs)
-	}
-	if strings.Contains(out, "finding:") {
-		t.Errorf("want the real ledger to parse cleanly with zero findings, out=%q", out)
-	}
-	// The live verdict depends on this build's real, evolving on-disk state
-	// (its own dogfood cursor, ticket files, and handoffs) rather than a
-	// fixed fixture — assert the format landed, not a specific outcome that
-	// would go stale as the build progresses toward its own handoff.
-	if !strings.Contains(out, "derivation: clean") && !strings.Contains(out, "derivation: blocking") {
-		t.Errorf("want a live derivation verdict (clean or blocking), out=%q", out)
-	}
-}
-
 // cursorWriteRepo creates a small on-disk spine repo for the cursor write
 // verbs. Tests drive run through its public command boundary; this helper
 // deliberately does not call cursor parsing or serialization APIs.

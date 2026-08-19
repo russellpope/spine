@@ -97,7 +97,7 @@ func checkBinaryHygiene(dir string, cfg Config) ([]Finding, error) {
 // detectBinary returns the signature kind matched by the file's header, or
 // "" when nothing matches. A file that has vanished since git listed it is
 // not a finding.
-func detectBinary(path string) (string, error) {
+func detectBinary(path string) (kind string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -105,7 +105,11 @@ func detectBinary(path string) (string, error) {
 		}
 		return "", err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("closing %s: %w", path, cerr)
+		}
+	}()
 	head := make([]byte, headerBytes)
 	// ReadFull, not a single Read: a short read would silently truncate the
 	// header below offset 257 and disable the tar signature. A file shorter

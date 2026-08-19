@@ -1208,7 +1208,11 @@ func scanJSONL(path string, warnings *[]string) ([]dispatch, []string, string) {
 		*warnings = append(*warnings, path+": unreadable: "+err.Error())
 		return nil, nil, ""
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			*warnings = append(*warnings, path+": close: "+err.Error())
+		}
+	}()
 	var dispatches []dispatch
 	var models []string
 	var cwd string

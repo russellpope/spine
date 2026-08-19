@@ -3,7 +3,6 @@ package handoff
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -227,9 +226,6 @@ func TestListSameDateOrdinalIsFreshCloneDeterministic(t *testing.T) {
 }
 
 func TestNewRefusesWhenStatFails(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation may require privileges on Windows")
-	}
 	dir := t.TempDir()
 	hdir := filepath.Join(dir, "docs", "handoffs")
 	if err := os.MkdirAll(hdir, 0o755); err != nil {
