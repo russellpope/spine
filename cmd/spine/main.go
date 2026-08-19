@@ -18,6 +18,7 @@ import (
 	"github.com/russellpope/spine/internal/cursor"
 	"github.com/russellpope/spine/internal/doctor"
 	"github.com/russellpope/spine/internal/eval"
+	"github.com/russellpope/spine/internal/gate"
 	"github.com/russellpope/spine/internal/handoff"
 	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/scaffold"
@@ -37,6 +38,7 @@ commands:
   eval     manage docs/evals (new, add-run, list)
   doctor   read-only workflow health checks
   audit    verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
+  gate     run a gate-pack check class (gate go <check> [--dir D])
   cursor   print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
   model    resolve the model table for a (flavor, tier) pair (read-only)
   version  print the compiled template generation
@@ -66,6 +68,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdAdopt(args[1:], stdout, stderr)
 	case "audit":
 		return cmdAudit(args[1:], stdout, stderr)
+	case "gate":
+		return cmdGate(args[1:], stdout, stderr)
 	case "cursor":
 		return cmdCursor(args[1:], stdout, stderr)
 	case "model":
@@ -567,6 +571,55 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 }
+
+// cmdGate is a thin dispatcher over gate.Run: `spine gate <pack> <check>
+// [--dir D]`. The pack owns the exit-code contract (0 pass, 1 findings,
+// 2 misconfiguration), the results-contract emitter and the human table, so
+// nothing but flag parsing lives here.
+func cmdGate(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprint(stderr, gateUsage)
+		return 2
+	}
+	pack, check := args[0], args[1]
+	fs := flag.NewFlagSet("gate "+pack+" "+check, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root to check")
+	if err := fs.Parse(args[2:]); err != nil {
+		return 2
+	}
+	return gate.Run(pack, check, *dir, stdout, stderr, gate.EnvConfig())
+}
+
+// gateUsage documents the gate pack in CONTEXT.md vocabulary: a gate pack
+// is a versioned battery of check classes; one invocation runs one check
+// class and every finding is attributable to <pack>@<version>/<check>.
+var gateUsage = `usage: spine gate <pack> <check> [--dir D]
+
+pack:    ` + gate.PackName + ` (version ` + gate.PackID() + `)
+checks:  tskip, binary-hygiene
+
+  tskip           any t.Skip/t.Skipf/t.SkipNow (and b.Skip*) call in a
+                  _test.go file under --dir. Zero tolerance by default;
+                  allowlist via ` + gateTskipAllowVar + `, a comma-separated
+                  list of entries, each either a path relative to --dir
+                  (slash-separated) or path:line. Unset means no allowlist.
+  binary-hygiene  tracked files (git ls-files) that are executables or
+                  archives by content, plus stray second module trees (a
+                  tracked go.mod outside the repo root). --dir must be a
+                  git repo.
+
+exit:    0 pass, 1 findings, 2 misconfiguration
+results: with ` + gate.ResultsEnvVar + ` set, the results contract is written
+         there as JSON (maipipe_results, status, summary, findings[] each
+         with severity, message, file, line, code = "` + gate.PackID() + `/<check>");
+         otherwise a human table on stdout and no file is written.
+`
+
+// gateTskipAllowVar is the tskip allowlist variable, named by the gate-pack
+// convention: SPINE_GATE_ + the upper-snake of the WORKFLOW.md
+// gate_pack_config key.
+var gateTskipAllowVar = gate.EnvVar("tskip_allow")
 
 func cmdAudit(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
