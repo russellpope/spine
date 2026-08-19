@@ -1,0 +1,57 @@
+---
+id: I094
+title: "spine init / doctor: stamp and check `maikanban.repositorySlug` when scaffolding docs/issues/ (new repos currently arrive unconfigured and break maikanban fleet discovery)"
+severity: low
+status: open
+affects: []
+blocked-by: []
+execution-mode: subagent-driven
+tier: routine
+effort:
+risk-triggers: []
+review-tier: routine
+---
+
+## Problem
+
+Filed 2026-08-19 from maikanban (`docs/issues/I030-…`, ADR 0008). maikanban discovers its fleet by
+scanning the projects root for `docs/issues/` and requires every discovered repository to carry
+`git config maikanban.repositorySlug owner/repo` (maikanban ADR 0007). `spine init` is what
+creates `docs/issues/` (via the `workflow-init` skill, a thin shim), and it never sets the slug —
+so every freshly scaffolded repo is unconfigured until the owner remembers. Observed 2026-08-19:
+`pi-pack` (no remote, empty ledger) made `maikanban` fail to open from `maipipe`. maikanban I030
+turns that into a per-repo exclusion; this ticket stops the exclusion from happening in the
+first place.
+
+## Fix
+
+1. `spine init` (`cmd/spine/main.go:cmdInit` → `internal/scaffold.Init`): after creating
+   `docs/issues/`, if the dir is a Git repo and `maikanban.repositorySlug` is unset, set it to
+   `<owner>/<basename>` where owner is parsed from `origin` (`github.com[:/]<owner>/…`), else
+   from a new `--owner` flag, else from the global `maikanban.defaultOwner` git config if set;
+   if no owner can be determined, print `note: set git config maikanban.repositorySlug
+   owner/repo (maikanban fleet identity)` and exit 0 (never fail init over it). Report
+   `create: git config maikanban.repositorySlug <value>` in the created list; never overwrite
+   an existing value. Honour the slug grammar from maikanban ADR 0007 (1–100 ASCII bytes per
+   component, alphanumeric ends, `._-` inside).
+2. `spine doctor`: report a missing/malformed slug on a repo that has `docs/issues/` as a warning
+   with the exact command.
+3. `workflow-init` SKILL.md (deepthought repo `skills/workflow-init/SKILL.md`): one-line gotcha
+   — "`spine init` stamps `maikanban.repositorySlug`; if it printed the `note:` line, run the
+   command before opening maikanban." Commit in deepthought with an explicit path.
+4. Tests: scaffold into a temp repo with an `origin` → slug set; without origin and no
+   `--owner` → note printed, exit 0, no config; pre-existing slug untouched; `doctor` warning.
+
+## Acceptance criteria
+
+- [ ] `spine init` in a temp git repo with `origin=git@github.com:acme/x.git` sets
+      `maikanban.repositorySlug=acme/x` and lists it under `create:`; re-running does not change it
+- [ ] No origin / no `--owner` / no `maikanban.defaultOwner` → init exits 0 and prints the
+      `note:` line; `--owner acme` sets `acme/<basename>`
+- [ ] `spine doctor` warns on a `docs/issues/` repo with missing or malformed slug, with the command
+- [ ] `workflow-init` SKILL.md note committed (deepthought); full lane green; shellcheck/deny
+      stages unchanged
+
+## Blocked by
+
+- None. Related: maikanban I030 / ADR 0007 / ADR 0008.
