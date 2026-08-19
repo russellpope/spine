@@ -1,0 +1,26 @@
+[
+  {
+    "id": "gate-sort-findings-reversed",
+    "file": "internal/gate/gate.go",
+    "find": "\t\tif f[i].File != f[j].File {\n\t\t\treturn f[i].File < f[j].File\n\t\t}",
+    "replace": "\t\tif f[i].File != f[j].File {\n\t\t\treturn f[i].File > f[j].File\n\t\t}",
+    "report_only": false,
+    "desc": "class 6 ordering: reverse the documented file-sort of results-contract findings"
+  },
+  {
+    "id": "tskip-allowlist-ignored",
+    "file": "internal/gate/tskip.go",
+    "find": "\t\t\tif allow[rel] || allow[rel+\":\"+strconv.Itoa(line)] {\n\t\t\t\treturn true\n\t\t\t}",
+    "replace": "\t\t\tif false && (allow[rel] || allow[rel+\":\"+strconv.Itoa(line)]) {\n\t\t\t\treturn true\n\t\t\t}",
+    "report_only": false,
+    "desc": "class 3 flag honoured: SPINE_GATE_TSKIP_ALLOW still parses but no longer suppresses a finding"
+  },
+  {
+    "id": "mutate-workcopy-leak-on-copy-error",
+    "file": "internal/gate/mutate.go",
+    "find": "\t\tif err := copyOne(filepath.Join(dir, filepath.FromSlash(rel)), filepath.Join(work, filepath.FromSlash(rel))); err != nil {\n\t\t\t_ = os.RemoveAll(work)\n\t\t\treturn \"\", err\n\t\t}",
+    "replace": "\t\tif err := copyOne(filepath.Join(dir, filepath.FromSlash(rel)), filepath.Join(work, filepath.FromSlash(rel))); err != nil {\n\t\t\treturn \"\", err\n\t\t}",
+    "report_only": true,
+    "desc": "class 9 lifecycle [report-only]: drop the working-copy cleanup on a copy error"
+  }
+]
