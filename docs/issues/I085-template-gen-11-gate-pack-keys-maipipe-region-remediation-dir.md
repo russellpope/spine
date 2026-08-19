@@ -2,7 +2,7 @@
 id: I085
 title: "Template gen 11: gate_pack keys, maipipe.toml region (gate-go), docs/remediation scaffold, doctor region integrity"
 severity: high
-status: open
+status: fixed
 affects: [templates, update, scaffold, doctor, workflow]
 blocked-by: [I082]
 execution-mode: subagent-driven
@@ -53,3 +53,26 @@ here (I086 adds it with the command).
 ## Blocked by
 
 - I082 (the rendered stages must invoke commands that exist).
+
+## Resolution
+
+Fixed 2026-08-18 on branch `local-harness-conventions` (commit a9427bb).
+Template generation 11: WORKFLOW.md gains preserved choice keys `gate_pack`
+(empty = opt-out), `gate_pack_disabled: []`, and a `gate_pack_config:` block
+with sub-keys `test_enum_spec`, `fixture_manifest`, `build_outputs`,
+`n_plus_one_clients`, `tskip_allow` (extracted as dotted keys). `spine update`
+renders `# spine:begin gate-pack go@1` … `# spine:end` into `maipipe.toml`
+(`internal/update/gatepack.go`): `[pipelines.gate-go]`, `profile = "full"`,
+one `[[pipelines.gate-go.stages]]` per enabled class in `gate.CheckNames()`
+order with `run = "spine gate go <check>"` and `env` from non-empty config;
+absent file → region-only create; user lanes byte-preserved; region refreshed
+in place; `mutation-go` deferred to I086. Ruling (ADR 0002 applied to a
+render that is a pure function of WORKFLOW.md keys): drift recognition is
+shape-based — lines any configuration could have rendered refresh silently
+(inherited), everything else is unrecognized and reported (skip unless
+`--force`); marker damage is never `--force`-repaired. Doctor D10: markers
+well-formed and content canonical for the pinned pack, only when `gate_pack`
+is set. `docs/remediation/README.md` embedded (`remediation-README.md`),
+scaffolded by init and managed by update. gen 10→11 migration lock
+(`testdata/spine-gen10`, `gen10to11_test.go`). Spine's own repo self-adopts
+gen 11 in a separate chore commit. Primary-tier review clean, no fix round.
