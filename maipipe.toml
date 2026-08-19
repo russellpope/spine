@@ -1,0 +1,69 @@
+schema = 0
+
+# spine:begin gate-pack go@1
+# spine manages this region. Change it through the gate_pack keys in
+# WORKFLOW.md and re-run `spine update`, never by hand.
+# Compose the pack into your own lane with a stage: pipeline = "gate-go"
+# and the advisory battery with: pipeline = "mutation-go"
+
+[pipelines.gate-go]
+profile = "full"
+
+[[pipelines.gate-go.stage]]
+name = "binary-hygiene"
+run = "spine gate go binary-hygiene"
+
+[[pipelines.gate-go.stage]]
+name = "dead-code-callgraph"
+run = "spine gate go dead-code-callgraph"
+
+[[pipelines.gate-go.stage]]
+name = "deferred-cleanup-errcheck"
+run = "spine gate go deferred-cleanup-errcheck"
+
+[[pipelines.gate-go.stage]]
+name = "gitignore-control"
+run = "spine gate go gitignore-control"
+env = { SPINE_GATE_BUILD_OUTPUTS = "bin/spine" }
+
+[[pipelines.gate-go.stage]]
+name = "tskip"
+run = "spine gate go tskip"
+env = { SPINE_GATE_TSKIP_ALLOW = "cmd/spine/dogfood_test.go,internal/cursor/dogfood_test.go" }
+
+[pipelines.mutation-go]
+profile = "audit"
+
+[[pipelines.mutation-go.stage]]
+name = "mutate"
+run = "spine gate go mutate"
+# spine:end
+
+# spine repo lanes (owner-managed; the region above is spine-managed)
+[pipelines.fast]
+description = "vet + test"
+profile = "fast"
+
+[[pipelines.fast.stage]]
+name = "vet"
+run = "go vet ./..."
+timeout = "3m"
+
+[[pipelines.fast.stage]]
+name = "test"
+run = "go test ./..."
+needs = ["vet"]
+timeout = "10m"
+
+[pipelines.full]
+description = "fast lane + go@1 gate pack"
+profile = "full"
+
+[[pipelines.full.stage]]
+name = "fast"
+pipeline = "fast"
+
+[[pipelines.full.stage]]
+name = "gates"
+pipeline = "gate-go"
+needs = ["fast"]
