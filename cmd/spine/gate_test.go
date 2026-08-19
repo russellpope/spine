@@ -42,23 +42,48 @@ func gateRepo(t *testing.T, files map[string][]byte) string {
 	return dir
 }
 
+// goodTestFile is the tskip negative control: it contains a Skip token, but
+// on an unrelated receiver, so a class that matched any ident receiver would
+// fire here.
 const goodTestFile = `package fixture
 
 import "testing"
 
+type queue struct{}
+
+func (queue) Skip() {}
+
 func TestGood(t *testing.T) {
+	var q queue
+	q.Skip()
 	if 1+1 != 2 {
 		t.Fatal("arithmetic")
 	}
 }
 `
 
+// skippedTestFile seeds all three receiver shapes the class must catch: the
+// conventional t, a testing.TB helper parameter, and the suite-style T()
+// accessor.
 const skippedTestFile = `package fixture
 
 import "testing"
 
+type suite struct{ t *testing.T }
+
+func (s *suite) T() *testing.T { return s.t }
+
 func TestSkipped(t *testing.T) {
 	t.Skip("seeded violation")
+}
+
+func skipHelper(tb testing.TB) {
+	tb.SkipNow()
+}
+
+func TestSuiteSkipped(t *testing.T) {
+	s := &suite{t: t}
+	s.T().Skip("seeded violation")
 }
 `
 
@@ -84,6 +109,16 @@ func elfBytes() []byte {
 	return b
 }
 
+// tarBytes is a file whose header carries the tar signature at offset 257 —
+// the one magic in the list that is not at offset 0, and so the one a short
+// read would silently skip.
+func tarBytes() []byte {
+	b := make([]byte, 512)
+	copy(b, []byte("fixture.txt"))
+	copy(b[257:], []byte("ustar\x0000"))
+	return b
+}
+
 func binaryHygieneFixtures() (good, seeded map[string][]byte) {
 	good = map[string][]byte{
 		"go.mod":    []byte("module fixture\n\ngo 1.26\n"),
@@ -94,6 +129,7 @@ func binaryHygieneFixtures() (good, seeded map[string][]byte) {
 		"go.mod":       []byte("module fixture\n\ngo 1.26\n"),
 		"main.go":      []byte("package main\n\nfunc main() {}\n"),
 		"bin/tool":     elfBytes(),
+		"data/x.tar":   tarBytes(),
 		"tools/go.mod": []byte("module fixture/tools\n\ngo 1.26\n"),
 	}
 	return good, seeded
@@ -111,8 +147,8 @@ func TestGatePositiveControls(t *testing.T) {
 		seeded map[string][]byte
 		want   []string // substrings expected in the seeded run's findings
 	}{
-		{"tskip", tskipGood, tskipSeeded, []string{"pkg/skipped_test.go"}},
-		{"binary-hygiene", binGood, binSeeded, []string{"bin/tool", "tools/go.mod"}},
+		{"tskip", tskipGood, tskipSeeded, []string{"t.Skip call", "tb.SkipNow call", "s.T().Skip call"}},
+		{"binary-hygiene", binGood, binSeeded, []string{"bin/tool", "data/x.tar", "tools/go.mod"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.check+"/good", func(t *testing.T) {
@@ -259,7 +295,7 @@ func TestGateResultsDeterministic(t *testing.T) {
 func TestGateTskipAllowlist(t *testing.T) {
 	_, seeded := tskipFixtures()
 	dir := gateRepo(t, seeded)
-	for _, allow := range []string{"pkg/skipped_test.go", "pkg/skipped_test.go:6", " , pkg/skipped_test.go "} {
+	for _, allow := range []string{"pkg/skipped_test.go", "pkg/skipped_test.go:10,pkg/skipped_test.go:14,pkg/skipped_test.go:19", " , pkg/skipped_test.go "} {
 		t.Setenv("SPINE_GATE_TSKIP_ALLOW", allow)
 		code, out, errs := runCmd(t, "gate", "go", "tskip", "--dir", dir)
 		if code != 0 {

@@ -60,7 +60,7 @@ func checkTskip(dir string, cfg Config) ([]Finding, error) {
 			if !ok || !skipNames[sel.Sel.Name] {
 				return true
 			}
-			recv, ok := sel.X.(*ast.Ident)
+			recv, ok := skipReceiver(sel.X)
 			if !ok {
 				return true
 			}
@@ -70,7 +70,7 @@ func checkTskip(dir string, cfg Config) ([]Finding, error) {
 			}
 			findings = append(findings, Finding{
 				Severity: SeverityError,
-				Message:  fmt.Sprintf("skipped test: %s.%s call in a _test.go file", recv.Name, sel.Sel.Name),
+				Message:  fmt.Sprintf("skipped test: %s.%s call in a _test.go file", recv, sel.Sel.Name),
 				File:     rel,
 				Line:     line,
 				Code:     Code("tskip"),
@@ -83,6 +83,33 @@ func checkTskip(dir string, cfg Config) ([]Finding, error) {
 		return nil, walkErr
 	}
 	return findings, nil
+}
+
+// tbNames are the receiver identifiers a testing.TB value conventionally
+// carries. Restricting the ident case to these keeps the class from firing
+// on an unrelated method that happens to be named Skip — an operator's only
+// remedy for that would be allowlisting a line that is not a skip.
+var tbNames = map[string]bool{"t": true, "b": true, "tb": true}
+
+// skipReceiver reports whether expr is a testing.TB receiver for a Skip
+// call, and its printed form for the finding message. Two shapes match: a
+// conventionally named identifier (t, b, tb) and a T() accessor call, which
+// is how suite-style tests reach the TB (s.T().Skip()).
+func skipReceiver(expr ast.Expr) (string, bool) {
+	switch x := expr.(type) {
+	case *ast.Ident:
+		if tbNames[x.Name] {
+			return x.Name, true
+		}
+	case *ast.CallExpr:
+		if sel, ok := x.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "T" {
+			if recv, ok := sel.X.(*ast.Ident); ok {
+				return recv.Name + ".T()", true
+			}
+			return "T()", true
+		}
+	}
+	return "", false
 }
 
 // parseTskipAllow reads the allowlist format: a comma-separated list of

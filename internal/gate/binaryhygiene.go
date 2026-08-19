@@ -3,6 +3,7 @@ package gate
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -102,9 +103,12 @@ func detectBinary(path string) (string, error) {
 	}
 	defer f.Close()
 	head := make([]byte, headerBytes)
-	n, err := f.Read(head)
-	if err != nil && n == 0 {
-		return "", nil // empty or unreadable-at-offset-0; nothing to match
+	// ReadFull, not a single Read: a short read would silently truncate the
+	// header below offset 257 and disable the tar signature. A file shorter
+	// than the buffer is normal — match against what it has.
+	n, err := io.ReadFull(f, head)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return "", fmt.Errorf("reading %s: %w", path, err)
 	}
 	head = head[:n]
 	for _, m := range magics {
