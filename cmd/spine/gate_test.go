@@ -1046,10 +1046,10 @@ func TestGateMutatePositiveControl(t *testing.T) {
 	}
 	want := map[string]row{
 		"M1-invocation": {"KILLED", "info", 3},
-		"M2-units":      {"SURVIVED", "warn", 5},
+		"M2-units":      {"SURVIVED", "warning", 5},
 		"M3-drift":      {"NO-SITE", "info", 0},
 		"M4-build":      {"BUILD-ERR", "info", 5},
-		"M5-lifecycle":  {"SURVIVED", "warn", 1},
+		"M5-lifecycle":  {"SURVIVED", "warning", 1},
 	}
 	seen := map[string]bool{}
 	for _, f := range r.Findings {

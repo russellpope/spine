@@ -201,9 +201,9 @@ func checkMutate(dir string, cfg Config) (Report, error) {
 // invalid-probe results are neither.
 func mutateSeverity(result string) string {
 	if result == resultSurvived {
-		return "warn"
+		return SeverityWarning
 	}
-	return "info"
+	return SeverityInfo
 }
 
 // rate formats one kill rate the way the Python runner did: "K/V = P%",

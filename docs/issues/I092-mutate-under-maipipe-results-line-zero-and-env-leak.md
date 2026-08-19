@@ -16,8 +16,8 @@ review-tier: n/a
 
 Dogfood §1c/d (2026-08-19): `maipipe run mutation-go --wait` on spine →
 `run verdict: error`, stage `mutate` `error_kind=results_invalid`,
-`finding line must be a positive 64-bit integer`. Two defects, one masking
-the other:
+`finding line must be a positive 64-bit integer`. Three defects, each masking
+the next:
 
 1. **Results contract** (I082): `jsonFinding` always emits `file` and
    `line`; site-less findings (mutate's control failure with `file: "."`,
@@ -32,10 +32,16 @@ the other:
    reproduced locally: `MAIPIPE_RESULTS=x go test ./cmd/spine` in the kept
    working copy fails; without it, passes.
 
+3. **Severity vocabulary** (I086): mutate emitted `warn` for SURVIVED rows;
+   maipipe's enum is `error | warning | info` (`FindingSeverityDocument`,
+   `rename_all = "lowercase"`) → `invalid JSON or v0 document`.
+
 ## Fix
 
 - `results.go`: `file,omitempty` / `line,omitempty`; mutate's control
   finding carries neither.
+- `gate.go`: `SeverityWarning = "warning"`, `SeverityInfo`; mutate uses them
+  (positive-control test expects `warning`).
 - `mutate.go`: `verifyEnv` strips `MAIPIPE_RESULTS=` and `SPINE_GATE_*`
   from the verify command env.
 - Tests (`cmd/spine/gate_test.go`): `TestGateResultsOmitLineZero`,

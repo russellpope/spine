@@ -41,6 +41,14 @@ func Code(check string) string { return PackID() + "/" + check }
 // Severity strings used in the results contract.
 const SeverityError = "error"
 
+// SeverityWarning and SeverityInfo are the other two values of maipipe's
+// finding-severity vocabulary (error | warning | info — I092: "warn" is
+// rejected as an invalid v0 document, failing the stage as results_invalid).
+const (
+	SeverityWarning = "warning"
+	SeverityInfo    = "info"
+)
+
 // A Finding is one attributable problem found by a check class. Its field
 // set is exactly the results contract's finding keys.
 type Finding struct {
