@@ -597,13 +597,15 @@ func unresolvableTicketsNote(raw string) string {
 }
 
 // roundBudgetNotes implements the round-budget advisory (I087): the
-// remediation budget is 3 rounds per effort, derived by counting nothing
-// more than the presence of the numbered round records under
-// docs/remediation/<effort>/. A record named round-N.md with N >= 4 whose
-// frontmatter lacks a non-empty extension-ratified-by: is reported as a
-// Note. Advisory only — Report.Blocking() never consults Notes, so this can
-// never change an exit code. No directory, rounds 1-3, and a ratified
-// round-4+ are all silent.
+// remediation budget is 3 rounds per effort, keyed on each round record's
+// own ordinal — the N in a round-N.md under docs/remediation/<effort>/ —
+// and not on how many records the directory happens to hold. A record named
+// round-N.md with N >= 4 whose frontmatter lacks a non-empty
+// extension-ratified-by: yields one entry. The value is returned as a
+// Report.RoundBudget entry, never as a Notes entry. Advisory only —
+// Report.Blocking() never consults RoundBudget, so this can never change an
+// exit code. No directory, rounds 1-3, and a ratified round-4+ are all
+// silent.
 func roundBudgetNotes(dir, effort string) []string {
 	effort = strings.TrimSpace(effort)
 	if effort == "" {

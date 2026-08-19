@@ -228,9 +228,11 @@ Gate pack (per ADR 0015/0016)
 - Check definitions (v1): `tskip` — any `t.Skip*` call in `_test.go` is a
   finding (zero tolerance; allowlist via config); `deferred-cleanup-errcheck`
   — deferred calls whose error return is discarded on cleanup-class
-  functions (Close/Remove/Flush/etc.); `dead-code-callgraph` — exported
+  functions (default name set: Close/Remove/RemoveAll/Flush/Sync; extra
+  names via `SPINE_GATE_CLEANUP_FUNCS`); `dead-code-callgraph` — exported
   and unexported functions unreachable from any main/test root via
-  `go/packages`; `test-enum-vs-spec` — enum/const set in code vs values
+  `go list -export` + `go/types`, stdlib only per ADR 0001;
+  `test-enum-vs-spec` — enum/const set in code vs values
   enumerated in the configured spec file; `n-plus-one` — call-in-loop
   pattern against configured client method names; `binary-hygiene` —
   tracked files that are executables/archives by content, and stray second
@@ -300,6 +302,13 @@ Model table
   WORKFLOW.md with alternate as a trailing `alt: id @ effort` on the same
   line, parsed back with the same inherited/override rules.
 - No reachability/doctor check for pi models (I072).
+
+### Amendments (2026-08-19)
+
+- `dead-code-callgraph` loads via `go list -export` + `go/types` (stdlib
+  only per ADR 0001), not `go/packages`; `deferred-cleanup-errcheck`'s
+  default name set is pinned to Close/Remove/RemoveAll/Flush/Sync, with
+  extra names via `SPINE_GATE_CLEANUP_FUNCS`.
 
 ## Testing Decisions
 

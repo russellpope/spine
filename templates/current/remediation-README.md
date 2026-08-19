@@ -28,8 +28,9 @@ facts is the evidence renderer's job.
 
 ## Round budget
 
-The budget is **3 rounds per effort**, derived by counting the round records
-in the effort's directory — there is no separate counter to keep in sync. A
+The budget is **3 rounds per effort**, derived from the round record's
+ordinal (`round-N.md`; sequential numbering is the convention) in the
+effort's directory — there is no separate counter to keep in sync. A
 4th or later round is legal only when its record carries
 `extension-ratified-by:` in its frontmatter, naming the owner who ratified
 the extension. `spine audit stages` advises (never blocks) on a round beyond

@@ -24,10 +24,10 @@ source run id: <the run id these findings came from>
 - why it matters: a skip is a green build with no evidence behind it; the
   check class exists to make missing evidence visible.
 
-### `go@1/errsink`
+### `go@1/deferred-cleanup-errcheck`
 
 - file:line — `internal/thing/run.go:88`
-- finding: the returned error is assigned and dropped.
+- finding: the deferred cleanup call discards its error return.
 - why it matters: the failure is invisible at the call seam, so the caller
   proceeds on a value that was never produced.
 
