@@ -1065,11 +1065,12 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 	dir := fs.String("dir", ".", "repo root")
 	effort := fs.Bool("effort", false, "print the resolved effort instead of the bare id")
 	asJSON := fs.Bool("json", false, "print the whole resolved entry as JSON")
+	alternate := fs.Bool("alternate", false, "print the cell's alternate instead of its primary id/effort")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
-		fmt.Fprintln(stderr, `usage: spine model [--dir D] [--effort|--json] <flavor> <tier>`)
+		fmt.Fprintln(stderr, `usage: spine model [--dir D] [--alternate] [--effort|--json] <flavor> <tier>`)
 		return 2
 	}
 	entry, err := model.Resolve(*dir, fs.Arg(0), fs.Arg(1))
@@ -1077,19 +1078,35 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "model:", err)
 		return 2
 	}
+	// --alternate answers from the cell's alternate half (I079). A cell that
+	// ships none is an error rather than a silent fall-back to the primary:
+	// an evaluator that asked for the critic and got the author would run a
+	// model against itself and report agreement.
+	if *alternate && entry.Alternate == nil && !*asJSON {
+		fmt.Fprintf(stderr, "model: %s.%s has no alternate\n", entry.Flavor, entry.Tier)
+		return 2
+	}
 	switch {
 	case *asJSON:
+		type altJSON struct {
+			ID     string `json:"id"`
+			Effort string `json:"effort"`
+		}
 		type entryJSON struct {
 			Flavor     string   `json:"flavor"`
 			Tier       string   `json:"tier"`
 			ID         string   `json:"id"`
 			Effort     string   `json:"effort"`
 			Aliases    []string `json:"aliases"`
+			Alternate  *altJSON `json:"alternate,omitempty"`
 			Provenance string   `json:"provenance"`
 		}
 		out := entryJSON{
 			Flavor: entry.Flavor, Tier: entry.Tier, ID: entry.ID, Effort: entry.Effort,
 			Aliases: entry.Aliases, Provenance: string(entry.Provenance),
+		}
+		if entry.Alternate != nil {
+			out.Alternate = &altJSON{ID: entry.Alternate.ID, Effort: entry.Alternate.Effort}
 		}
 		if out.Aliases == nil {
 			out.Aliases = []string{}
@@ -1098,6 +1115,10 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "model:", err)
 			return 2
 		}
+	case *alternate && *effort:
+		fmt.Fprintln(stdout, entry.Alternate.Effort)
+	case *alternate:
+		fmt.Fprintln(stdout, entry.Alternate.ID)
 	case *effort:
 		fmt.Fprintln(stdout, entry.Effort)
 	default:

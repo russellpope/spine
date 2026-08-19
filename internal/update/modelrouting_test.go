@@ -339,3 +339,132 @@ func TestChoicesExcludesModelRoutingKeys(t *testing.T) {
 		t.Errorf("non-model choice lost: %#v", choices)
 	}
 }
+
+// gen10WithoutPiRows stages spine's own checked-in gen-10 WORKFLOW.md with
+// the pi mirror rows stripped — exactly what every gen-10 repo in the fleet
+// carries before this ticket's table change reaches it — with mutate applied
+// afterwards ("" = pristine).
+func gen10WithoutPiRows(t *testing.T, mutate func(string) string) (dir, before string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "pi.") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	content := strings.Join(kept, "\n")
+	if !strings.Contains(content, "codex.fallback:") || strings.Contains(content, "pi.") {
+		t.Fatalf("fixture did not stage as a gen-10 mirror without pi rows:\n%s", content)
+	}
+	if mutate != nil {
+		content = mutate(content)
+	}
+	dir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir, content
+}
+
+// I079 AC3 negative control: a gen-10 repo with no pi rows is unaffected by
+// the pi addition — its claude/codex rows come through byte-identical and
+// nothing about them is itemized. The pi rows arrive as table-rendered
+// additions (design D8 renders every (flavor, tier) the table ships), which
+// is an addition, not a change to what the repo already declared.
+func TestGen10WithoutPiRowsIsUnaffected(t *testing.T) {
+	dir, before := gen10WithoutPiRows(t, nil)
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := report(t, reports, "WORKFLOW.md")
+	if len(wf.Unrecognized) > 0 {
+		t.Errorf("unrecognized=%v, want none", wf.Unrecognized)
+	}
+	for _, m := range wf.ModelRefreshes {
+		t.Errorf("unexpected refresh of an existing row: %+v", m)
+	}
+	for _, o := range wf.ModelOverrides {
+		t.Errorf("unexpected override report: %+v", o)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(before, "\n") {
+		if !strings.Contains(string(after), line) {
+			t.Errorf("pre-existing line lost or rewritten: %q", line)
+		}
+	}
+	for _, want := range []string{
+		"pi.primary:", "qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh",
+	} {
+		if !strings.Contains(string(after), want) {
+			t.Errorf("after update, WORKFLOW.md lacks %q:\n%s", want, after)
+		}
+	}
+}
+
+// I079 AC3: a repo that edited only the alternate half of a pi cell has made
+// a deliberate choice — it is reported and preserved as an override, not
+// refreshed back to the table's alternate.
+func TestPiEditedAlternateIsPreservedAsOverride(t *testing.T) {
+	dir, _ := gen10WithoutPiRows(t, func(content string) string {
+		return strings.Replace(content,
+			"  codex.fallback:",
+			"  pi.primary:        qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ low\n  codex.fallback:", 1)
+	})
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := report(t, reports, "WORKFLOW.md")
+	want := ModelOverride{Key: "model_routing.pi.primary", Value: "qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ low"}
+	found := false
+	for _, o := range wf.ModelOverrides {
+		if o == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("overrides=%+v, want %+v", wf.ModelOverrides, want)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), "alt: qwen3.8-27b-q8_0 @ low") {
+		t.Errorf("edited alternate not preserved:\n%s", after)
+	}
+}
+
+// I079 AC3 negative control for the pair above: the same row spelled as the
+// table ships it is inherited, not an override — the alternate comparison
+// distinguishes an edit from a faithful mirror.
+func TestPiUneditedAlternateIsInherited(t *testing.T) {
+	dir, _ := gen10WithoutPiRows(t, func(content string) string {
+		return strings.Replace(content,
+			"  codex.fallback:",
+			"  pi.primary:        qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh\n  codex.fallback:", 1)
+	})
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := report(t, reports, "WORKFLOW.md")
+	for _, o := range wf.ModelOverrides {
+		if strings.Contains(o.Key, "pi.") {
+			t.Errorf("unedited pi row reported as override: %+v", o)
+		}
+	}
+	for _, m := range wf.ModelRefreshes {
+		if strings.Contains(m.Key, "pi.") {
+			t.Errorf("unedited pi row itemized as a refresh: %+v", m)
+		}
+	}
+}

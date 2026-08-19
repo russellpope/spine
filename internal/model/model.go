@@ -38,6 +38,17 @@
 //     authoritative — the override if one is present, else the shipped
 //     default — so an override that sets an id but omits effort still
 //     inherits the tier default, not the default entry's effort.
+//   - A cell may carry an optional alternate (CONTEXT.md "alternate"): an
+//     (id, effort) pair rendered on the mirror row as a trailing
+//     " alt: <id> @ <effort>" and read back under the same rules, and part
+//     of the pair everShipped compares, so editing or deleting only a cell's
+//     alternate reads as the deliberate choice it is (I079).
+//   - A flavor may declare an effort vocabulary in the table
+//     (effortVocabulary); an effort outside it — the pi harness has no
+//     "high" — is refused at resolution rather than mapped onto a
+//     neighbouring level. Translating an effort to a model's own reasoning
+//     aliases is the harness's job, not spine's. Flavors with no declared
+//     vocabulary are unconstrained, as claude and codex always were.
 //   - A (flavor, tier) pair with no id in the table (an unshipped tier on an
 //     otherwise-known flavor — the shape a partially-populated third flavor
 //     would take) is a hard error, never a zero-value Entry: an empty model
@@ -79,22 +90,35 @@ const (
 	Override Provenance = "override"
 )
 
-// Entry is one resolved (flavor, tier) row.
+// Alternate is a cell's owner-tuned alternate (CONTEXT.md "alternate"): the
+// (id, effort) pair a second dispatch on the same cell uses — the maipipe
+// critic against the author, say — so the difference between the two is
+// data in the table, not a dispatch-time heuristic (I079). The same id at a
+// different effort is a legitimate alternate.
+type Alternate struct {
+	ID     string `json:"id"`
+	Effort string `json:"effort,omitempty"`
+}
+
+// Entry is one resolved (flavor, tier) row. Alternate is nil for a cell
+// that ships none — most cells do not.
 type Entry struct {
 	Flavor     string
 	Tier       string
 	ID         string
 	Effort     string
 	Aliases    []string
+	Alternate  *Alternate
 	Provenance Provenance
 }
 
 // tableEntry is one (flavor, tier) row as shipped in models/defaults.json.
 type tableEntry struct {
-	ID      string         `json:"id"`
-	Effort  string         `json:"effort,omitempty"`
-	Aliases []string       `json:"aliases"`
-	History []historyEntry `json:"history"`
+	ID        string         `json:"id"`
+	Effort    string         `json:"effort,omitempty"`
+	Aliases   []string       `json:"aliases"`
+	Alternate *Alternate     `json:"alternate,omitempty"`
+	History   []historyEntry `json:"history"`
 }
 
 // historyEntry is one previously shipped default as the (id, effort) pair it
@@ -104,13 +128,18 @@ type tableEntry struct {
 // omitted effort (D3). Without the pair, a historical id would be compared
 // against the CURRENT default's effort — harmless until the first time a
 // default's effort changes across a history entry, then wrong.
+// A history entry may carry an alternate too, so inherited-vs-override
+// detection covers the alternate half of a cell rather than only its id and
+// effort (I079).
 type historyEntry struct {
-	ID     string `json:"id"`
-	Effort string `json:"effort,omitempty"`
+	ID        string     `json:"id"`
+	Effort    string     `json:"effort,omitempty"`
+	Alternate *Alternate `json:"alternate,omitempty"`
 }
 
 type table struct {
 	TierDefaultEffort map[string]string                `json:"tierDefaultEffort"`
+	EffortVocabulary  map[string][]string              `json:"effortVocabulary"`
 	Flavors           map[string]map[string]tableEntry `json:"flavors"`
 }
 
@@ -150,13 +179,77 @@ func validateTable(t table) {
 			if tiers[tier].ID == "" {
 				panic(fmt.Sprintf("models/defaults.json: flavor %q has no id for tier %q", flavor, tier))
 			}
+			checkAlternate := func(what string, alt *Alternate) {
+				if alt == nil {
+					return
+				}
+				if alt.ID == "" {
+					panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q %s alternate has no id", flavor, tier, what))
+				}
+				if alt.Effort == "" {
+					panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q %s alternate has no effort", flavor, tier, what))
+				}
+			}
+			checkAlternate("current", tiers[tier].Alternate)
 			for _, h := range tiers[tier].History {
 				if h.ID == "" {
 					panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q has a history entry with no id", flavor, tier))
 				}
+				checkAlternate("history", h.Alternate)
+			}
+			// A shipped cell must speak its own flavor's effort vocabulary,
+			// so a data edit that ships (say) a pi cell at "high" fails the
+			// build's tests rather than erroring at every resolution.
+			for _, effort := range shippedEfforts(tiers[tier]) {
+				if err := checkEffort(t, flavor, effort); err != nil {
+					panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q: %v", flavor, tier, err))
+				}
 			}
 		}
 	}
+}
+
+// shippedEfforts lists every effort a shipped cell names — its own, its
+// alternate's, and those of its history entries. An omitted effort is the
+// tier default, which tierDefaultEffort validation already covers, so it is
+// not repeated here.
+func shippedEfforts(def tableEntry) []string {
+	var efforts []string
+	add := func(e string) {
+		if e != "" {
+			efforts = append(efforts, e)
+		}
+	}
+	add(def.Effort)
+	if def.Alternate != nil {
+		add(def.Alternate.Effort)
+	}
+	for _, h := range def.History {
+		add(h.Effort)
+		if h.Alternate != nil {
+			add(h.Alternate.Effort)
+		}
+	}
+	return efforts
+}
+
+// checkEffort enforces a flavor's effort vocabulary (design: pi speaks
+// low | medium | xhigh and has no "high"). A flavor absent from the
+// vocabulary table accepts any effort — the pre-existing behavior for
+// claude and codex, whose efforts spine never constrained. Translating an
+// effort to a model's own reasoning aliases is the harness's job, not
+// spine's; spine only refuses a word the harness does not have.
+func checkEffort(t table, flavor, effort string) error {
+	vocab, ok := t.EffortVocabulary[flavor]
+	if !ok || effort == "" {
+		return nil
+	}
+	for _, v := range vocab {
+		if v == effort {
+			return nil
+		}
+	}
+	return fmt.Errorf("effort %q is not in the %s effort vocabulary (known: %s)", effort, flavor, strings.Join(vocab, ", "))
 }
 
 // Flavors returns the known flavors, sorted. Data-driven: a third flavor
@@ -204,13 +297,15 @@ func resolveFrom(t table, repoDir, flavor, tier string) (Entry, error) {
 	entry := Entry{
 		Flavor: flavor, Tier: tier,
 		ID: def.ID, Effort: def.Effort, Aliases: def.Aliases,
+		Alternate:  def.Alternate,
 		Provenance: Default,
 	}
 
 	if ov, found := readOverride(repoDir, flavor, tier); found {
 		entry.ID = ov.id
 		entry.Effort = ov.effort
-		if everShipped(def, tierDefaultEffort, ov.id, ov.effort) {
+		entry.Alternate = ov.alternate
+		if everShipped(def, tierDefaultEffort, ov) {
 			entry.Provenance = Inherited
 		} else {
 			entry.Provenance = Override
@@ -231,6 +326,24 @@ func resolveFrom(t table, repoDir, flavor, tier string) (Entry, error) {
 	if entry.Effort == "" {
 		entry.Effort = tierDefaultEffort
 	}
+	// An alternate that names no effort of its own runs at the cell's own
+	// effort — the alternate is then purely a different model, not a
+	// different effort. (Shipped defaults always name one; this covers a
+	// hand-written mirror row that omits it.)
+	if entry.Alternate != nil && entry.Alternate.Effort == "" {
+		entry.Alternate = &Alternate{ID: entry.Alternate.ID, Effort: entry.Effort}
+	}
+	// The vocabulary check runs on the resolved pair, so a per-repo override
+	// asking pi for "high" fails here — the only place an effort outside a
+	// flavor's vocabulary can still enter after load-time validation.
+	if err := checkEffort(t, flavor, entry.Effort); err != nil {
+		return Entry{}, fmt.Errorf("%s.%s: %w", flavor, tier, err)
+	}
+	if entry.Alternate != nil {
+		if err := checkEffort(t, flavor, entry.Alternate.Effort); err != nil {
+			return Entry{}, fmt.Errorf("%s.%s alternate: %w", flavor, tier, err)
+		}
+	}
 	return entry, nil
 }
 
@@ -242,22 +355,39 @@ func resolveFrom(t table, repoDir, flavor, tier string) (Entry, error) {
 // effort happens to be. This keeps a deliberate effort override on an
 // otherwise-default id from being misreported as Inherited, in either
 // direction.
-func everShipped(def tableEntry, tierDefaultEffort, id, effort string) bool {
-	effective := effort
+// The alternate is part of the pair (I079): a repo that edited only the
+// alternate half of a cell — or deleted it — made a deliberate choice, and
+// reporting that as Inherited would let the refresh rule silently revert it.
+func everShipped(def tableEntry, tierDefaultEffort string, ov override) bool {
+	effective := ov.effort
 	if effective == "" {
 		effective = tierDefaultEffort
 	}
-	matches := func(shippedID, shippedEffort string) bool {
+	// An alternate's effort defaults to the cell's own effective effort, the
+	// same rule resolveFrom applies, so both sides compare as resolved.
+	altKey := func(alt *Alternate, cellEffort string) string {
+		if alt == nil {
+			return ""
+		}
+		effort := alt.Effort
+		if effort == "" {
+			effort = cellEffort
+		}
+		return alt.ID + " @ " + effort
+	}
+	onDisk := altKey(ov.alternate, effective)
+	matches := func(shippedID, shippedEffort string, shippedAlt *Alternate) bool {
 		if shippedEffort == "" {
 			shippedEffort = tierDefaultEffort
 		}
-		return id == shippedID && effective == shippedEffort
+		return ov.id == shippedID && effective == shippedEffort &&
+			onDisk == altKey(shippedAlt, shippedEffort)
 	}
-	if matches(def.ID, def.Effort) {
+	if matches(def.ID, def.Effort, def.Alternate) {
 		return true
 	}
 	for _, h := range def.History {
-		if matches(h.ID, h.Effort) {
+		if matches(h.ID, h.Effort, h.Alternate) {
 			return true
 		}
 	}
@@ -278,11 +408,23 @@ func TierDefaultEffort(tier string) string {
 // entry's effective effort deviates from its tier's default. An effort equal
 // to the tier default is omitted so the common case stays a bare id and the
 // suffix always signals a real deviation.
+// A cell with an alternate appends " alt: <id> @ <effort>" on the same line
+// (I079). The alternate's effort is always spelled out — it is a deliberate
+// tuning knob, and a bare id there would read as "same effort as the cell"
+// rather than as the owner's choice.
 func MirrorValue(e Entry) string {
+	v := e.ID
 	if e.Effort != "" && e.Effort != defaults.TierDefaultEffort[e.Tier] {
-		return e.ID + " @ " + e.Effort
+		v += " @ " + e.Effort
 	}
-	return e.ID
+	if e.Alternate != nil {
+		effort := e.Alternate.Effort
+		if effort == "" {
+			effort = e.Effort
+		}
+		v += " alt: " + e.Alternate.ID + " @ " + effort
+	}
+	return v
 }
 
 // MirrorRows renders the embedded defaults as the gen-10 WORKFLOW.md mirror
@@ -298,7 +440,7 @@ func MirrorRows() []string {
 	for _, flavor := range flavorsOf(defaults) {
 		for _, tier := range Tiers {
 			def := defaults.Flavors[flavor][tier]
-			e := Entry{Flavor: flavor, Tier: tier, ID: def.ID, Effort: def.Effort}
+			e := Entry{Flavor: flavor, Tier: tier, ID: def.ID, Effort: def.Effort, Alternate: def.Alternate}
 			if e.Effort == "" {
 				e.Effort = defaults.TierDefaultEffort[tier]
 			}
@@ -433,8 +575,9 @@ func CommentIndex(s string) int {
 
 // override is one on-disk "<flavor>.<tier>" mirror value.
 type override struct {
-	id     string
-	effort string
+	id        string
+	effort    string
+	alternate *Alternate
 }
 
 // readOverride looks up repoDir's WORKFLOW.md model_routing block for the
@@ -468,12 +611,22 @@ func readOverride(repoDir, flavor, tier string) (override, bool) {
 	return override{}, false
 }
 
-// parseValue splits one mirror value into id and optional effort per D9:
-// "<id>" or "<id> @ <effort>". RoutingKeys has already stripped any trailing
-// comment — D9's corrected order (comment first, then the separator split).
+// parseValue splits one mirror value into id, optional effort, and optional
+// alternate per D9 plus I079: "<id>[ @ <effort>][ alt: <id>[ @ <effort>]]".
+// RoutingKeys has already stripped any trailing comment — D9's corrected
+// order (comment first, then the separator split). The alternate clause is
+// cut off first so the effort split never sees the alternate's own " @ ".
 func parseValue(v string) override {
-	id, effort, hasEffort := strings.Cut(v, "@")
-	ov := override{id: strings.TrimSpace(id)}
+	var ov override
+	head, alt, hasAlt := strings.Cut(v, " alt:")
+	if hasAlt {
+		altID, altEffort, _ := strings.Cut(alt, "@")
+		if id := strings.TrimSpace(altID); id != "" {
+			ov.alternate = &Alternate{ID: id, Effort: strings.TrimSpace(altEffort)}
+		}
+	}
+	id, effort, hasEffort := strings.Cut(head, "@")
+	ov.id = strings.TrimSpace(id)
 	if hasEffort {
 		ov.effort = strings.TrimSpace(effort)
 	}

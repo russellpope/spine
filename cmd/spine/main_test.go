@@ -1787,3 +1787,137 @@ func TestModelMissingArgsExitsNonZero(t *testing.T) {
 		}
 	}
 }
+
+// I079 AC1: the pi harness resolves from the table today — each tier at its
+// spec'd explicit effort, with the owner-tuned alternate available.
+func TestModelPiTiersResolveWithExplicitEfforts(t *testing.T) {
+	for _, tc := range []struct{ tier, effort string }{
+		{"primary", "xhigh"},
+		{"routine", "medium"},
+		{"mechanical", "low"},
+		{"fallback", "xhigh"},
+	} {
+		dir := t.TempDir()
+		code, out, errs := runCmd(t, "model", "--dir", dir, "pi", tc.tier)
+		if code != 0 || out != "qwen3.8-27b-q8_0\n" {
+			t.Errorf("pi %s: code=%d out=%q stderr=%q", tc.tier, code, out, errs)
+		}
+		code, out, errs = runCmd(t, "model", "--dir", dir, "--effort", "pi", tc.tier)
+		if code != 0 || out != tc.effort+"\n" {
+			t.Errorf("pi %s --effort: code=%d out=%q stderr=%q", tc.tier, code, out, errs)
+		}
+	}
+}
+
+// I079 AC1: --alternate answers from the cell's alternate half — qwen @
+// xhigh on every pi cell — so an evaluator's critic differs from its author
+// by table data rather than a dispatch-time heuristic.
+func TestModelPiAlternateReturnsOwnerTunedPair(t *testing.T) {
+	dir := t.TempDir()
+	code, out, errs := runCmd(t, "model", "--dir", dir, "--alternate", "pi", "routine")
+	if code != 0 || out != "qwen3.8-27b-q8_0\n" {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCmd(t, "model", "--dir", dir, "--alternate", "--effort", "pi", "routine")
+	if code != 0 || out != "xhigh\n" {
+		t.Fatalf("--effort: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+// I079 AC1: --json carries the alternate when the cell has one.
+func TestModelJSONCarriesAlternateForPi(t *testing.T) {
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--json", "pi", "routine")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	var got struct {
+		ID        string `json:"id"`
+		Effort    string `json:"effort"`
+		Alternate *struct {
+			ID     string `json:"id"`
+			Effort string `json:"effort"`
+		} `json:"alternate"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("out=%q not valid JSON: %v", out, err)
+	}
+	if got.ID != "qwen3.8-27b-q8_0" || got.Effort != "medium" {
+		t.Errorf("got=%+v, out=%q", got, out)
+	}
+	if got.Alternate == nil || got.Alternate.ID != "qwen3.8-27b-q8_0" || got.Alternate.Effort != "xhigh" {
+		t.Errorf("alternate=%+v, want qwen3.8-27b-q8_0 @ xhigh", got.Alternate)
+	}
+}
+
+// I079 AC1 negative control: a cell without an alternate says so rather than
+// silently answering with its primary id — an evaluator that asked for the
+// critic and got the author would run a model against itself.
+func TestModelAlternateAbsentIsAnError(t *testing.T) {
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--alternate", "claude", "primary")
+	if code != 2 || !strings.Contains(errs, "has no alternate") {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+// I079 AC1 negative control: claude's --json output gains no alternate key.
+func TestModelJSONOmitsAlternateWhenAbsent(t *testing.T) {
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--json", "claude", "primary")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	if strings.Contains(out, "alternate") {
+		t.Fatalf("out=%q, want no alternate key for a cell that ships none", out)
+	}
+}
+
+// I079 AC2: pi speaks low | medium | xhigh. A per-repo override asking pi
+// for "high" fails with a message naming the vocabulary rather than being
+// mapped onto some neighbouring level.
+func TestModelPiRejectsHighEffortNamingItsVocabulary(t *testing.T) {
+	dir := writeModelWorkflow(t, "model_routing:\n  pi.routine: qwen3.8-27b-q8_0 @ high\n")
+	code, _, errs := runCmd(t, "model", "--dir", dir, "--effort", "pi", "routine")
+	if code != 2 {
+		t.Fatalf("code=%d, want 2; stderr=%q", code, errs)
+	}
+	for _, want := range []string{`effort "high"`, "pi effort vocabulary", "low, medium, xhigh"} {
+		if !strings.Contains(errs, want) {
+			t.Errorf("stderr=%q, want it to contain %q", errs, want)
+		}
+	}
+}
+
+// I079 AC2 negative control: the same override at a vocabulary effort
+// resolves cleanly — the check rejects the word, not the override path.
+func TestModelPiAcceptsVocabularyEffortOverride(t *testing.T) {
+	dir := writeModelWorkflow(t, "model_routing:\n  pi.routine: qwen3.8-27b-q8_0 @ low\n")
+	code, out, errs := runCmd(t, "model", "--dir", dir, "--effort", "pi", "routine")
+	if code != 0 || out != "low\n" {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+// I079 AC3 at the resolver's own seam: an on-disk pi row spelled as the
+// table ships it reports inherited; the same row with an edited alternate
+// reports override, so the refresh rule leaves the edit alone.
+func TestModelPiAlternateProvenance(t *testing.T) {
+	for _, tc := range []struct{ row, want string }{
+		{"qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh", "inherited"},
+		{"qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ low", "override"},
+		{"qwen3.8-27b-q8_0 @ xhigh", "override"},
+	} {
+		dir := writeModelWorkflow(t, "model_routing:\n  pi.primary: "+tc.row+"\n")
+		code, out, errs := runCmd(t, "model", "--dir", dir, "--json", "pi", "primary")
+		if code != 0 {
+			t.Fatalf("row %q: code=%d stderr=%q", tc.row, code, errs)
+		}
+		var got struct {
+			Provenance string `json:"provenance"`
+		}
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("out=%q not valid JSON: %v", out, err)
+		}
+		if got.Provenance != tc.want {
+			t.Errorf("row %q: provenance=%q, want %q", tc.row, got.Provenance, tc.want)
+		}
+	}
+}

@@ -14,6 +14,10 @@ model_routing:                     # spine-managed defaults; edit a value to ove
   codex.routine:     gpt-5.6-terra
   codex.mechanical:  gpt-5.6-luna
   codex.fallback:    gpt-5.6-terra @ xhigh
+  pi.primary:        qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh
+  pi.routine:        qwen3.8-27b-q8_0 alt: qwen3.8-27b-q8_0 @ xhigh
+  pi.mechanical:     qwen3.8-27b-q8_0 alt: qwen3.8-27b-q8_0 @ xhigh
+  pi.fallback:       qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh
 stages: [grill, prd, issues, implement, functional-test, review, verify, ship, deploy, docs, handoff]
 
 See `docs/harness-interface.md` for the functional-test harness contract.

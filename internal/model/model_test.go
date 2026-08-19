@@ -206,8 +206,15 @@ func TestResolve_UnknownTier_Rejected(t *testing.T) {
 // models/defaults.json needs no change here.
 func TestFlavors_DataDriven(t *testing.T) {
 	flavors := Flavors()
-	if len(flavors) != 2 || flavors[0] != "claude" || flavors[1] != "codex" {
-		t.Errorf("Flavors() = %v, want [claude codex]", flavors)
+	want := []string{"claude", "codex", "pi"}
+	if len(flavors) != len(want) {
+		t.Fatalf("Flavors() = %v, want %v", flavors, want)
+	}
+	for i, f := range want {
+		if flavors[i] != f {
+			t.Errorf("Flavors() = %v, want %v", flavors, want)
+			break
+		}
 	}
 }
 

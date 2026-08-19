@@ -5,6 +5,9 @@
     "mechanical": "low",
     "fallback": "high"
   },
+  "effortVocabulary": {
+    "pi": ["low", "medium", "xhigh"]
+  },
   "flavors": {
     "claude": {
       "primary": {
@@ -50,6 +53,36 @@
         "id": "gpt-5.6-terra",
         "effort": "xhigh",
         "aliases": ["gpt-5.6-terra", "terra"],
+        "history": []
+      }
+    },
+    "pi": {
+      "primary": {
+        "id": "qwen3.8-27b-q8_0",
+        "effort": "xhigh",
+        "aliases": ["qwen3.8", "qwen"],
+        "alternate": {"id": "qwen3.8-27b-q8_0", "effort": "xhigh"},
+        "history": []
+      },
+      "routine": {
+        "id": "qwen3.8-27b-q8_0",
+        "effort": "medium",
+        "aliases": ["qwen3.8", "qwen"],
+        "alternate": {"id": "qwen3.8-27b-q8_0", "effort": "xhigh"},
+        "history": []
+      },
+      "mechanical": {
+        "id": "qwen3.8-27b-q8_0",
+        "effort": "low",
+        "aliases": ["qwen3.8", "qwen"],
+        "alternate": {"id": "qwen3.8-27b-q8_0", "effort": "xhigh"},
+        "history": []
+      },
+      "fallback": {
+        "id": "qwen3.8-27b-q8_0",
+        "effort": "xhigh",
+        "aliases": ["qwen3.8", "qwen"],
+        "alternate": {"id": "qwen3.8-27b-q8_0", "effort": "xhigh"},
         "history": []
       }
     }
