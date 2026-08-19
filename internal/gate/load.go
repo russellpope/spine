@@ -63,7 +63,26 @@ type goListPackage struct {
 	XTestGoFiles []string
 	Export       string
 	Module       *struct{ Main bool }
-	Error        *struct{ Err string }
+	Error        *goListError
+	DepsErrors   []*goListError
+}
+
+// goListError is `go list -e`'s per-package error. A package that does not
+// compile carries one in Error; every package that imports it carries the
+// same text in DepsErrors (and no export data).
+type goListError struct{ Err string }
+
+// firstLine strips the `# importpath` header `go build` prefixes to a
+// compile failure and returns the first diagnostic line, so the refusal
+// reads `internal/inv/inv.go:3:29: undefined: x` and not a transcript.
+func (e *goListError) firstLine() string {
+	for _, line := range strings.Split(e.Err, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "# ") {
+			return line
+		}
+	}
+	return strings.TrimSpace(e.Err)
 }
 
 // isMainModule reports whether p is a package of the module under --dir and
@@ -99,6 +118,23 @@ func loadModule(dir string) (*loaded, error) {
 	if len(own) == 0 {
 		return nil, fmt.Errorf("cannot load the module under --dir %s: no Go packages found (is there a go.mod?)", dir)
 	}
+	// Refuse on the first compile error before type-checking anything:
+	// the packages are checked in import-path order, and an importer that
+	// sorts before its broken dependency would otherwise fail first with
+	// the downstream symptom ("could not import … (no export data)")
+	// instead of the cause (I093.2). A package's own Error outranks the
+	// DepsErrors it inherits, so the named error is the one to fix.
+	sort.Slice(own, func(i, j int) bool { return own[i].ImportPath < own[j].ImportPath })
+	for _, p := range own {
+		if p.Error != nil {
+			return nil, fmt.Errorf("--dir %s does not type-check: %s: %s", dir, p.ImportPath, p.Error.firstLine())
+		}
+	}
+	for _, p := range own {
+		if len(p.DepsErrors) > 0 {
+			return nil, fmt.Errorf("--dir %s does not type-check: dependency of %s: %s", dir, p.ImportPath, p.DepsErrors[0].firstLine())
+		}
+	}
 	fset := token.NewFileSet()
 	imp := importer.ForCompiler(fset, "gc", func(path string) (io.ReadCloser, error) {
 		file, ok := exports[path]
@@ -108,11 +144,7 @@ func loadModule(dir string) (*loaded, error) {
 		return os.Open(file)
 	})
 	out := &loaded{dir: dir, fset: fset}
-	sort.Slice(own, func(i, j int) bool { return own[i].ImportPath < own[j].ImportPath })
 	for _, p := range own {
-		if p.Error != nil {
-			return nil, fmt.Errorf("--dir %s does not type-check: %s: %s", dir, p.ImportPath, strings.TrimSpace(p.Error.Err))
-		}
 		// One unit for the package plus its internal test files, one more
 		// for its external test package when it has one. CgoFiles belong to
 		// the first: a cgo package whose C-backed declarations are missing

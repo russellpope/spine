@@ -54,3 +54,24 @@ Minor findings from the 2026-08-19 dogfood (I088–I092), none blocking:
 
 Five small tickets' worth; batch when convenient. (1) and (2) are code +
 test; (3) and (4) need an owner call first.
+
+### Done 2026-08-19 — items 1 and 2
+
+1. `internal/gate/gate_test.go` `TestSortFindingsOrder`: four findings tying
+   at each level, asserts `file asc, line asc, message asc`. Negative
+   control = the mutation probe itself: `MAIPIPE_RESULTS=… spine gate go
+   mutate --dir .` → `gate-sort-findings-reversed SURVIVED` with the test
+   untracked (the battery copies tracked files only), `KILLED` once staged.
+   Remaining survivor is the report-only `mutate-workcopy-leak-on-copy-error`.
+2. `internal/gate/load.go`: `loadModule` now pre-passes every main-module
+   package for `go list -e`'s `Error`, then `DepsErrors`, before any
+   type-check, and reports the first diagnostic line (the `# importpath`
+   header stripped). New refusal case in
+   `TestGateTypeCheckedClassesRejectNonCompilingRepo` ("importer sorts
+   first": `cmd` imports broken `internal/inv`) — red before the fix with
+   the exact downstream text (`could not import … (no export data …)`),
+   green after; every case now also asserts `no export data` is absent.
+   `make test` 18/18 ok, `go vet` clean.
+
+Open: 3 (unconfigured-class advisory), 4 (`--force` scoping), 5 (D11 value
+hash) — owner call.

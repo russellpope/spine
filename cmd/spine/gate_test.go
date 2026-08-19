@@ -853,6 +853,19 @@ func TestGateTypeCheckedClassesRejectNonCompilingRepo(t *testing.T) {
 			[]string{"does not type-check", "example.com/fixture"},
 		},
 		{
+			// The importer sorts before the package that is actually broken
+			// (cmd < internal): the refusal must name the first compile
+			// error, not the downstream "could not import … (no export
+			// data)" symptom (I093.2).
+			"does not type-check, importer sorts first",
+			map[string][]byte{
+				"go.mod":              []byte("module example.com/fixture\n\ngo 1.22\n"),
+				"cmd/main.go":         []byte("package main\n\nimport \"example.com/fixture/internal/inv\"\n\nfunc main() { _ = inv.Name() }\n"),
+				"internal/inv/inv.go": []byte("package inv\n\nfunc Name() string { return undefinedThing }\n"),
+			},
+			[]string{"does not type-check", "internal/inv/inv.go:3:", "undefined: undefinedThing"},
+		},
+		{
 			"cannot load",
 			map[string][]byte{
 				"go.mod":  []byte("module\n"),
@@ -874,6 +887,9 @@ func TestGateTypeCheckedClassesRejectNonCompilingRepo(t *testing.T) {
 					if !strings.Contains(errs, want) {
 						t.Errorf("stderr=%q, want %q", errs, want)
 					}
+				}
+				if strings.Contains(errs, "no export data") {
+					t.Errorf("stderr names the downstream symptom, not the cause: %q", errs)
 				}
 			})
 		}
