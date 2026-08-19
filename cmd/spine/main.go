@@ -15,6 +15,7 @@ import (
 	"github.com/russellpope/spine/internal/adopt"
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/audit"
+	"github.com/russellpope/spine/internal/checkpoint"
 	"github.com/russellpope/spine/internal/cursor"
 	"github.com/russellpope/spine/internal/doctor"
 	"github.com/russellpope/spine/internal/eval"
@@ -30,18 +31,19 @@ import (
 const usage = `usage: spine <command> [flags]
 
 commands:
-  init     scaffold the unified workflow into a repo
-  adopt    retrofit a pre-spine repo (dry-run by default; --write applies)
-  update   regenerate machine-owned workflow files (dry-run by default; --write applies)
-  adr      manage architecture decision records (new, list)
-  handoff  manage docs/handoffs (new, list, latest [--fleet DIR])
-  eval     manage docs/evals (new, add-run, list)
-  doctor   read-only workflow health checks
-  audit    verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
-  gate     run a gate-pack check class (gate go <check> [--dir D])
-  cursor   print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
-  model    resolve the model table for a (flavor, tier) pair (read-only)
-  version  print the compiled template generation
+  init       scaffold the unified workflow into a repo
+  adopt      retrofit a pre-spine repo (dry-run by default; --write applies)
+  update     regenerate machine-owned workflow files (dry-run by default; --write applies)
+  adr        manage architecture decision records (new, list)
+  handoff    manage docs/handoffs (new, list, latest [--fleet DIR])
+  eval       manage docs/evals (new, add-run, list)
+  doctor     read-only workflow health checks
+  audit      verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
+  gate       run a gate-pack check class (gate go <check> [--dir D])
+  checkpoint write or replay a session checkpoint (new, latest, list)
+  cursor     print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
+  model      resolve the model table for a (flavor, tier) pair (read-only)
+  version    print the compiled template generation
 `
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -70,6 +72,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdAudit(args[1:], stdout, stderr)
 	case "gate":
 		return cmdGate(args[1:], stdout, stderr)
+	case "checkpoint":
+		return cmdCheckpoint(args[1:], stdout, stderr)
 	case "cursor":
 		return cmdCursor(args[1:], stdout, stderr)
 	case "model":
@@ -800,6 +804,135 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 // with zero parsed stage rows there is nothing coherent to call clean or
 // blocking about the stages themselves — see internal/stages' package doc
 // (CursorFindings never affects Report.Blocking()).
+// checkpointUsage documents the verbs in CONTEXT.md vocabulary: a
+// checkpoint is what a running session distils itself into before a context
+// reload; it holds a model region (the model's own prior claims) and a
+// facts region (harness-written evidence), and accumulates in the
+// checkpoint working home.
+const checkpointUsage = `usage: spine checkpoint <new|latest|list> [flags]
+
+  new     write a checkpoint into the working home
+          (.superpowers/sdd/checkpoints/NNN-<slug>.md)
+          spine checkpoint new [--dir D] --from <narrative.md> --touched <csv>
+            --gate <pass|fail|none> --effort <level> [--slug s] [--facts-only]
+          The narrative becomes the model region and must carry non-empty
+          "## Task", "## Conclusions" and "## Next moves" sections; a missing
+          or empty section is refused (exit 2, naming the section).
+          --facts-only skips the narrative and writes narrative: missing.
+  latest  print the reload preamble followed by the newest checkpoint
+          (exit 1 when the working home is empty)
+  list    list the working home in ordinal order
+`
+
+func cmdCheckpoint(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprint(stderr, checkpointUsage)
+		return 2
+	}
+	switch args[0] {
+	case "new":
+		return cmdCheckpointNew(args[1:], stdout, stderr)
+	case "latest":
+		return cmdCheckpointLatest(args[1:], stdout, stderr)
+	case "list":
+		return cmdCheckpointList(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "unknown checkpoint subcommand %q\n%s", args[0], checkpointUsage)
+		return 2
+	}
+}
+
+func cmdCheckpointNew(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("checkpoint new", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	from := fs.String("from", "", "narrative file becoming the model region")
+	touched := fs.String("touched", "", "comma-separated files touched (order preserved)")
+	gate := fs.String("gate", "", "gate status: pass | fail | none")
+	effort := fs.String("effort", "", "recommended per-leg effort")
+	slug := fs.String("slug", "", "filename slug (default: derived from the ## Task line)")
+	factsOnly := fs.Bool("facts-only", false, "write facts with narrative: missing and an empty model region")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	path, err := checkpoint.New(checkpoint.Options{
+		Dir:       *dir,
+		From:      *from,
+		Touched:   splitTouched(*touched),
+		Gate:      *gate,
+		Effort:    *effort,
+		Slug:      *slug,
+		FactsOnly: *factsOnly,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, "checkpoint new:", err)
+		return 2
+	}
+	fmt.Fprintln(stdout, path)
+	return 0
+}
+
+// splitTouched parses the --touched CSV; an empty value is an empty list,
+// and caller order is preserved.
+func splitTouched(csv string) []string {
+	var out []string
+	for _, part := range strings.Split(csv, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func cmdCheckpointLatest(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("checkpoint latest", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	e, ok, err := checkpoint.Latest(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "checkpoint latest:", err)
+		return 2
+	}
+	if !ok {
+		fmt.Fprintln(stderr, "no checkpoints found")
+		return 1
+	}
+	preamble, err := checkpoint.Preamble()
+	if err != nil {
+		fmt.Fprintln(stderr, "checkpoint latest:", err)
+		return 2
+	}
+	raw, err := os.ReadFile(e.Path)
+	if err != nil {
+		fmt.Fprintln(stderr, "checkpoint latest:", err)
+		return 2
+	}
+	fmt.Fprint(stdout, preamble)
+	fmt.Fprint(stdout, string(raw))
+	return 0
+}
+
+func cmdCheckpointList(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("checkpoint list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	entries, err := checkpoint.List(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "checkpoint list:", err)
+		return 2
+	}
+	for _, e := range entries {
+		fmt.Fprintf(stdout, "%03d  %-30s  %s\n", e.Ordinal, e.Slug, e.Created)
+	}
+	return 0
+}
+
 func cmdCursor(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 {
 		switch args[0] {
