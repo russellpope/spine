@@ -117,8 +117,6 @@ func checkMutate(dir string, cfg Config) (Report, error) {
 			Findings: []Finding{{
 				Severity: SeverityError,
 				Message:  msg,
-				File:     ".",
-				Line:     0,
 				Code:     Code("mutate"),
 			}},
 			Summary: Code("mutate") + ": control failed: unmutated tree is not green — no probes run",
@@ -343,6 +341,7 @@ func (v verifier) run(command string) (bool, string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = v.dir
+	cmd.Env = verifyEnv(os.Environ())
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
@@ -445,4 +444,21 @@ func copyOne(src, dst string) error {
 		return fmt.Errorf("copying %s into the mutation working copy: %w", src, err)
 	}
 	return nil
+}
+
+// verifyEnv is the environment the tree's own build and suite run under:
+// the stage's environment minus the gate's own knobs. MAIPIPE_RESULTS is the
+// stage's results path — inherited, any test in the tree that exercises a
+// results-emitting tool would write there instead of stdout and fail the
+// control (I092, first live mutation-go run on spine itself); SPINE_GATE_*
+// are this stage's inputs, not the tree's.
+func verifyEnv(environ []string) []string {
+	var env []string
+	for _, kv := range environ {
+		if strings.HasPrefix(kv, ResultsEnvVar+"=") || strings.HasPrefix(kv, "SPINE_GATE_") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return env
 }

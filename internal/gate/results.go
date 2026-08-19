@@ -27,9 +27,12 @@ type results struct {
 type jsonFinding struct {
 	Severity string `json:"severity"`
 	Message  string `json:"message"`
-	File     string `json:"file"`
-	Line     int    `json:"line"`
-	Code     string `json:"code"`
+	// file and line are omitted when absent (I092): maipipe accepts a
+	// missing line but rejects 0 ("must be a positive 64-bit integer"),
+	// and a missing file but not a placeholder path.
+	File string `json:"file,omitempty"`
+	Line int    `json:"line,omitempty"`
+	Code string `json:"code"`
 }
 
 // emit reports one check class's outcome: the results-contract JSON to the

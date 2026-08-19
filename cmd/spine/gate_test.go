@@ -692,6 +692,53 @@ func TestGateGitignoreControlArmsIndependent(t *testing.T) {
 	}
 }
 
+// rawFindingKeys decodes the results file's findings as generic maps so a
+// test can assert which keys are present, not just their decoded values
+// (a missing int decodes as 0 and hides an omitted key).
+func rawFindingKeys(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	var doc struct {
+		Findings []map[string]any `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(readFile(t, path)), &doc); err != nil {
+		t.Fatalf("results JSON: %v", err)
+	}
+	if len(doc.Findings) == 0 {
+		t.Fatal("no findings in results file")
+	}
+	return doc.Findings
+}
+
+// TestGateResultsOmitLineZero (I092): a finding without a line — arm 1 of
+// gitignore-control names a path, not a line — must omit the key rather
+// than emit 0, which maipipe rejects as "finding line must be a positive
+// 64-bit integer" and fails the whole stage as results_invalid.
+func TestGateResultsOmitLineZero(t *testing.T) {
+	_, seeded := gitignoreControlFixtures()
+	dir := gateRepo(t, seeded)
+	t.Setenv("SPINE_GATE_BUILD_OUTPUTS", "bin/spine")
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	code, out, errs := runCmd(t, "gate", "go", "gitignore-control", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	var sawLineless bool
+	for _, f := range rawFindingKeys(t, results) {
+		line, present := f["line"]
+		if !present {
+			sawLineless = true
+			continue
+		}
+		if n, ok := line.(float64); !ok || n < 1 {
+			t.Errorf("finding emits a non-positive line %v: %+v", line, f)
+		}
+	}
+	if !sawLineless {
+		t.Errorf("expected the declared-output finding to carry no line key: %s", readFile(t, results))
+	}
+}
+
 // TestGateFixtureManifestMissing: an absent manifest is a finding, not
 // misconfiguration — the manifest is what the class checks.
 func TestGateFixtureManifestMissing(t *testing.T) {
@@ -1103,6 +1150,13 @@ func TestDouble(t *testing.T) {
 	if !strings.Contains(r.Summary, "no probes run") {
 		t.Errorf("summary = %q", r.Summary)
 	}
+	// The control finding has no site (I092): maipipe rejects line 0
+	// outright and a placeholder file path, so neither key may appear.
+	for _, key := range []string{"file", "line"} {
+		if _, present := rawFindingKeys(t, results)[0][key]; present {
+			t.Errorf("control finding carries a %q key maipipe would reject: %s", key, readFile(t, results))
+		}
+	}
 	// The control failed inside the working copy, which is a tracked-files-
 	// only tree: the operator needs the output and a tree still on disk to
 	// look at, because the failure need not reproduce under --dir.
@@ -1130,6 +1184,45 @@ func mutateWorkingCopy(t *testing.T, message string) string {
 	}
 	path, _, _ := strings.Cut(rest, "\n")
 	return strings.TrimSpace(path)
+}
+
+// TestGateMutateVerifyEnvScrubbed (I092): the tree's own suite runs without
+// the stage's MAIPIPE_RESULTS and SPINE_GATE_* — a test in the tree that
+// exercises a results-emitting tool would otherwise write to the stage's
+// results path and fail the control. The fixture suite is red exactly when
+// either leaks through.
+func TestGateMutateVerifyEnvScrubbed(t *testing.T) {
+	envSensitive := `package fixture
+
+import (
+	"os"
+	"testing"
+)
+
+func TestDouble(t *testing.T) {
+	if os.Getenv("MAIPIPE_RESULTS") != "" {
+		t.Fatal("stage results path leaked into the tree's suite")
+	}
+	if os.Getenv("SPINE_GATE_TSKIP_ALLOW") != "" {
+		t.Fatal("gate config leaked into the tree's suite")
+	}
+	if Double(3) != 6 {
+		t.Fatal("double")
+	}
+}
+`
+	dir := mutateFixture(t, mutateSpec, envSensitive)
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	t.Setenv("SPINE_GATE_TSKIP_ALLOW", "x_test.go")
+	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir)
+	if code != 0 {
+		t.Fatalf("control must pass with the stage env scrubbed: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	r := readResults(t, results)
+	if r.Status != "pass" || strings.Contains(r.Summary, "control failed") {
+		t.Fatalf("status=%q summary=%q", r.Status, r.Summary)
+	}
 }
 
 // TestGateMutateRemovesWorkingCopyOnSuccess is the other half of the
