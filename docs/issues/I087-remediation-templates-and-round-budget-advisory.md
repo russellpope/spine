@@ -2,7 +2,7 @@
 id: I087
 title: "Remediation templates (hitlist, round record) + round-budget audit advisory"
 severity: med
-status: open
+status: fixed
 affects: [templates, stages, audit]
 blocked-by: [I085]
 execution-mode: subagent-driven
@@ -53,3 +53,25 @@ with the templates.
 
 - I085 (docs/remediation scaffold, gen 11). Do-not-regress content assumes
   I086's killed rows but the templates do not depend on it landing first.
+
+## Resolution
+
+Fixed 2026-08-19 on branch `local-harness-conventions` (commit 55cba1c).
+Embedded `templates/current/hitlist.tmpl.md` (header effort/round/dose/source
+run id; per finding `code`, file:line, finding, why-it-matters, do-not-regress
+block of killed `go@1/mutate` rows by probe id; no fix text — dose-scoped to
+the `findings-only` default) and `remediation-round.tmpl.md` (frontmatter
+round/dose/hitlist/run_id/verdict/optional extension-ratified-by; per-finding
+table `code | status open|fixed|regressed | note` keyed on results-contract
+codes). Decision: NO `spine remediation new` verb — both templates are
+scaffolded as machine-owned `docs/remediation/_hitlist.template.md` and
+`_round.template.md` (init + update; knowledge profile excluded) and
+instantiated by copying to `docs/remediation/<effort>/`; README names them.
+`spine audit stages` gains one advisory: `docs/remediation/<effort>/
+round-N.md` with N ≥ 4 lacking a non-empty `extension-ratified-by:` is printed
+as `warning:` from a dedicated `Report.RoundBudget` (not `Notes`, which doctor
+would surface as D9 and turn into a gate); exit code proven unchanged for
+blocking and non-blocking cursors; rounds 1–3 and ratified rounds silent.
+Ruling: the rule keys on the record's filename ordinal (round-N), which is
+the count under the sequential-numbering convention. Review clean, no fix
+round.
