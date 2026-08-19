@@ -1,7 +1,7 @@
 ---
 id: "0013"
 title: "Mutation battery packaging: docs-only, runner outside spine, no enforcement code"
-status: Accepted
+status: Superseded by 0015
 date: 2026-08-06
 ---
 

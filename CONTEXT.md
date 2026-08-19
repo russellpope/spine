@@ -95,6 +95,21 @@ declares exactly one.
   declared tier annotations vs actual models in the transcript, per task
   (`spine audit routing`). Required at the verify stage: reasoned
   escalations advisory, silent descent blocking.
+- **harness** (ratified 2026-08-10, I067) — the execution vehicle that runs a
+  dispatch: claude, codex, and from 2026-08-18 **pi** (the weak-local /
+  open-weight driver). Replaces **flavor** as the model table's first axis;
+  the model cell carries the actual model id whatever its family. Reachability
+  of a model from a given host is a separate, per-host constraint (I068/I072),
+  never a harness. _Avoid_: flavor (legacy name, migration I073), "local
+  flavor" — local is a property of where a model is served, not a harness.
+- **alternate** (decided 2026-08-18, local-harness grill) — an optional second
+  `(id, effort)` a model-table cell names for the same (harness, tier), used
+  when a critic should differ from the author (pure self-review is
+  structurally weak: zero self-flagged shortcuts across the corpus). A
+  different model is preferred; the same model at a different effort is a
+  legitimate, owner-tuned choice (cf. claude routine = opus-5 @ low over a
+  smaller model). Owner-ratified data, never computed at dispatch; absent
+  means same-model-fresh-session is the only critic available.
 
 ## Stage cursor (decided 2026-08-06, cursor-writes grill)
 
@@ -116,6 +131,47 @@ declares exactly one.
 - **write-time tripwire** — stage-completion claims are checked against
   artifact derivation at the moment of the write, not only at audit time; a
   forced write defers the reckoning to the audit, never waives it.
+
+## Checkpoint (decided 2026-08-18, local-harness grill)
+
+- **checkpoint** — the document a running session distils itself into just
+  before a context reload, so the next leg resumes without compaction: task,
+  conclusions-with-why, and **next moves** (forward intent — the one thing
+  measured lost across a context clear). Fires once or twice per long task;
+  operational, not historical. Distinct from a **handoff** (session-end,
+  human-facing, committed) and from the cursor's **committed snapshot**.
+- **model region** — the checkpoint's model-authored narrative. Treated on
+  reload as the model's own prior claims, never as evidence.
+- **facts region** — the harness-appended machine facts (files touched, gate
+  status, git sha, recommended per-leg effort). Sole-writer and canonical-form
+  rules apply exactly as for the cursor; the two regions are structurally
+  separate so narrative can never masquerade as fact.
+- **checkpoint working home** — the uncommitted, ordinal-numbered location
+  where checkpoints accumulate for the current effort; the newest one may be
+  snapshotted into a handoff. _Avoid_: "state file", "brief" (maipipe's relay
+  term for what it hands a leg — a checkpoint is one possible brief payload).
+- **reload preamble** — the static, spine-shipped text that precedes the
+  checkpoint in the reload prompt. Byte-stable so the prefix is cacheable;
+  states the model-region/facts-region trust split explicitly.
+
+## Gate pack (decided 2026-08-18, local-harness grill)
+
+- **workflow gate** — a stage in a repo's WORKFLOW.md `gates:` list (grill,
+  verify) that must pass before the effort advances. Human/agent-judged.
+- **gate pack** — a spine-authored, independently versioned battery of
+  deterministic **check classes** for one language (Go first), executed by
+  maipipe as the enforcement floor. Versioned per pack (`go@1`), not by the
+  template generation, so a finding is attributable to `<pack>@<v>/<check>`
+  and a repo can opt out by dropping a check class. Not a workflow gate: it
+  is content maipipe's verify gate runs. _Avoid_: "check pack" (rejected
+  2026-08-18 — five PRDs already say gate pack), "gate stage" for the pack as
+  a whole.
+- **check class** — one attributable, individually droppable check inside a
+  gate pack (e.g. t.Skip zero-tolerance, deferred-cleanup errcheck). One
+  maipipe stage per check class.
+- **positive control** — the fixture pair every check class ships with in
+  spine's own test suite: a known-good input the check must pass and a
+  seeded violation it must fail. A check without both is not shippable.
 
 ## Audit evidence (decided 2026-07-26, codex-audit grill)
 
