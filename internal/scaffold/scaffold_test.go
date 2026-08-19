@@ -59,14 +59,14 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Created) != 7 || len(res.Skipped) != 0 {
+	if len(res.Created) != 8 || len(res.Skipped) != 0 {
 		t.Fatalf("created=%v skipped=%v", res.Created, res.Skipped)
 	}
 	wf, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 10",
+	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 11",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli",
 		"## Stage cursor (consistency rule)", "<!-- spine:cursor -->",
 		"**Sole-writer rule:** `spine` is the only legal cursor writer.",
@@ -230,7 +230,7 @@ func TestInitIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Created) != 0 || len(res.Skipped) != 7 {
+	if len(res.Created) != 0 || len(res.Skipped) != 8 {
 		t.Fatalf("second run created=%v skipped=%v", res.Created, res.Skipped)
 	}
 }

@@ -14,6 +14,7 @@ import (
 var topKeys = []string{
 	"profile", "template_version", "reviewers", "functional_harness", "gates",
 	"effort", "model_default", "security_routing", "stages",
+	"gate_pack", "gate_pack_disabled", "gate_pack_config",
 }
 
 // isRoutingKey reports whether k names a bare routing tier. The tier list is
@@ -58,7 +59,23 @@ func ExtractKeys(content string) map[string]string {
 	for k, v := range model.RoutingKeys(content) {
 		keys["model_routing."+k] = v
 	}
+	inGateConfig := false
 	for _, line := range splitLines(content) {
+		// gate_pack_config sub-keys come back dotted too, the same shape
+		// model_routing rows use: an indented row under the block header.
+		if strings.HasPrefix(line, "gate_pack_config:") {
+			inGateConfig = true
+		} else if inGateConfig {
+			if sub := strings.TrimSpace(line); strings.HasPrefix(line, "  ") && sub != "" {
+				for _, k := range gatePackConfigKeys {
+					if v, ok := cutKey(sub, k); ok {
+						keys["gate_pack_config."+k] = v
+					}
+				}
+			} else {
+				inGateConfig = false
+			}
+		}
 		for _, k := range topKeys {
 			if v, ok := cutKey(line, k); ok {
 				keys[k] = v

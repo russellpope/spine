@@ -47,7 +47,7 @@ func TestUnknownCommand(t *testing.T) {
 
 func TestVersionCommand(t *testing.T) {
 	code, out, _ := runCmd(t, "version")
-	if code != 0 || !strings.Contains(out, "spine template generation 10") {
+	if code != 0 || !strings.Contains(out, "spine template generation 11") {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
@@ -131,7 +131,7 @@ func TestUpdateDryRunThenWrite(t *testing.T) {
 		}
 	}
 	code, out, _ = runCmd(t, "update", "--dir", dir)
-	if code != 1 || !strings.Contains(out, "+ template_version: 10") {
+	if code != 1 || !strings.Contains(out, "+ template_version: 11") {
 		t.Fatalf("dry-run code=%d out=%q", code, out)
 	}
 	// also remove a simple machine-owned file entirely, so --write must
@@ -690,14 +690,14 @@ func TestAdoptDryRunShowsDiffs(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("want pending exit 1, got %d out=%q", code, out)
 	}
-	if !strings.Contains(out, "+ template_version: 10") {
+	if !strings.Contains(out, "+ template_version: 11") {
 		t.Errorf("dry-run text output missing diff content: out=%q", out)
 	}
 	// --json must never carry the diff text as loose prose in the payload
 	// stream; the JSON test above already checks the stream is pure JSON,
 	// this just confirms diffs are a text-mode-only addition.
 	_, jsonOut, _ := runCmd(t, "adopt", "--dir", dir, "--json")
-	if strings.Contains(jsonOut, "+ template_version: 10\n") {
+	if strings.Contains(jsonOut, "+ template_version: 11\n") {
 		t.Errorf("json output should not contain raw diff text: out=%q", jsonOut)
 	}
 }
@@ -1960,5 +1960,96 @@ func TestModelClaudeBareIDRowStillInheritsGlobalTierDefault(t *testing.T) {
 	code, out, errs := runCmd(t, "model", "--dir", dir, "--effort", "claude", "primary")
 	if code != 0 || out != "high\n" {
 		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+// AC (I085): docs/remediation/README.md is scaffolded by init, restored by
+// update when missing, and states the remediation convention.
+func TestRemediationReadmeScaffolded(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	rel := filepath.Join("docs", "remediation", "README.md")
+	raw, err := os.ReadFile(filepath.Join(dir, rel))
+	if err != nil {
+		t.Fatalf("init did not scaffold %s: %v", rel, err)
+	}
+	for _, want := range []string{
+		"docs/remediation/<effort>/round-N.md",
+		"3 rounds per effort",
+		"extension-ratified-by:",
+		"spine audit stages",
+		"findings-only",
+		"prescriptive",
+		"raw-review",
+		"results-contract `code`",
+		"hitlist.tmpl.md",
+		"remediation-round.tmpl.md",
+		"ADR 0007",
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("remediation README missing %q", want)
+		}
+	}
+	if err := os.Remove(filepath.Join(dir, rel)); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 0 {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+		t.Errorf("update did not restore %s: %v", rel, err)
+	}
+}
+
+// AC (I085) at the CLI seam: opting into the pack renders the gate-go region
+// into maipipe.toml; a repo that never opts in gets no maipipe.toml.
+func TestGatePackRegionAtCLISeam(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	if code, out, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 0 {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "maipipe.toml")); !os.IsNotExist(err) {
+		t.Fatalf("maipipe.toml written without gate_pack (err=%v)", err)
+	}
+	wfPath := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(wfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opted := strings.Replace(string(raw), "gate_pack: ", "gate_pack: go@1", 1)
+	if opted == string(raw) {
+		t.Fatal("gate_pack: row not found in the scaffolded WORKFLOW.md")
+	}
+	if err := os.WriteFile(wfPath, []byte(opted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCmd(t, "update", "--dir", dir, "--write")
+	if code != 0 {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	if !strings.Contains(out, "maipipe.toml") {
+		t.Errorf("update output does not name maipipe.toml: %q", out)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "maipipe.toml"))
+	if err != nil {
+		t.Fatalf("region not rendered: %v", err)
+	}
+	for _, want := range []string{
+		"# spine:begin gate-pack go@1\n",
+		"[pipelines.gate-go]\nprofile = \"full\"\n",
+		"run = \"spine gate go tskip\"\n",
+		"# spine:end\n",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("rendered region missing %q:\n%s", want, got)
+		}
+	}
+	if code, out, _ := runCmd(t, "doctor", "--dir", dir); code != 0 {
+		t.Errorf("doctor on a canonical region: code=%d out=%q", code, out)
 	}
 }

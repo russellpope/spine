@@ -77,6 +77,7 @@ var simpleFiles = []struct {
 	{"issues-README.md", "docs/issues/README.md", false, false},
 	{"issue.tmpl.md", "docs/issues/_template.md", false, false},
 	{"adr-README.md", "docs/adr/README.md", false, true},
+	{"remediation-README.md", "docs/remediation/README.md", false, false},
 }
 
 // Run plans (and with opts.Write, applies) regeneration of every managed file.
@@ -125,6 +126,24 @@ func Run(opts Options) ([]FileReport, error) {
 		reports = append(reports, r)
 	case err != nil && !os.IsNotExist(err):
 		return nil, err
+	}
+	// The gate pack's delivery region in maipipe.toml (ADR 0016) is planned
+	// from the WORKFLOW.md this run produces, so an owner who sets
+	// gate_pack: and runs update once gets both the key and the region.
+	workflow := wf.newContent
+	if workflow == "" {
+		raw, err := os.ReadFile(filepath.Join(opts.Dir, "WORKFLOW.md"))
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		workflow = string(raw)
+	}
+	mp, ok, err := planMaipipe(opts.Dir, workflow)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		reports = append(reports, mp)
 	}
 	// policy: unrecognized edits skip the file unless --force; files with no
 	// regenerable content (nil newContent) stay skipped regardless. The one
@@ -598,6 +617,12 @@ func keyLineSignature(line string) (key, sig string, ok bool) {
 	for _, k := range model.Tiers {
 		if _, has := cutKey(trimmed, k); has {
 			return k, k + "\x00" + commentOf(trimmed, k), true
+		}
+	}
+	for _, k := range gatePackConfigKeys {
+		if _, has := cutKey(trimmed, k); has {
+			dotted := "gate_pack_config." + k
+			return dotted, dotted + "\x00" + commentOf(trimmed, k), true
 		}
 	}
 	if dk, has := model.DottedRoutingKey(trimmed); has {

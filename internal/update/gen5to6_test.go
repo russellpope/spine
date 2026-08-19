@@ -117,6 +117,9 @@ func TestGen5To6IsStampPlusDeclaredContent(t *testing.T) {
 				if isGen10ContentDiffLine(line) { // gen 10's conscious content edit; see gen9to10_test.go
 					continue
 				}
+				if isGen11ContentDiffLine(line) { // gen 11's conscious content edit; see gen10to11_test.go
+					continue
+				}
 				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
 					continue
 				}
@@ -154,7 +157,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"template_version: 10",
+		"template_version: 11",
 		"spine audit routing",
 	} {
 		if !strings.Contains(string(wf), want) {
@@ -178,8 +181,8 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(cl), "<!-- spine:begin v10 -->") {
-		t.Error("migrated CLAUDE.md missing v10 marker")
+	if !strings.HasPrefix(string(cl), "<!-- spine:begin v11 -->") {
+		t.Error("migrated CLAUDE.md missing v11 marker")
 	}
 	if !strings.Contains(string(cl), "primary / routine / mechanical / fallback") {
 		t.Error("migrated CLAUDE.md Model pointer missing the four-tier parenthetical")

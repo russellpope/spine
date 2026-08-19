@@ -28,6 +28,7 @@ var Files = []struct{ TmplName, RelPath string }{
 	{"issues-README.md", "docs/issues/README.md"},
 	{"issue.tmpl.md", "docs/issues/_template.md"},
 	{"adr-README.md", "docs/adr/README.md"},
+	{"remediation-README.md", "docs/remediation/README.md"},
 }
 
 // DetectProfile inspects dir and returns a profile when signals are
@@ -132,6 +133,9 @@ func Init(dir, profile, name string) (Result, error) {
 			continue
 		} else if !os.IsNotExist(err) {
 			return res, fmt.Errorf("stat %s: %w", dst, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return res, fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
 		}
 		content, err := tmpl.Render("current", f.TmplName, v)
 		if err != nil {

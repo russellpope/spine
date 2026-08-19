@@ -57,6 +57,9 @@ func TestGen1To2IsStampOnly(t *testing.T) {
 				if isGen10ContentDiffLine(line) { // gen 10's conscious content edit; see gen9to10_test.go
 					continue
 				}
+				if isGen11ContentDiffLine(line) { // gen 11's conscious content edit; see gen10to11_test.go
+					continue
+				}
 				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
 					continue
 				}

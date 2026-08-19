@@ -12,6 +12,7 @@ import (
 	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/tmpl"
+	"github.com/russellpope/spine/internal/update"
 )
 
 func ids(fs []doctor.Finding) map[string]int {
@@ -637,5 +638,120 @@ func TestD8HandoffNaming(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("want D8, findings=%+v", findings)
+	}
+}
+
+// gatePackRepo scaffolds a repo, opts it into the gate pack, and renders the
+// region — the canonical starting point for the D10 checks.
+func gatePackRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opted := strings.Replace(string(raw), "gate_pack: ", "gate_pack: go@1", 1)
+	if opted == string(raw) {
+		t.Fatal("gate_pack: row not found in the scaffolded WORKFLOW.md")
+	}
+	if err := os.WriteFile(path, []byte(opted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := update.Run(update.Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// AC (I085) negative control: a canonical gate-pack region is silent.
+func TestD10SilentOnCanonicalRegion(t *testing.T) {
+	fs, err := doctor.Run(gatePackRepo(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fs) != 0 {
+		t.Fatalf("want clean, got %#v", fs)
+	}
+}
+
+// AC (I085): doctor fires on a broken marker (begin without end).
+func TestD10BrokenMarker(t *testing.T) {
+	dir := gatePackRepo(t)
+	path := filepath.Join(dir, update.MaipipeFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := strings.Replace(string(raw), "# spine:end\n", "", 1)
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []doctor.Finding
+	for _, f := range fs {
+		if f.ID == "D10" {
+			got = append(got, f)
+		}
+	}
+	if len(got) != 1 || got[0].Severity != "error" || !strings.Contains(got[0].Message, "unbalanced") {
+		t.Fatalf("want one D10 error about unbalanced markers, got %#v (all: %#v)", got, fs)
+	}
+	if ids(fs)["D4"] != 0 {
+		t.Errorf("region health double-reported as D4: %#v", fs)
+	}
+}
+
+// AC (I085): drifted region content is non-canonical for the pinned pack.
+func TestD10NonCanonicalRegionContent(t *testing.T) {
+	dir := gatePackRepo(t)
+	path := filepath.Join(dir, update.MaipipeFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drifted := strings.Replace(string(raw), `run = "spine gate go tskip"`, `run = "echo tskip"`, 1)
+	if drifted == string(raw) {
+		t.Fatal("tskip stage not found in the rendered region")
+	}
+	if err := os.WriteFile(path, []byte(drifted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range fs {
+		if f.ID == "D10" {
+			found = true
+			if f.Severity != "warn" || !strings.Contains(f.Message, "not canonical") {
+				t.Errorf("D10 = %#v, want a warn about non-canonical content", f)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("want a D10 finding, got %#v", fs)
+	}
+}
+
+// Negative control: a repo that never opted in has no region and no D10.
+func TestD10SilentWithoutGatePack(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids(fs)["D10"] != 0 {
+		t.Fatalf("D10 fired without gate_pack: %#v", fs)
 	}
 }

@@ -1,0 +1,253 @@
+package update
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/russellpope/spine/internal/gate"
+)
+
+// gateRepo is a gen-11 repo that has opted into the pack: WORKFLOW.md is
+// migrated first, then the gate-pack keys are set the way an owner would.
+func gateRepo(t *testing.T, disabled string, config map[string]string) string {
+	t.Helper()
+	dir := stageGen10Repo(t, nil)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	optIn(t, dir, gate.PackID(), disabled, config)
+	return dir
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// AC (I085): absent maipipe.toml + gate_pack set → the file is created
+// containing only the region, with one stage per enabled check class.
+func TestGatePackCreatesMaipipeWithRegionOnly(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != Pending || !mp.Created {
+		t.Fatalf("want a created maipipe.toml, got state=%v created=%v", mp.State, mp.Created)
+	}
+	got := readFile(t, filepath.Join(dir, MaipipeFile))
+	if !strings.HasPrefix(got, "# spine:begin gate-pack "+gate.PackID()+"\n") ||
+		!strings.HasSuffix(got, "# spine:end\n") {
+		t.Fatalf("created file is not region-only:\n%s", got)
+	}
+	if !strings.Contains(got, "[pipelines.gate-go]\nprofile = \"full\"\n") {
+		t.Errorf("missing gate-go pipeline header:\n%s", got)
+	}
+	for _, check := range gate.CheckNames() {
+		want := "run = \"spine gate go " + check + "\""
+		if !strings.Contains(got, want) {
+			t.Errorf("missing stage for check class %q:\n%s", check, got)
+		}
+	}
+	if n := strings.Count(got, "[[pipelines.gate-go.stages]]"); n != len(gate.CheckNames()) {
+		t.Errorf("stage count = %d, want %d", n, len(gate.CheckNames()))
+	}
+	if strings.Contains(got, "env = {") {
+		t.Errorf("env rendered with no gate_pack_config set:\n%s", got)
+	}
+}
+
+// AC (I085): gate_pack_disabled drops exactly the named class.
+func TestGatePackDisabledOmitsStage(t *testing.T) {
+	dir := gateRepo(t, "[tskip]", nil)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, filepath.Join(dir, MaipipeFile))
+	if strings.Contains(got, "spine gate go tskip") {
+		t.Errorf("disabled check class still rendered:\n%s", got)
+	}
+	if n := strings.Count(got, "[[pipelines.gate-go.stages]]"); n != len(gate.CheckNames())-1 {
+		t.Errorf("stage count = %d, want %d", n, len(gate.CheckNames())-1)
+	}
+	if !strings.Contains(got, "spine gate go binary-hygiene") {
+		t.Error("dropping one class dropped others too")
+	}
+}
+
+// AC (I085): a non-empty gate_pack_config value reaches its class's stage as
+// SPINE_GATE_<KEY>; classes that take no configuration get no env.
+func TestGatePackConfigRendersEnv(t *testing.T) {
+	dir := gateRepo(t, "[]", map[string]string{
+		"fixture_manifest": "docs/fixtures.md",
+		"build_outputs":    "bin/spine",
+	})
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, filepath.Join(dir, MaipipeFile))
+	for _, want := range []string{
+		"run = \"spine gate go fixture-manifest\"\nenv = { SPINE_GATE_FIXTURE_MANIFEST = \"docs/fixtures.md\" }",
+		"run = \"spine gate go gitignore-control\"\nenv = { SPINE_GATE_BUILD_OUTPUTS = \"bin/spine\" }",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if n := strings.Count(got, "env = {"); n != 2 {
+		t.Errorf("env tables = %d, want 2 (only configured classes carry env):\n%s", n, got)
+	}
+	if strings.Contains(got, "SPINE_GATE_CLEANUP_FUNCS") {
+		t.Error("env-only knob rendered into the region")
+	}
+}
+
+// AC (I085): an existing maipipe.toml keeps the owner's own lanes
+// byte-for-byte; the region is appended, then refreshed in place.
+func TestGatePackPreservesUserLanes(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	lanes := "[pipelines.full]\n\n[[pipelines.full.stages]]\nname = \"build\"\nrun = \"make build\"\n"
+	path := filepath.Join(dir, MaipipeFile)
+	if err := os.WriteFile(path, []byte(lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, path)
+	if !strings.HasPrefix(got, lanes) {
+		t.Fatalf("user lanes not preserved byte-for-byte:\n%s", got)
+	}
+	if !strings.Contains(got, "# spine:begin gate-pack ") {
+		t.Fatalf("region not appended:\n%s", got)
+	}
+	// A config change refreshes the region in place, lanes still untouched.
+	optIn(t, dir, gate.PackID(), "[]", map[string]string{"tskip_allow": "internal/gate/testdata"})
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if len(mp.Unrecognized) > 0 {
+		t.Errorf("spine's own region read as a local edit: %v", mp.Unrecognized)
+	}
+	got = readFile(t, path)
+	if !strings.HasPrefix(got, lanes) {
+		t.Errorf("refresh disturbed the user lanes:\n%s", got)
+	}
+	if !strings.Contains(got, "env = { SPINE_GATE_TSKIP_ALLOW = \"internal/gate/testdata\" }") {
+		t.Errorf("region not refreshed with the new config:\n%s", got)
+	}
+	if n := strings.Count(got, "# spine:begin gate-pack "); n != 1 {
+		t.Errorf("region count = %d, want 1", n)
+	}
+	// Idempotent: a second run has nothing to do.
+	reports, err = Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mp := report(t, reports, MaipipeFile); mp.State != UpToDate {
+		t.Errorf("second pass state=%v diff:\n%s", mp.State, mp.Diff)
+	}
+}
+
+// AC (I085): an edit inside the region is reported as unrecognized and the
+// file is skipped — never silently kept, never silently overwritten. --force
+// is the explicit opt-in that regenerates it.
+func TestGatePackRegionEditIsUnrecognized(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, MaipipeFile)
+	edited := strings.Replace(readFile(t, path),
+		"run = \"spine gate go tskip\"", "run = \"echo tskip\"", 1)
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != SkippedUnrecognized || len(mp.Unrecognized) != 1 ||
+		!strings.Contains(mp.Unrecognized[0], "echo tskip") {
+		t.Fatalf("want the edited line reported, got state=%v unrec=%v", mp.State, mp.Unrecognized)
+	}
+	if got := readFile(t, path); !strings.Contains(got, "echo tskip") {
+		t.Error("edited region overwritten without --force")
+	}
+	if _, err := Run(Options{Dir: dir, Write: true, Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); strings.Contains(got, "echo tskip") {
+		t.Error("--force did not regenerate the region")
+	}
+}
+
+// AC (I085): damaged markers — a begin without an end — are hand-repair
+// work: reported, file skipped, and --force cannot paper over them.
+func TestGatePackBrokenMarkerIsReported(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, MaipipeFile)
+	broken := strings.Replace(readFile(t, path), "# spine:end\n", "", 1)
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, force := range []bool{false, true} {
+		reports, err := Run(Options{Dir: dir, Write: true, Force: force})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mp := report(t, reports, MaipipeFile)
+		if mp.State != SkippedUnrecognized || len(mp.Unrecognized) != 1 ||
+			!strings.Contains(mp.Unrecognized[0], "unbalanced") {
+			t.Fatalf("force=%v: want unbalanced markers reported, got state=%v unrec=%v",
+				force, mp.State, mp.Unrecognized)
+		}
+		if got := readFile(t, path); got != broken {
+			t.Errorf("force=%v: file with damaged markers was rewritten", force)
+		}
+	}
+}
+
+// Negative control (fleet): a repo that never opts in gets no maipipe.toml,
+// and an existing region is left alone rather than deleted.
+func TestNoGatePackWritesNoMaipipe(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	before := readFile(t, filepath.Join(dir, MaipipeFile))
+	optIn(t, dir, "", "[]", nil)
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range reports {
+		if r.Path == MaipipeFile {
+			t.Fatalf("maipipe.toml reported with no gate_pack: %+v", r)
+		}
+	}
+	if after := readFile(t, filepath.Join(dir, MaipipeFile)); after != before {
+		t.Error("an existing region was touched after opting out")
+	}
+
+	fresh := stageGen10Repo(t, nil)
+	if _, err := Run(Options{Dir: fresh, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(fresh, MaipipeFile)); !os.IsNotExist(err) {
+		t.Errorf("maipipe.toml created for a repo without gate_pack (err=%v)", err)
+	}
+}

@@ -279,17 +279,43 @@ func TestSpineOwnWorkflowModelMirrorIsByteStable(t *testing.T) {
 			t.Fatal(err)
 		}
 		wf := report(t, reports, "WORKFLOW.md")
-		if wf.State != UpToDate || len(wf.ModelRefreshes) != 0 || len(wf.ModelOverrides) != 0 {
-			t.Errorf("run %d: state=%v refreshes=%+v overrides=%+v, want spine WORKFLOW unchanged", i+1, wf.State, wf.ModelRefreshes, wf.ModelOverrides)
+		if len(wf.ModelRefreshes) != 0 || len(wf.ModelOverrides) != 0 {
+			t.Errorf("run %d: refreshes=%+v overrides=%+v, want spine WORKFLOW's mirror unchanged", i+1, wf.ModelRefreshes, wf.ModelOverrides)
+		}
+		// The stamp and the generation's own content move while spine's
+		// checked-in WORKFLOW.md still trails a just-bumped generation (it
+		// adopts in a separate commit), so only the second run is required
+		// to be a no-op — the mirror itself is checked byte-wise below.
+		if i == 1 && wf.State != UpToDate {
+			t.Errorf("run 2: state=%v, want UpToDate — the update is not idempotent\n%s", wf.State, wf.Diff)
 		}
 	}
 	after, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(after) != string(before) {
-		t.Error("spine WORKFLOW changed across write updates")
+	if got, want := mirrorBlock(string(after)), mirrorBlock(string(before)); got != want {
+		t.Errorf("spine WORKFLOW model mirror changed across write updates:\n%s\n---\n%s", want, got)
 	}
+}
+
+// mirrorBlock is the model_routing block of WORKFLOW.md content: the header
+// line and every indented row under it.
+func mirrorBlock(content string) string {
+	var out []string
+	in := false
+	for _, line := range strings.Split(content, "\n") {
+		switch {
+		case strings.HasPrefix(line, "model_routing:"):
+			in = true
+			out = append(out, line)
+		case in && strings.HasPrefix(line, "  "):
+			out = append(out, line)
+		case in:
+			return strings.Join(out, "\n")
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // AC (I035): nothing is written without the write flag — the refresh is
@@ -397,6 +423,9 @@ func TestGen10WithoutPiRowsIsUnaffected(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, line := range strings.Split(before, "\n") {
+		if strings.HasPrefix(line, "template_version:") {
+			continue // the stamp moves on every generation bump, by design
+		}
 		if !strings.Contains(string(after), line) {
 			t.Errorf("pre-existing line lost or rewritten: %q", line)
 		}
