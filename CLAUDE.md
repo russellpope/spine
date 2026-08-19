@@ -1,4 +1,4 @@
-<!-- spine:begin v10 -->
+<!-- spine:begin v11 -->
 # spine
 
 Uses the **unified workflow** — see `WORKFLOW.md` for the active profile (`library-cli`) and stages.

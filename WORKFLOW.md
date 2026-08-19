@@ -1,7 +1,7 @@
 # Workflow — spine
 
 profile: library-cli
-template_version: 10
+template_version: 11
 reviewers: [go-reviewer, python-reviewer]
 functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
@@ -18,6 +18,14 @@ model_routing:                     # spine-managed defaults; edit a value to ove
   pi.routine:        qwen3.8-27b-q8_0 alt: qwen3.8-27b-q8_0 @ xhigh
   pi.mechanical:     qwen3.8-27b-q8_0 alt: qwen3.8-27b-q8_0 @ xhigh
   pi.fallback:       qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh
+gate_pack:                         # gate pack rendered into maipipe.toml (go@1); empty = no pack
+gate_pack_disabled: []             # check classes dropped from the rendered pipeline
+gate_pack_config:                  # per-check inputs; a non-empty value reaches its stage as SPINE_GATE_<KEY>
+  test_enum_spec:                  # spec file test-enum-vs-spec reads the enumerated values from
+  fixture_manifest:                # manifest path fixture-manifest requires
+  build_outputs:                   # build output paths gitignore-control requires to be ignored
+  n_plus_one_clients:              # client method names n-plus-one looks for in loops
+  tskip_allow:                     # test files tskip tolerates a skip in
 stages: [grill, prd, issues, implement, functional-test, review, verify, ship, deploy, docs, handoff]
 
 See `docs/harness-interface.md` for the functional-test harness contract.
