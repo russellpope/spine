@@ -633,6 +633,36 @@ checks:  ` + strings.Join(gate.CheckNames(), ", ") + `
                      <!-- spine:enum TypeName --> … <!-- /spine:enum -->.
                      Only types a marker names are compared; a spec with no
                      marker is misconfiguration.
+  deferred-cleanup-errcheck
+                     deferred calls to cleanup-class functions whose error
+                     return is discarded (defer f.Close()). A call is a
+                     finding only when go/types confirms the callee returns
+                     an error; a deferred func literal that inspects the
+                     error is not. Default name set: ` + strings.Join(gate.DefaultCleanupFuncs, ", ") + `.
+                     Extra names via ` + gate.CleanupFuncsVar + `, comma-
+                     separated — an env-only tuning knob, not a
+                     gate_pack_config key, so spine update never renders it.
+  dead-code-callgraph
+                     functions and methods (exported and unexported)
+                     unreachable from any root. Roots: every main in a
+                     package main, every init, every Test/Benchmark/Example/
+                     Fuzz function in a _test.go file, every package-level
+                     reference, and — in a library module (one with any
+                     importable non-main package) — every exported function
+                     and method of a non-main package. Interface calls reach
+                     every concrete method of that name; only declarations
+                     outside _test.go files are reported.
+  n-plus-one         a call to one of the client names in
+                     ` + gateNPlusOneClientsVar + ` (comma-separated method or
+                     function names, e.g. Get,Query,Fetch) lexically inside
+                     a for or range loop body, at any depth, outside
+                     _test.go files. The list is required configuration: an
+                     unset or empty list is misconfiguration.
+
+deferred-cleanup-errcheck and dead-code-callgraph type-check the module
+under --dir (go list + go/types, stdlib only). A --dir that does not compile
+is misconfiguration, not a finding: a gate cannot judge code the compiler
+has not agreed to.
 
 exit:    0 pass, 1 findings, 2 misconfiguration
 results: with ` + gate.ResultsEnvVar + ` set, the results contract is written
@@ -652,6 +682,7 @@ var (
 	gateBuildOutputsVar    = gate.EnvVar("build_outputs")
 	gateFixtureManifestVar = gate.EnvVar("fixture_manifest")
 	gateTestEnumSpecVar    = gate.EnvVar("test_enum_spec")
+	gateNPlusOneClientsVar = gate.EnvVar("n_plus_one_clients")
 )
 
 func cmdAudit(args []string, stdout, stderr io.Writer) int {

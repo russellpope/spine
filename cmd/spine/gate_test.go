@@ -206,6 +206,160 @@ func testEnumVsSpecFixtures() (good, seeded map[string][]byte) {
 	return good, seeded
 }
 
+// deferredCleanupGood is the negative control for the cleanup class: the
+// two shapes that are not findings. A deferred func literal inspects the
+// error, and a Close that returns nothing has no error to discard — a class
+// matching on the name alone would fire on both.
+const deferredCleanupGood = `package fixture
+
+import "os"
+
+type quietCloser struct{}
+
+func (quietCloser) Close() {}
+
+func report(err error) { _ = err }
+
+func Copy(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			report(cerr)
+		}
+	}()
+	var q quietCloser
+	defer q.Close()
+	return nil
+}
+`
+
+const deferredCleanupSeeded = `package fixture
+
+import "os"
+
+func Read(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return nil
+}
+
+func Scratch(path string) error {
+	defer os.RemoveAll(path)
+	return nil
+}
+`
+
+func deferredCleanupFixtures() (good, seeded map[string][]byte) {
+	good = map[string][]byte{
+		"go.mod":  []byte("module example.com/fixture\n\ngo 1.22\n"),
+		"copy.go": []byte(deferredCleanupGood),
+	}
+	seeded = map[string][]byte{
+		"go.mod":  []byte("module example.com/fixture\n\ngo 1.22\n"),
+		"copy.go": []byte(deferredCleanupGood),
+		"read.go": []byte(deferredCleanupSeeded),
+	}
+	return good, seeded
+}
+
+// deadCodeFixtures: a library module with a main package. The good repo
+// holds exactly the three shapes the root rule must keep live — an exported
+// function of a library package, a function reached only from a test, and
+// main itself; the seeded repo adds one unexported function nothing reaches.
+func deadCodeFixtures() (good, seeded map[string][]byte) {
+	good = map[string][]byte{
+		"go.mod": []byte("module example.com/fixture\n\ngo 1.22\n"),
+		"lib/lib.go": []byte(`package lib
+
+// Exported is the library's API: no caller in this module, live by the
+// library rule.
+func Exported() string { return helper() }
+
+// testOnly is reached only from lib_test.go.
+func testOnly() string { return "test-only" }
+
+func helper() string { return "helper" }
+`),
+		"lib/lib_test.go": []byte(`package lib
+
+import "testing"
+
+func TestTestOnly(t *testing.T) {
+	if testOnly() == "" {
+		t.Fatal("empty")
+	}
+}
+`),
+		"cmd/app/main.go": []byte(`package main
+
+import "example.com/fixture/lib"
+
+func main() { println(lib.Exported()) }
+`),
+	}
+	seeded = map[string][]byte{}
+	for k, v := range good {
+		seeded[k] = v
+	}
+	seeded["lib/dead.go"] = []byte(`package lib
+
+func unreached() string { return "nobody calls me" }
+`)
+	return good, seeded
+}
+
+const nPlusOneGood = `package fixture
+
+type client struct{}
+
+func (client) Query(id int) int { return id }
+
+// Batch makes one call and loops over the result: the shape the class must
+// not flag.
+func Batch(c client, ids []int) int {
+	total := c.Query(len(ids))
+	for range ids {
+		total++
+	}
+	return total
+}
+`
+
+const nPlusOneSeeded = `package fixture
+
+// PerRow is one round trip per iteration, directly and through a func
+// literal declared in the loop body.
+func PerRow(c client, ids []int) int {
+	total := 0
+	for _, id := range ids {
+		total += c.Query(id)
+	}
+	for i := 0; i < len(ids); i++ {
+		func() { total += c.Query(i) }()
+	}
+	return total
+}
+`
+
+func nPlusOneFixtures() (good, seeded map[string][]byte) {
+	good = map[string][]byte{
+		"go.mod":    []byte("module example.com/fixture\n\ngo 1.22\n"),
+		"client.go": []byte(nPlusOneGood),
+	}
+	seeded = map[string][]byte{
+		"go.mod":    []byte("module example.com/fixture\n\ngo 1.22\n"),
+		"client.go": []byte(nPlusOneGood),
+		"perrow.go": []byte(nPlusOneSeeded),
+	}
+	return good, seeded
+}
+
 // TestGatePositiveControls is the positive control pair for each check
 // class: a known-good repo the class passes (exit 0) and a seeded violation
 // it fails (exit 1), with each finding attributable to go@1/<check>.
@@ -215,6 +369,9 @@ func TestGatePositiveControls(t *testing.T) {
 	ignGood, ignSeeded := gitignoreControlFixtures()
 	manGood, manSeeded := fixtureManifestFixtures()
 	enumGood, enumSeeded := testEnumVsSpecFixtures()
+	deferGood, deferSeeded := deferredCleanupFixtures()
+	deadGood, deadSeeded := deadCodeFixtures()
+	nplusGood, nplusSeeded := nPlusOneFixtures()
 	cases := []struct {
 		check  string
 		good   map[string][]byte
@@ -239,6 +396,19 @@ func TestGatePositiveControls(t *testing.T) {
 			"test-enum-vs-spec", enumGood, enumSeeded,
 			map[string]string{"SPINE_GATE_TEST_ENUM_SPEC": "docs/spec.md"}, 2,
 			[]string{"is declared in code but not enumerated", "no const declares it", "severity.go", "docs/spec.md"},
+		},
+		{
+			"deferred-cleanup-errcheck", deferGood, deferSeeded, nil, 2,
+			[]string{"deferred cleanup call discards its error", "f.Close", "os.RemoveAll", "read.go"},
+		},
+		{
+			"dead-code-callgraph", deadGood, deadSeeded, nil, 1,
+			[]string{"unreachable function", "lib.unreached", "lib/dead.go"},
+		},
+		{
+			"n-plus-one", nplusGood, nplusSeeded,
+			map[string]string{"SPINE_GATE_N_PLUS_ONE_CLIENTS": "Query,Fetch"}, 2,
+			[]string{"call in loop", "Query", "perrow.go"},
 		},
 	}
 	for _, tc := range cases {
@@ -448,7 +618,7 @@ func TestGateUsageDocumentsPack(t *testing.T) {
 		t.Fatalf("spine help does not mention gate: %q", out)
 	}
 	_, _, errs := runCmd(t, "gate", "go")
-	wants := []string{"go@1", "SPINE_GATE_TSKIP_ALLOW", "SPINE_GATE_BUILD_OUTPUTS", "SPINE_GATE_FIXTURE_MANIFEST", "SPINE_GATE_TEST_ENUM_SPEC", "MAIPIPE_RESULTS", "0 pass, 1 findings, 2 misconfiguration"}
+	wants := []string{"go@1", "SPINE_GATE_TSKIP_ALLOW", "SPINE_GATE_BUILD_OUTPUTS", "SPINE_GATE_FIXTURE_MANIFEST", "SPINE_GATE_TEST_ENUM_SPEC", "SPINE_GATE_N_PLUS_ONE_CLIENTS", "SPINE_GATE_CLEANUP_FUNCS", "MAIPIPE_RESULTS", "0 pass, 1 findings, 2 misconfiguration"}
 	// The check list is derived from the registry, so a class that ships
 	// without a usage entry is a test failure, not a documentation drift.
 	wants = append(wants, gate.CheckNames()...)
@@ -502,6 +672,109 @@ func TestGateFixtureManifestMissing(t *testing.T) {
 	}
 }
 
+// TestGateDeadCodeRootRule is the AC2 rule fixture: in a library module,
+// exactly the unreachable unexported function is flagged — a function
+// reached only from a test is live, and an exported function of a library
+// package is live because a library's callers are outside the module.
+func TestGateDeadCodeRootRule(t *testing.T) {
+	_, seeded := deadCodeFixtures()
+	dir := gateRepo(t, seeded)
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	code, out, errs := runCmd(t, "gate", "go", "dead-code-callgraph", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	r := readResults(t, results)
+	if len(r.Findings) != 1 {
+		t.Fatalf("want exactly the unreachable function, got %+v", r.Findings)
+	}
+	f := r.Findings[0]
+	if !strings.Contains(f.Message, "lib.unreached") || f.File != "lib/dead.go" || f.Line != 3 {
+		t.Errorf("finding=%+v", f)
+	}
+}
+
+// TestGateNPlusOneCallSites pins the call-in-loop rule to the two seeded
+// sites: the direct call in a range body and the one in a func literal
+// declared inside a for body. The call outside any loop is not a finding.
+func TestGateNPlusOneCallSites(t *testing.T) {
+	_, seeded := nPlusOneFixtures()
+	dir := gateRepo(t, seeded)
+	t.Setenv("SPINE_GATE_N_PLUS_ONE_CLIENTS", "Query")
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	if code, _, errs := runCmd(t, "gate", "go", "n-plus-one", "--dir", dir); code != 1 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	r := readResults(t, results)
+	if len(r.Findings) != 2 {
+		t.Fatalf("findings=%+v", r.Findings)
+	}
+	for _, f := range r.Findings {
+		if f.File != "perrow.go" {
+			t.Errorf("finding outside the seeded file: %+v", f)
+		}
+	}
+	if r.Findings[0].Line != 8 || r.Findings[1].Line != 11 {
+		t.Errorf("call sites=%d,%d want 8,11", r.Findings[0].Line, r.Findings[1].Line)
+	}
+}
+
+// TestGateTypeCheckedClassesRejectNonCompilingRepo: a gate cannot judge
+// code the compiler has not agreed to, so a --dir that does not build is
+// misconfiguration (exit 2) for the classes that type-check, and the
+// message names the package. The syntactic classes are unaffected.
+func TestGateTypeCheckedClassesRejectNonCompilingRepo(t *testing.T) {
+	dir := gateRepo(t, map[string][]byte{
+		"go.mod":    []byte("module example.com/fixture\n\ngo 1.22\n"),
+		"broken.go": []byte("package fixture\n\nfunc Broken() int { return \"not an int\" }\n"),
+	})
+	for _, check := range []string{"deferred-cleanup-errcheck", "dead-code-callgraph"} {
+		t.Run(check, func(t *testing.T) {
+			code, out, errs := runCmd(t, "gate", "go", check, "--dir", dir)
+			if code != 2 {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+			}
+			if !strings.Contains(errs, "example.com/fixture") {
+				t.Errorf("stderr does not name the package: %q", errs)
+			}
+		})
+	}
+}
+
+// TestGateCleanupFuncsEnv: SPINE_GATE_CLEANUP_FUNCS extends the default
+// name set. It is env-only — no gate_pack_config key — so it is read
+// straight from the environment and unset means the defaults alone.
+func TestGateCleanupFuncsEnv(t *testing.T) {
+	dir := gateRepo(t, map[string][]byte{
+		"go.mod": []byte("module example.com/fixture\n\ngo 1.22\n"),
+		"shutdown.go": []byte(`package fixture
+
+type server struct{}
+
+func (server) Shutdown() error { return nil }
+
+func Serve(s server) {
+	defer s.Shutdown()
+}
+`),
+	})
+	if code, _, errs := runCmd(t, "gate", "go", "deferred-cleanup-errcheck", "--dir", dir); code != 0 {
+		t.Fatalf("Shutdown is not a default cleanup name: code=%d stderr=%q", code, errs)
+	}
+	t.Setenv("SPINE_GATE_CLEANUP_FUNCS", "Shutdown")
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	if code, _, errs := runCmd(t, "gate", "go", "deferred-cleanup-errcheck", "--dir", dir); code != 1 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	r := readResults(t, results)
+	if len(r.Findings) != 1 || !strings.Contains(r.Findings[0].Message, "s.Shutdown") {
+		t.Fatalf("findings=%+v", r.Findings)
+	}
+}
+
 // TestGateConfigMisconfiguration: every config-driven class exits 2 naming
 // the variable an operator has to set, and names the path when the
 // configured input itself is unusable.
@@ -521,6 +794,8 @@ func TestGateConfigMisconfiguration(t *testing.T) {
 		{"build outputs empty", "gitignore-control", map[string]string{"SPINE_GATE_BUILD_OUTPUTS": " , "}, []string{"SPINE_GATE_BUILD_OUTPUTS"}},
 		{"manifest unset", "fixture-manifest", nil, []string{"SPINE_GATE_FIXTURE_MANIFEST"}},
 		{"enum spec unset", "test-enum-vs-spec", nil, []string{"SPINE_GATE_TEST_ENUM_SPEC"}},
+		{"n-plus-one clients unset", "n-plus-one", nil, []string{"SPINE_GATE_N_PLUS_ONE_CLIENTS"}},
+		{"n-plus-one clients empty", "n-plus-one", map[string]string{"SPINE_GATE_N_PLUS_ONE_CLIENTS": " , "}, []string{"SPINE_GATE_N_PLUS_ONE_CLIENTS"}},
 		{"enum spec missing", "test-enum-vs-spec", map[string]string{"SPINE_GATE_TEST_ENUM_SPEC": "docs/nope.md"}, []string{"SPINE_GATE_TEST_ENUM_SPEC", "docs/nope.md"}},
 		{"enum spec without marker", "test-enum-vs-spec", map[string]string{"SPINE_GATE_TEST_ENUM_SPEC": "docs/bare.md"}, []string{"SPINE_GATE_TEST_ENUM_SPEC", "docs/bare.md", "spine:enum"}},
 	}

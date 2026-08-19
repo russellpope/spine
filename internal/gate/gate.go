@@ -78,17 +78,32 @@ func (c Config) Get(key string) (string, bool) {
 	return v, ok
 }
 
+// env reads an environment variable by its literal name, for the few
+// tuning knobs that are env-only and so have no gate_pack_config key —
+// SPINE_GATE_CLEANUP_FUNCS. It shares Config's lookup so a check class
+// never reaches around the configuration seam to the process environment.
+func (c Config) env(name string) string {
+	if c.lookup == nil {
+		return ""
+	}
+	v, _ := c.lookup(name)
+	return v
+}
+
 // A Check is one check class: it inspects dir and returns its findings.
 // A returned error is a misconfiguration (exit 2), not a finding.
 type Check func(dir string, cfg Config) ([]Finding, error)
 
 // checks is the check-class registry for the go pack: name -> implementation.
 var checks = map[string]Check{
-	"tskip":             checkTskip,
-	"binary-hygiene":    checkBinaryHygiene,
-	"gitignore-control": checkGitignoreControl,
-	"fixture-manifest":  checkFixtureManifest,
-	"test-enum-vs-spec": checkTestEnumVsSpec,
+	"tskip":                     checkTskip,
+	"binary-hygiene":            checkBinaryHygiene,
+	"gitignore-control":         checkGitignoreControl,
+	"fixture-manifest":          checkFixtureManifest,
+	"test-enum-vs-spec":         checkTestEnumVsSpec,
+	"deferred-cleanup-errcheck": checkDeferredCleanup,
+	"dead-code-callgraph":       checkDeadCode,
+	"n-plus-one":                checkNPlusOne,
 }
 
 // CheckNames returns the registered check classes, sorted.
