@@ -1054,6 +1054,53 @@ func TestDouble(t *testing.T) {
 	if !strings.Contains(r.Summary, "no probes run") {
 		t.Errorf("summary = %q", r.Summary)
 	}
+	// The control failed inside the working copy, which is a tracked-files-
+	// only tree: the operator needs the output and a tree still on disk to
+	// look at, because the failure need not reproduce under --dir.
+	if !strings.Contains(f.Message, "this tree is red before any mutation") {
+		t.Errorf("control finding carries no verify output: %q", f.Message)
+	}
+	kept := mutateWorkingCopy(t, f.Message)
+	info, err := os.Stat(kept)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("working copy %q not kept for the operator: %v", kept, err)
+	}
+	if _, err := os.Stat(filepath.Join(kept, "calc.go")); err != nil {
+		t.Errorf("kept working copy is not the tree: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(kept) })
+}
+
+// mutateWorkingCopy pulls the kept working-copy path out of a control-failure
+// message.
+func mutateWorkingCopy(t *testing.T, message string) string {
+	t.Helper()
+	_, rest, ok := strings.Cut(message, "Working copy kept at ")
+	if !ok {
+		t.Fatalf("control finding does not name the working copy: %q", message)
+	}
+	path, _, _ := strings.Cut(rest, "\n")
+	return strings.TrimSpace(path)
+}
+
+// TestGateMutateRemovesWorkingCopyOnSuccess is the other half of the
+// keep-on-failure rule: a run whose control passes leaves nothing behind.
+func TestGateMutateRemovesWorkingCopyOnSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	dir := mutateFixture(t, mutateSpec, mutateModuleTest)
+	if code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir); code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "spine-mutate-") {
+			t.Errorf("working copy %s left behind after a successful run", e.Name())
+		}
+	}
 }
 
 // TestGateMutateSpecMisconfiguration: no spec at the default path and no

@@ -88,24 +88,38 @@ func checkMutate(dir string, cfg Config) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	defer func() { _ = os.RemoveAll(work) }()
+	// The working copy is removed on the way out, except when the control
+	// fails: that failure happened in the copy, and the copy is a
+	// tracked-files-only tree that may not reproduce in the repo under --dir,
+	// so it is left on disk for the operator and named in the finding.
+	keep := false
+	defer func() {
+		if !keep {
+			_ = os.RemoveAll(work)
+		}
+	}()
 
 	verify := newVerifier(cfg, work, timeout)
 
 	// The negative control: no probe is believed against a red baseline.
-	green, err := verify.green()
+	green, out, err := verify.green()
 	if err != nil {
 		return Report{}, err
 	}
 	if !green {
+		keep = true
+		msg := fmt.Sprintf("control failed: unmutated tree is not green (%s) — no probes run; fix the tree or set %s. Working copy kept at %s",
+			verify.describe(), MutateVerifyVar, work)
+		if tail := outputTail(out); tail != "" {
+			msg += "\nverify output (last " + fmt.Sprint(maxTailLines) + " lines):\n" + tail
+		}
 		return Report{
 			Findings: []Finding{{
 				Severity: SeverityError,
-				Message: fmt.Sprintf("control failed: unmutated tree is not green (%s) — no probes run; fix the tree or set %s",
-					verify.describe(), MutateVerifyVar),
-				File: ".",
-				Line: 0,
-				Code: Code("mutate"),
+				Message:  msg,
+				File:     ".",
+				Line:     0,
+				Code:     Code("mutate"),
 			}},
 			Summary: Code("mutate") + ": control failed: unmutated tree is not green — no probes run",
 		}, nil
@@ -278,14 +292,15 @@ func (v verifier) describe() string {
 }
 
 // green reports whether the tree in the working copy passes verification —
-// the negative control when the tree is unmutated.
-func (v verifier) green() (bool, error) {
+// the negative control when the tree is unmutated — and returns the output of
+// the phase that decided it.
+func (v verifier) green() (bool, string, error) {
 	if v.custom != "" {
 		return v.run(v.custom)
 	}
-	built, err := v.run(defaultMutateBuild)
+	built, out, err := v.run(defaultMutateBuild)
 	if err != nil || !built {
-		return false, err
+		return false, out, err
 	}
 	return v.run(defaultMutateTest)
 }
@@ -293,7 +308,7 @@ func (v verifier) green() (bool, error) {
 // probe verifies a mutated working copy and names the outcome.
 func (v verifier) probe() (string, error) {
 	if v.custom != "" {
-		ok, err := v.run(v.custom)
+		ok, _, err := v.run(v.custom)
 		if err != nil {
 			return "", err
 		}
@@ -302,14 +317,14 @@ func (v verifier) probe() (string, error) {
 		}
 		return resultKilled, nil
 	}
-	built, err := v.run(defaultMutateBuild)
+	built, _, err := v.run(defaultMutateBuild)
 	if err != nil {
 		return "", err
 	}
 	if !built {
 		return resultBuildErr, nil
 	}
-	passed, err := v.run(defaultMutateTest)
+	passed, _, err := v.run(defaultMutateTest)
 	if err != nil {
 		return "", err
 	}
@@ -320,9 +335,10 @@ func (v verifier) probe() (string, error) {
 }
 
 // run executes one shell command in the working copy and reports whether it
-// exited 0. Only a failure to start the command (or a timeout) is an error;
-// a non-zero exit is the answer, not a problem.
-func (v verifier) run(command string) (bool, error) {
+// exited 0, along with its combined output — the only diagnostic an operator
+// gets when the control fails. Only a failure to start the command (or a
+// timeout) is an error; a non-zero exit is the answer, not a problem.
+func (v verifier) run(command string) (bool, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), v.timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
@@ -331,16 +347,29 @@ func (v verifier) run(command string) (bool, error) {
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
 	if ctx.Err() != nil {
-		return false, fmt.Errorf("verify command %q timed out after %s (raise %s)", command, v.timeout, MutateTimeoutVar)
+		return false, out.String(), fmt.Errorf("verify command %q timed out after %s (raise %s)", command, v.timeout, MutateTimeoutVar)
 	}
 	if err == nil {
-		return true, nil
+		return true, out.String(), nil
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
-		return false, nil
+		return false, out.String(), nil
 	}
-	return false, fmt.Errorf("running verify command %q: %v", command, err)
+	return false, out.String(), fmt.Errorf("running verify command %q: %v", command, err)
+}
+
+// outputTail is the last maxTailLines lines of a verify command's output,
+// trimmed — enough to name the failing test without pasting a whole build log
+// into a finding message.
+const maxTailLines = 20
+
+func outputTail(out string) string {
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) > maxTailLines {
+		lines = lines[len(lines)-maxTailLines:]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // copyTree copies the tree under dir into a fresh temp directory: the
