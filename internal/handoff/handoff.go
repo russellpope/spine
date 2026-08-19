@@ -92,6 +92,14 @@ func NewWithCursor(dir, topic string) (string, bool, error) {
 	if cursorResult.HasCursor {
 		content += "\n" + cursorResult.Cursor.Block() + "\n"
 	}
+	// The newest checkpoint, when the checkpoint working home is non-empty:
+	// forward intent survives the session end. Empty working home => the
+	// handoff is byte-identical to a pre-embed one.
+	embed, err := checkpointEmbed(dir)
+	if err != nil {
+		return "", false, err
+	}
+	content += embed
 	if err := fsutil.WriteFileExclusive(path, []byte(content)); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return "", false, fmt.Errorf("%s already exists — pick a more specific topic", path)

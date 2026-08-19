@@ -35,7 +35,8 @@ commands:
   adopt      retrofit a pre-spine repo (dry-run by default; --write applies)
   update     regenerate machine-owned workflow files (dry-run by default; --write applies)
   adr        manage architecture decision records (new, list)
-  handoff    manage docs/handoffs (new, list, latest [--fleet DIR])
+  handoff    manage docs/handoffs (new, list, latest [--fleet DIR]); new embeds the
+             cursor block and the newest checkpoint from the checkpoint working home
   eval       manage docs/evals (new, add-run, list)
   doctor     read-only workflow health checks
   audit      verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
@@ -296,7 +297,8 @@ func cmdHandoff(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if fs.NArg() != 1 {
-			fmt.Fprintln(stderr, `usage: spine handoff new [--dir D] "Topic" (flags before topic)`)
+			fmt.Fprintln(stderr, `usage: spine handoff new [--dir D] "Topic" (flags before topic)`+"\n"+
+				`  embeds the cursor block, then the newest checkpoint: facts region verbatim, model region under "Prior narrative (model-authored, not evidence)"`)
 			return 2
 		}
 		path, embeddedCursor, err := handoff.NewWithCursor(*dir, fs.Arg(0))
