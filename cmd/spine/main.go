@@ -15,9 +15,11 @@ import (
 	"github.com/russellpope/spine/internal/adopt"
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/audit"
+	"github.com/russellpope/spine/internal/checkpoint"
 	"github.com/russellpope/spine/internal/cursor"
 	"github.com/russellpope/spine/internal/doctor"
 	"github.com/russellpope/spine/internal/eval"
+	"github.com/russellpope/spine/internal/gate"
 	"github.com/russellpope/spine/internal/handoff"
 	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/scaffold"
@@ -29,17 +31,20 @@ import (
 const usage = `usage: spine <command> [flags]
 
 commands:
-  init     scaffold the unified workflow into a repo
-  adopt    retrofit a pre-spine repo (dry-run by default; --write applies)
-  update   regenerate machine-owned workflow files (dry-run by default; --write applies)
-  adr      manage architecture decision records (new, list)
-  handoff  manage docs/handoffs (new, list, latest [--fleet DIR])
-  eval     manage docs/evals (new, add-run, list)
-  doctor   read-only workflow health checks
-  audit    verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
-  cursor   print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
-  model    resolve the model table for a (flavor, tier) pair (read-only)
-  version  print the compiled template generation
+  init       scaffold the unified workflow into a repo
+  adopt      retrofit a pre-spine repo (dry-run by default; --write applies)
+  update     regenerate machine-owned workflow files (dry-run by default; --write applies)
+  adr        manage architecture decision records (new, list)
+  handoff    manage docs/handoffs (new, list, latest [--fleet DIR]); new embeds the
+             cursor block and the newest checkpoint from the checkpoint working home
+  eval       manage docs/evals (new, add-run, list)
+  doctor     read-only workflow health checks
+  audit      verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
+  gate       run a gate-pack check class (gate go <check> [--dir D])
+  checkpoint write or replay a session checkpoint (new, latest, list)
+  cursor     print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
+  model      resolve the model table for a (flavor, tier) pair (read-only)
+  version    print the compiled template generation
 `
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -66,6 +71,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdAdopt(args[1:], stdout, stderr)
 	case "audit":
 		return cmdAudit(args[1:], stdout, stderr)
+	case "gate":
+		return cmdGate(args[1:], stdout, stderr)
+	case "checkpoint":
+		return cmdCheckpoint(args[1:], stdout, stderr)
 	case "cursor":
 		return cmdCursor(args[1:], stdout, stderr)
 	case "model":
@@ -288,7 +297,8 @@ func cmdHandoff(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if fs.NArg() != 1 {
-			fmt.Fprintln(stderr, `usage: spine handoff new [--dir D] "Topic" (flags before topic)`)
+			fmt.Fprintln(stderr, `usage: spine handoff new [--dir D] "Topic" (flags before topic)`+"\n"+
+				`  embeds the cursor block, then the newest checkpoint: facts region verbatim, model region under "Prior narrative (model-authored, not evidence)"`)
 			return 2
 		}
 		path, embeddedCursor, err := handoff.NewWithCursor(*dir, fs.Arg(0))
@@ -568,6 +578,160 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
+// cmdGate is a thin dispatcher over gate.Run: `spine gate <pack> <check>
+// [--dir D]`. The pack owns the exit-code contract (0 pass, 1 findings,
+// 2 misconfiguration), the results-contract emitter and the human table, so
+// nothing but flag parsing lives here.
+func cmdGate(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprint(stderr, gateUsage)
+		return 2
+	}
+	pack, check := args[0], args[1]
+	fs := flag.NewFlagSet("gate "+pack+" "+check, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root to check")
+	if err := fs.Parse(args[2:]); err != nil {
+		return 2
+	}
+	return gate.Run(pack, check, *dir, stdout, stderr, gate.EnvConfig())
+}
+
+// gateUsage documents the gate pack in CONTEXT.md vocabulary: a gate pack
+// is a versioned battery of check classes; one invocation runs one check
+// class and every finding is attributable to <pack>@<version>/<check>.
+var gateUsage = `usage: spine gate <pack> <check> [--dir D]
+
+pack:    ` + gate.PackName + ` (version ` + gate.PackID() + `)
+checks:  ` + strings.Join(gate.CheckNames(), ", ") + `
+
+  tskip              any t.Skip/t.Skipf/t.SkipNow (and b.Skip*) call in a
+                     _test.go file under --dir. Zero tolerance by default;
+                     allowlist via ` + gateTskipAllowVar + `, a comma-separated
+                     list of entries, each either a path relative to --dir
+                     (slash-separated) or path:line. Unset means no allowlist.
+  binary-hygiene     tracked files (git ls-files) that are executables or
+                     archives by content, plus stray second module trees (a
+                     tracked go.mod outside the repo root). --dir must be a
+                     git repo.
+  gitignore-control  two arms, reported distinctly. Arm 1: every declared
+                     build output in ` + gateBuildOutputsVar + ` (a
+                     comma-separated list of paths relative to --dir, e.g.
+                     bin/spine,dist/) is ignored at that path. Arm 2: no
+                     package main source file under --dir is ignored — the
+                     hidden-entry-point control. --dir must be a git repo;
+                     an unset or empty list is misconfiguration.
+  fixture-manifest   the manifest at ` + gateFixtureManifestVar + ` exists
+                     and is non-empty. A missing or empty manifest is a
+                     finding; content judgment is the evaluator's and is
+                     never done here. An unset variable, or a manifest that
+                     exists but cannot be read, is misconfiguration.
+  test-enum-vs-spec  typed string enums in code vs the values enumerated in
+                     the spec file at ` + gateTestEnumSpecVar + `, reporting
+                     each side's extras. Code side: a const with an explicit
+                     named type and a string literal value (const Low
+                     Severity = "low"), outside _test.go files. Spec side:
+                     every ` + "`backticked`" + ` token inside a marked block —
+                     <!-- spine:enum TypeName --> … <!-- /spine:enum -->.
+                     Only types a marker names are compared; a spec with no
+                     marker is misconfiguration.
+  deferred-cleanup-errcheck
+                     deferred calls to cleanup-class functions whose error
+                     return is discarded (defer f.Close()). A call is a
+                     finding only when go/types confirms the callee returns
+                     an error; a deferred func literal that inspects the
+                     error is not. Default name set: ` + strings.Join(gate.DefaultCleanupFuncs, ", ") + `.
+                     Extra names via ` + gate.CleanupFuncsVar + `, comma-
+                     separated — an env-only tuning knob, not a
+                     gate_pack_config key, so spine update never renders it.
+  dead-code-callgraph
+                     functions and methods (exported and unexported)
+                     unreachable from any root. Roots: every main in a
+                     package main, every init, every Test/Benchmark/Example/
+                     Fuzz function in a _test.go file, every package-level
+                     reference, and every exported function and method of
+                     an importable package — non-main, non-test, and with no
+                     "internal" element in its import path. Exported
+                     declarations under internal/ are candidates like any
+                     other: no other module can import them. Interface calls reach
+                     every concrete method of that name, and a method is
+                     live if its name is a method of any interface declared
+                     in the module or in a package it imports (so a String
+                     called only by fmt is live). Residual limitation: a
+                     method reached only through an interface from a package
+                     the module does not directly import is still reported.
+                     Only declarations outside _test.go files are reported.
+  n-plus-one         a call to one of the client names in
+                     ` + gateNPlusOneClientsVar + ` (comma-separated method or
+                     function names, e.g. Get,Query,Fetch) lexically inside
+                     a for or range loop body, at any depth, outside
+                     _test.go files. The list is required configuration: an
+                     unset or empty list is misconfiguration.
+  mutate             the behavioural mutation battery (advisory lane): each
+                     probe of the per-tree mutation spec is applied to a
+                     copy of the tracked tree, the verify command re-run,
+                     and the outcome reported as one row — KILLED (the
+                     suite went red), SURVIVED (a blind spot), NO-SITE (the
+                     literal is not in the file: spec drift), BUILD-ERR
+                     (the mutation broke compilation: an invalid probe).
+                     Severities let a consumer filter without parsing:
+                     SURVIVED is warn, every other row is info, and a
+                     failed control is error. The tree under --dir is never
+                     mutated. The unmutated negative control runs first: a
+                     tree that is not green yields one finding and exit 1
+                     and no probes run; otherwise the exit code is 0
+                     whatever the survivors, and the summary carries both
+                     kill rates (raw, and scorable with report-only probes
+                     excluded). Spec path via ` + gate.MutateSpecVar + `
+                     (relative to --dir or absolute), default ` + gate.DefaultMutateSpec + `;
+                     a missing or unparseable spec is misconfiguration.
+                     Verify command via ` + gate.MutateVerifyVar + ` (run
+                     with sh -c in the copy; exit 0 is green), default
+                     go build ./... then go test ./..., which is what tells
+                     BUILD-ERR from KILLED. Per-command timeout via
+                     ` + gate.MutateTimeoutVar + ` (a Go duration), default
+                     15m. All three are env-only tuning knobs, not
+                     gate_pack_config keys, so spine update never renders
+                     them.
+
+The syntactic classes (tskip, n-plus-one, test-enum-vs-spec, gitignore-
+control) walk the tree under --dir and skip what the Go toolchain itself
+ignores: .git, vendor, node_modules, testdata, and any directory whose name
+starts with "_" or ".". gitignore-control's entry-point arm still walks
+testdata, since an ignored testdata entry point is hidden just the same, but
+a testdata file that does not parse is skipped rather than reported as
+misconfiguration. binary-hygiene's stray-module rule likewise exempts paths
+with a testdata element — "go build ./..." never descends there — while its
+content detection of committed binaries applies under testdata as everywhere
+else.
+
+deferred-cleanup-errcheck and dead-code-callgraph type-check the module
+under --dir (go list + go/types, stdlib only). A --dir that does not compile
+is misconfiguration, not a finding: a gate cannot judge code the compiler
+has not agreed to.
+
+exit:    0 pass, 1 findings, 2 misconfiguration (mutate is advisory: only a
+         failed control exits 1)
+results: with ` + gate.ResultsEnvVar + ` set, the results contract is written
+         there as JSON (maipipe_results, status, summary, findings[] each
+         with severity, message, file, line, code = "` + gate.PackID() + `/<check>");
+         otherwise a human table on stdout and no file is written.
+`
+
+// gateTskipAllowVar is the tskip allowlist variable, named by the gate-pack
+// convention: SPINE_GATE_ + the upper-snake of the WORKFLOW.md
+// gate_pack_config key.
+var gateTskipAllowVar = gate.EnvVar("tskip_allow")
+
+// The other gate_pack_config keys the pack's check classes read, named by
+// the same convention.
+var (
+	gateBuildOutputsVar    = gate.EnvVar("build_outputs")
+	gateFixtureManifestVar = gate.EnvVar("fixture_manifest")
+	gateTestEnumSpecVar    = gate.EnvVar("test_enum_spec")
+	gateNPlusOneClientsVar = gate.EnvVar("n_plus_one_clients")
+)
+
 func cmdAudit(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, `usage: spine audit <routing|stages> [flags]  (audit routing [--dir D] [--transcripts DIR] [--codex-sessions DIR] [--since TIME] [--session ID]; audit stages [--dir D])`)
@@ -693,6 +857,13 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 	for _, n := range rep.Notes {
 		fmt.Fprintln(stderr, "warning:", n)
 	}
+	// The remediation round-budget advisory (I087): printed here only, and
+	// never consulted by Blocking() — a round beyond budget advises, it does
+	// not gate. Kept out of rep.Notes so doctor's D9 pass-through (a warn,
+	// which does set doctor's exit code) cannot turn it into a gate.
+	for _, n := range rep.RoundBudget {
+		fmt.Fprintln(stderr, "warning:", n)
+	}
 	if !rep.HasCursor {
 		fmt.Fprintln(stdout, "no spine cursor — nothing to audit")
 		return 0
@@ -725,6 +896,135 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "handoff: applicable=%v blocking=%v — %s\n", rep.Handoff.Applicable, rep.Handoff.Blocking(), rep.Handoff.Detail)
 	if rep.Blocking() || cursorMalformed || cursorNonCanonical {
 		return 1
+	}
+	return 0
+}
+
+// checkpointUsage documents the verbs in CONTEXT.md vocabulary: a
+// checkpoint is what a running session distils itself into before a context
+// reload; it holds a model region (the model's own prior claims) and a
+// facts region (harness-written evidence), and accumulates in the
+// checkpoint working home.
+const checkpointUsage = `usage: spine checkpoint <new|latest|list> [flags]
+
+  new     write a checkpoint into the working home
+          (.superpowers/sdd/checkpoints/NNN-<slug>.md)
+          spine checkpoint new [--dir D] --from <narrative.md> --touched <csv>
+            --gate <pass|fail|none> --effort <level> [--slug s] [--facts-only]
+          The narrative becomes the model region and must carry non-empty
+          "## Task", "## Conclusions" and "## Next moves" sections; a missing
+          or empty section is refused (exit 2, naming the section).
+          --facts-only skips the narrative and writes narrative: missing.
+  latest  print the reload preamble followed by the newest checkpoint
+          (exit 1 when the working home is empty)
+  list    list the working home in ordinal order
+`
+
+func cmdCheckpoint(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprint(stderr, checkpointUsage)
+		return 2
+	}
+	switch args[0] {
+	case "new":
+		return cmdCheckpointNew(args[1:], stdout, stderr)
+	case "latest":
+		return cmdCheckpointLatest(args[1:], stdout, stderr)
+	case "list":
+		return cmdCheckpointList(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "unknown checkpoint subcommand %q\n%s", args[0], checkpointUsage)
+		return 2
+	}
+}
+
+func cmdCheckpointNew(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("checkpoint new", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	from := fs.String("from", "", "narrative file becoming the model region")
+	touched := fs.String("touched", "", "comma-separated files touched (order preserved)")
+	gate := fs.String("gate", "", "gate status: pass | fail | none")
+	effort := fs.String("effort", "", "recommended per-leg effort")
+	slug := fs.String("slug", "", "filename slug (default: derived from the ## Task line)")
+	factsOnly := fs.Bool("facts-only", false, "write facts with narrative: missing and an empty model region")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	path, err := checkpoint.New(checkpoint.Options{
+		Dir:       *dir,
+		From:      *from,
+		Touched:   splitTouched(*touched),
+		Gate:      *gate,
+		Effort:    *effort,
+		Slug:      *slug,
+		FactsOnly: *factsOnly,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, "checkpoint new:", err)
+		return 2
+	}
+	fmt.Fprintln(stdout, path)
+	return 0
+}
+
+// splitTouched parses the --touched CSV; an empty value is an empty list,
+// and caller order is preserved.
+func splitTouched(csv string) []string {
+	var out []string
+	for _, part := range strings.Split(csv, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func cmdCheckpointLatest(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("checkpoint latest", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	e, ok, err := checkpoint.Latest(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "checkpoint latest:", err)
+		return 2
+	}
+	if !ok {
+		fmt.Fprintln(stderr, "no checkpoints found")
+		return 1
+	}
+	preamble, err := checkpoint.Preamble()
+	if err != nil {
+		fmt.Fprintln(stderr, "checkpoint latest:", err)
+		return 2
+	}
+	raw, err := os.ReadFile(e.Path)
+	if err != nil {
+		fmt.Fprintln(stderr, "checkpoint latest:", err)
+		return 2
+	}
+	fmt.Fprint(stdout, preamble)
+	fmt.Fprint(stdout, string(raw))
+	return 0
+}
+
+func cmdCheckpointList(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("checkpoint list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "repo root")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	entries, err := checkpoint.List(*dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "checkpoint list:", err)
+		return 2
+	}
+	for _, e := range entries {
+		fmt.Fprintf(stdout, "%03d  %-30s  %s\n", e.Ordinal, e.Slug, e.Created)
 	}
 	return 0
 }
@@ -1065,11 +1365,12 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 	dir := fs.String("dir", ".", "repo root")
 	effort := fs.Bool("effort", false, "print the resolved effort instead of the bare id")
 	asJSON := fs.Bool("json", false, "print the whole resolved entry as JSON")
+	alternate := fs.Bool("alternate", false, "print the cell's alternate instead of its primary id/effort")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 2 {
-		fmt.Fprintln(stderr, `usage: spine model [--dir D] [--effort|--json] <flavor> <tier>`)
+		fmt.Fprintln(stderr, `usage: spine model [--dir D] [--alternate] [--effort|--json] <flavor> <tier>`)
 		return 2
 	}
 	entry, err := model.Resolve(*dir, fs.Arg(0), fs.Arg(1))
@@ -1077,19 +1378,35 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "model:", err)
 		return 2
 	}
+	// --alternate answers from the cell's alternate half (I079). A cell that
+	// ships none is an error rather than a silent fall-back to the primary:
+	// an evaluator that asked for the critic and got the author would run a
+	// model against itself and report agreement.
+	if *alternate && entry.Alternate == nil && !*asJSON {
+		fmt.Fprintf(stderr, "model: %s.%s has no alternate\n", entry.Flavor, entry.Tier)
+		return 2
+	}
 	switch {
 	case *asJSON:
+		type altJSON struct {
+			ID     string `json:"id"`
+			Effort string `json:"effort"`
+		}
 		type entryJSON struct {
 			Flavor     string   `json:"flavor"`
 			Tier       string   `json:"tier"`
 			ID         string   `json:"id"`
 			Effort     string   `json:"effort"`
 			Aliases    []string `json:"aliases"`
+			Alternate  *altJSON `json:"alternate,omitempty"`
 			Provenance string   `json:"provenance"`
 		}
 		out := entryJSON{
 			Flavor: entry.Flavor, Tier: entry.Tier, ID: entry.ID, Effort: entry.Effort,
 			Aliases: entry.Aliases, Provenance: string(entry.Provenance),
+		}
+		if entry.Alternate != nil {
+			out.Alternate = &altJSON{ID: entry.Alternate.ID, Effort: entry.Alternate.Effort}
 		}
 		if out.Aliases == nil {
 			out.Aliases = []string{}
@@ -1098,6 +1415,10 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "model:", err)
 			return 2
 		}
+	case *alternate && *effort:
+		fmt.Fprintln(stdout, entry.Alternate.Effort)
+	case *alternate:
+		fmt.Fprintln(stdout, entry.Alternate.ID)
 	case *effort:
 		fmt.Fprintln(stdout, entry.Effort)
 	default:

@@ -7,6 +7,21 @@
 This document is the normative checklist for the behavioural mutation battery. It
 does not live in `templates/` — see ADR 0013.
 
+## Superseded by `spine gate go mutate`
+
+The runner is now the spine binary: `spine gate go mutate --dir <tree>` reads the
+per-tree spec (`docs/mutation-spec.json` by default, or the path in
+`SPINE_GATE_MUTATE_SPEC`), copies the tracked tree, applies each probe to the copy,
+and emits one results-contract row per probe (`code = go@1/mutate`) plus both kill
+rates — running the unmutated negative control first. It ships as the `mutation-go`
+pipeline (profile `audit`) in the gate pack's `maipipe.toml` region. See ADR 0015,
+which supersedes ADR 0013 items 2 and 4; the Python runner bundled with the
+`/model-eval` skill is superseded by the binary.
+
+This document stays normative for the ten classes, the record format and the
+reporting rules below (ADR 0013 items 1 and 3 stand) — the binary executes them,
+it does not redefine them.
+
 ## What this is
 
 The battery is an **agent-assisted instrument**, not an automated gate with a pass

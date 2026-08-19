@@ -2,7 +2,7 @@
 id: I080
 title: "Checkpoint document + spine checkpoint new|latest|list"
 severity: high
-status: open
+status: fixed
 affects: [checkpoint, templates, cli]
 blocked-by: []
 execution-mode: subagent-driven
@@ -60,3 +60,23 @@ document-family abstraction.
 ## Blocked by
 
 - None — can start immediately.
+
+## Resolution
+
+Fixed 2026-08-18 on branch `local-harness-conventions` (commits 38b2e29,
+acb2708, 473b318). New package `internal/checkpoint`: `spine checkpoint new
+--from <narrative.md> --touched <csv> --gate <pass|fail|none> --effort <level>
+[--slug s] [--facts-only] [--dir D]`, `latest` (embedded reload preamble
+`templates/current/checkpoint-preamble.md` + newest checkpoint, byte-stable;
+exit 1 when none), `list`. Working home `.superpowers/sdd/checkpoints/
+NNN-<slug>.md`; ordinals reserved via the exclusive-marker primitive now
+shared with handoffs (`fsutil.ReserveOrdinal`). Frontmatter `ordinal`,
+`created`, `effort`, `narrative`; `<!-- spine:checkpoint:model -->` region
+(narrative verbatim; sections `## Task`, `## Conclusions`, `## Next moves`
+required non-empty, extra sections tolerated; region markers inside the
+narrative are refused so narrative can never masquerade as fact) and
+`<!-- spine:checkpoint:facts -->` canonical block (`touched`, `gate`, `sha`,
+`effort_recommended`, `written`; byte-deterministic, package-level test).
+Rulings: `effort` and `effort_recommended` both carry `--effort` in v1; CRLF
+normalized to LF. Exported for I081: `Latest`, `Split`, `ParseFacts`,
+`Canonical`, `Facts.Block`. Primary-tier review + two scoped re-reviews clean.

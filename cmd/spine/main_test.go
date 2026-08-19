@@ -47,7 +47,7 @@ func TestUnknownCommand(t *testing.T) {
 
 func TestVersionCommand(t *testing.T) {
 	code, out, _ := runCmd(t, "version")
-	if code != 0 || !strings.Contains(out, "spine template generation 10") {
+	if code != 0 || !strings.Contains(out, "spine template generation 11") {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
@@ -131,7 +131,7 @@ func TestUpdateDryRunThenWrite(t *testing.T) {
 		}
 	}
 	code, out, _ = runCmd(t, "update", "--dir", dir)
-	if code != 1 || !strings.Contains(out, "+ template_version: 10") {
+	if code != 1 || !strings.Contains(out, "+ template_version: 11") {
 		t.Fatalf("dry-run code=%d out=%q", code, out)
 	}
 	// also remove a simple machine-owned file entirely, so --write must
@@ -690,14 +690,14 @@ func TestAdoptDryRunShowsDiffs(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("want pending exit 1, got %d out=%q", code, out)
 	}
-	if !strings.Contains(out, "+ template_version: 10") {
+	if !strings.Contains(out, "+ template_version: 11") {
 		t.Errorf("dry-run text output missing diff content: out=%q", out)
 	}
 	// --json must never carry the diff text as loose prose in the payload
 	// stream; the JSON test above already checks the stream is pure JSON,
 	// this just confirms diffs are a text-mode-only addition.
 	_, jsonOut, _ := runCmd(t, "adopt", "--dir", dir, "--json")
-	if strings.Contains(jsonOut, "+ template_version: 10\n") {
+	if strings.Contains(jsonOut, "+ template_version: 11\n") {
 		t.Errorf("json output should not contain raw diff text: out=%q", jsonOut)
 	}
 }
@@ -1785,5 +1785,451 @@ func TestModelMissingArgsExitsNonZero(t *testing.T) {
 		if code == 0 || !strings.Contains(errs, "usage: spine model") {
 			t.Errorf("run(%v): code=%d stderr=%q", args, code, errs)
 		}
+	}
+}
+
+// I079 AC1: the pi harness resolves from the table today — each tier at its
+// spec'd explicit effort, with the owner-tuned alternate available.
+func TestModelPiTiersResolveWithExplicitEfforts(t *testing.T) {
+	for _, tc := range []struct{ tier, effort string }{
+		{"primary", "xhigh"},
+		{"routine", "medium"},
+		{"mechanical", "low"},
+		{"fallback", "xhigh"},
+	} {
+		dir := t.TempDir()
+		code, out, errs := runCmd(t, "model", "--dir", dir, "pi", tc.tier)
+		if code != 0 || out != "qwen3.8-27b-q8_0\n" {
+			t.Errorf("pi %s: code=%d out=%q stderr=%q", tc.tier, code, out, errs)
+		}
+		code, out, errs = runCmd(t, "model", "--dir", dir, "--effort", "pi", tc.tier)
+		if code != 0 || out != tc.effort+"\n" {
+			t.Errorf("pi %s --effort: code=%d out=%q stderr=%q", tc.tier, code, out, errs)
+		}
+	}
+}
+
+// I079 AC1: --alternate answers from the cell's alternate half — qwen @
+// xhigh on every pi cell — so an evaluator's critic differs from its author
+// by table data rather than a dispatch-time heuristic.
+func TestModelPiAlternateReturnsOwnerTunedPair(t *testing.T) {
+	dir := t.TempDir()
+	code, out, errs := runCmd(t, "model", "--dir", dir, "--alternate", "pi", "routine")
+	if code != 0 || out != "qwen3.8-27b-q8_0\n" {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCmd(t, "model", "--dir", dir, "--alternate", "--effort", "pi", "routine")
+	if code != 0 || out != "xhigh\n" {
+		t.Fatalf("--effort: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+// I079 AC1: --json carries the alternate when the cell has one.
+func TestModelJSONCarriesAlternateForPi(t *testing.T) {
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--json", "pi", "routine")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	var got struct {
+		ID        string `json:"id"`
+		Effort    string `json:"effort"`
+		Alternate *struct {
+			ID     string `json:"id"`
+			Effort string `json:"effort"`
+		} `json:"alternate"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("out=%q not valid JSON: %v", out, err)
+	}
+	if got.ID != "qwen3.8-27b-q8_0" || got.Effort != "medium" {
+		t.Errorf("got=%+v, out=%q", got, out)
+	}
+	if got.Alternate == nil || got.Alternate.ID != "qwen3.8-27b-q8_0" || got.Alternate.Effort != "xhigh" {
+		t.Errorf("alternate=%+v, want qwen3.8-27b-q8_0 @ xhigh", got.Alternate)
+	}
+}
+
+// I079 AC1 negative control: a cell without an alternate says so rather than
+// silently answering with its primary id — an evaluator that asked for the
+// critic and got the author would run a model against itself.
+func TestModelAlternateAbsentIsAnError(t *testing.T) {
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--alternate", "claude", "primary")
+	if code != 2 || !strings.Contains(errs, "has no alternate") {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+// I079 AC1 negative control: claude's --json output gains no alternate key.
+func TestModelJSONOmitsAlternateWhenAbsent(t *testing.T) {
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--json", "claude", "primary")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	if strings.Contains(out, "alternate") {
+		t.Fatalf("out=%q, want no alternate key for a cell that ships none", out)
+	}
+}
+
+// I079 AC2: pi speaks low | medium | xhigh. A per-repo override asking pi
+// for "high" fails with a message naming the vocabulary rather than being
+// mapped onto some neighbouring level.
+func TestModelPiRejectsHighEffortNamingItsVocabulary(t *testing.T) {
+	dir := writeModelWorkflow(t, "model_routing:\n  pi.routine: qwen3.8-27b-q8_0 @ high\n")
+	code, _, errs := runCmd(t, "model", "--dir", dir, "--effort", "pi", "routine")
+	if code != 2 {
+		t.Fatalf("code=%d, want 2; stderr=%q", code, errs)
+	}
+	for _, want := range []string{`effort "high"`, "pi effort vocabulary", "low, medium, xhigh"} {
+		if !strings.Contains(errs, want) {
+			t.Errorf("stderr=%q, want it to contain %q", errs, want)
+		}
+	}
+}
+
+// I079 AC2 negative control: the same override at a vocabulary effort
+// resolves cleanly — the check rejects the word, not the override path.
+func TestModelPiAcceptsVocabularyEffortOverride(t *testing.T) {
+	dir := writeModelWorkflow(t, "model_routing:\n  pi.routine: qwen3.8-27b-q8_0 @ low\n")
+	code, out, errs := runCmd(t, "model", "--dir", dir, "--effort", "pi", "routine")
+	if code != 0 || out != "low\n" {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+// I079 AC3 at the resolver's own seam: an on-disk pi row spelled as the
+// table ships it reports inherited; the same row with an edited alternate
+// reports override, so the refresh rule leaves the edit alone.
+func TestModelPiAlternateProvenance(t *testing.T) {
+	for _, tc := range []struct{ row, want string }{
+		{"qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh", "inherited"},
+		{"qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ low", "override"},
+		{"qwen3.8-27b-q8_0 @ xhigh", "override"},
+	} {
+		dir := writeModelWorkflow(t, "model_routing:\n  pi.primary: "+tc.row+"\n")
+		code, out, errs := runCmd(t, "model", "--dir", dir, "--json", "pi", "primary")
+		if code != 0 {
+			t.Fatalf("row %q: code=%d stderr=%q", tc.row, code, errs)
+		}
+		var got struct {
+			Provenance string `json:"provenance"`
+		}
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("out=%q not valid JSON: %v", out, err)
+		}
+		if got.Provenance != tc.want {
+			t.Errorf("row %q: provenance=%q, want %q", tc.row, got.Provenance, tc.want)
+		}
+	}
+}
+
+// I079 fix round 1: a bare-id pi mirror row — a plausible hand edit that
+// just pins an id — inherits pi's OWN tier default (xhigh on primary and
+// fallback), not the global "high" its vocabulary has no word for, so the
+// row resolves instead of erroring. It reports override because dropping
+// the cell's alternate is itself a deliberate edit.
+func TestModelPiBareIDRowInheritsPiTierDefault(t *testing.T) {
+	dir := writeModelWorkflow(t, "model_routing:\n  pi.primary: qwen3.8-27b-q8_0\n  pi.fallback: qwen3.8-27b-q8_0\n")
+	for _, tier := range []string{"primary", "fallback"} {
+		code, out, errs := runCmd(t, "model", "--dir", dir, "--effort", "pi", tier)
+		if code != 0 || out != "xhigh\n" {
+			t.Errorf("pi %s --effort: code=%d out=%q stderr=%q", tier, code, out, errs)
+		}
+		code, out, errs = runCmd(t, "model", "--dir", dir, "--json", "pi", tier)
+		if code != 0 {
+			t.Fatalf("pi %s --json: code=%d stderr=%q", tier, code, errs)
+		}
+		var got struct {
+			ID         string `json:"id"`
+			Effort     string `json:"effort"`
+			Provenance string `json:"provenance"`
+		}
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("out=%q not valid JSON: %v", out, err)
+		}
+		if got.ID != "qwen3.8-27b-q8_0" || got.Effort != "xhigh" || got.Provenance != "override" {
+			t.Errorf("pi %s: got=%+v (want xhigh/override — the row dropped the cell's alternate)", tier, got)
+		}
+	}
+}
+
+// I079 fix round 1 negative control: claude has no per-flavor tier default,
+// so a bare-id claude row still inherits the global "high" — the override is
+// scoped to the flavor that declares one.
+func TestModelClaudeBareIDRowStillInheritsGlobalTierDefault(t *testing.T) {
+	dir := writeModelWorkflow(t, "model_routing:\n  claude.primary: claude-custom-model\n")
+	code, out, errs := runCmd(t, "model", "--dir", dir, "--effort", "claude", "primary")
+	if code != 0 || out != "high\n" {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+// AC (I085): docs/remediation/README.md is scaffolded by init, restored by
+// update when missing, and states the remediation convention.
+func TestRemediationReadmeScaffolded(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	rel := filepath.Join("docs", "remediation", "README.md")
+	raw, err := os.ReadFile(filepath.Join(dir, rel))
+	if err != nil {
+		t.Fatalf("init did not scaffold %s: %v", rel, err)
+	}
+	for _, want := range []string{
+		"docs/remediation/<effort>/round-N.md",
+		"3 rounds per effort",
+		"extension-ratified-by:",
+		"spine audit stages",
+		"findings-only",
+		"prescriptive",
+		"raw-review",
+		"results-contract `code`",
+		"hitlist.tmpl.md",
+		"remediation-round.tmpl.md",
+		"ADR 0007",
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("remediation README missing %q", want)
+		}
+	}
+	if err := os.Remove(filepath.Join(dir, rel)); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 0 {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+		t.Errorf("update did not restore %s: %v", rel, err)
+	}
+}
+
+// AC (I085) at the CLI seam: opting into the pack renders the gate-go region
+// into maipipe.toml; a repo that never opts in gets no maipipe.toml.
+func TestGatePackRegionAtCLISeam(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	if code, out, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 0 {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "maipipe.toml")); !os.IsNotExist(err) {
+		t.Fatalf("maipipe.toml written without gate_pack (err=%v)", err)
+	}
+	wfPath := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(wfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opted := strings.Replace(string(raw), "gate_pack: ", "gate_pack: go@1", 1)
+	if opted == string(raw) {
+		t.Fatal("gate_pack: row not found in the scaffolded WORKFLOW.md")
+	}
+	if err := os.WriteFile(wfPath, []byte(opted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCmd(t, "update", "--dir", dir, "--write")
+	if code != 0 {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	if !strings.Contains(out, "maipipe.toml") {
+		t.Errorf("update output does not name maipipe.toml: %q", out)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "maipipe.toml"))
+	if err != nil {
+		t.Fatalf("region not rendered: %v", err)
+	}
+	for _, want := range []string{
+		"# spine:begin gate-pack go@1\n",
+		"[pipelines.gate-go]\nprofile = \"full\"\n",
+		"run = \"spine gate go tskip\"\n",
+		"# spine:end\n",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("rendered region missing %q:\n%s", want, got)
+		}
+	}
+	if code, out, _ := runCmd(t, "doctor", "--dir", dir); code != 0 {
+		t.Errorf("doctor on a canonical region: code=%d out=%q", code, out)
+	}
+}
+
+// remediationRepo stages a repo whose cursor names effort E, plus a newest
+// handoff carrying the same cursor block so the stages backstop is satisfied
+// — the fixture the round-budget advisory tests measure exit codes against.
+func remediationRepo(t *testing.T, effort, prd, stages string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte("stages: [grill, prd]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	block := "<!-- spine:cursor -->\n" +
+		"effort: " + effort + "\n" +
+		"prd: " + prd + "\n" +
+		"tickets: \n" +
+		"stages: " + stages + "\n" +
+		"<!-- /spine:cursor -->\n"
+	ledger := filepath.Join(dir, ".superpowers", "sdd", "progress.md")
+	if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledger, []byte(block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	handoffs := filepath.Join(dir, "docs", "handoffs")
+	if err := os.MkdirAll(handoffs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(handoffs, "2026-08-18-"+effort+".md"), []byte("# handoff\n\n"+block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeRoundRecord(t *testing.T, dir, effort, name, frontmatter string) {
+	t.Helper()
+	roundDir := filepath.Join(dir, "docs", "remediation", effort)
+	if err := os.MkdirAll(roundDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\n" + frontmatter + "hitlist: docs/remediation/" + effort + "/hitlist-1.md\n---\n\n# round\n"
+	if err := os.WriteFile(filepath.Join(roundDir, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// AC (I087): audit stages reports a round-4 record without ratification, and
+// the exit code is identical to the same repo without the file — the rule is
+// advisory and can never gate. Both a non-blocking and a blocking cursor are
+// measured, so "unchanged" is proved in both directions.
+func TestAuditStagesRoundBudgetAdvisoryNeverChangesExitCode(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		prd      string
+		stages   string
+		wantCode int
+	}{
+		{"non-blocking", "", "grill[<] prd[ ]", 0},
+		{"blocking", "docs/specs/missing.md", "grill[x] prd[x]", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := remediationRepo(t, "budget-"+tc.name, tc.prd, tc.stages)
+			baseCode, _, _ := runCmd(t, "audit", "stages", "--dir", base)
+			if baseCode != tc.wantCode {
+				t.Fatalf("fixture without the round record: code=%d want %d", baseCode, tc.wantCode)
+			}
+
+			dir := remediationRepo(t, "budget-"+tc.name, tc.prd, tc.stages)
+			writeRoundRecord(t, dir, "budget-"+tc.name, "round-4.md", "round: 4\ndose: findings-only\n")
+			code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+			if code != baseCode {
+				t.Errorf("advisory changed the exit code: %d vs %d (out=%q err=%q)", code, baseCode, out, errs)
+			}
+			for _, want := range []string{
+				"warning:",
+				"docs/remediation/budget-" + tc.name + "/round-4.md",
+				"beyond the 3-round remediation budget",
+				"add `extension-ratified-by: <owner>` to its frontmatter",
+			} {
+				if !strings.Contains(errs, want) {
+					t.Errorf("stderr missing %q: %q", want, errs)
+				}
+			}
+		})
+	}
+}
+
+// AC (I087) negative controls: rounds 1-3, a ratified round-4+, and no
+// remediation directory at all are all silent.
+func TestAuditStagesRoundBudgetNegativeControls(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, frontmatter string
+	}{
+		{"round-3-is-within-budget", "round-3.md", "round: 3\ndose: findings-only\n"},
+		{"round-4-ratified", "round-4.md", "round: 4\ndose: prescriptive\nextension-ratified-by: someone\n"},
+		{"round-5-ratified", "round-5.md", "round: 5\ndose: raw-review\nextension-ratified-by: someone\n"},
+		{"unnumbered-file-ignored", "notes.md", "round: 9\n"},
+		{"commented-out-key-in-round-3", "round-3.md", "round: 3\n# extension-ratified-by: <owner>\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := remediationRepo(t, "quiet", "", "grill[<] prd[ ]")
+			writeRoundRecord(t, dir, "quiet", tc.file, tc.frontmatter)
+			code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+			if code != 0 {
+				t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+			}
+			if strings.Contains(errs, "remediation budget") {
+				t.Errorf("negative control produced an advisory: %q", errs)
+			}
+		})
+	}
+	dir := remediationRepo(t, "no-dir", "", "grill[<] prd[ ]")
+	if code, out, errs := runCmd(t, "audit", "stages", "--dir", dir); code != 0 || strings.Contains(errs, "remediation budget") {
+		t.Errorf("no docs/remediation dir must be silent: code=%d out=%q err=%q", code, out, errs)
+	}
+}
+
+// AC (I087): both templates are scaffolded into docs/remediation/ by init and
+// restored by update — the same machine-owned simple-file ownership as the
+// README — and the README names them and how to instantiate them.
+func TestRemediationTemplatesScaffolded(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	rels := []string{
+		filepath.Join("docs", "remediation", "_hitlist.template.md"),
+		filepath.Join("docs", "remediation", "_round.template.md"),
+	}
+	for _, rel := range rels {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Fatalf("init did not scaffold %s: %v", rel, err)
+		}
+		if err := os.Remove(filepath.Join(dir, rel)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, out, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 0 {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	for _, rel := range rels {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Errorf("update did not restore %s: %v", rel, err)
+		}
+	}
+	readme, err := os.ReadFile(filepath.Join(dir, "docs", "remediation", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"docs/remediation/_hitlist.template.md",
+		"docs/remediation/_round.template.md",
+		"docs/remediation/<effort>/hitlist-N.md",
+		"There is no\n`spine remediation new` verb",
+	} {
+		if !strings.Contains(string(readme), want) {
+			t.Errorf("remediation README missing %q", want)
+		}
+	}
+}
+
+// AC (I087): the advisory fires when extension-ratified-by: is present but
+// empty — the load-bearing half of the ratified negative control — and
+// `spine doctor` stays untouched: the round-budget advisory is not a doctor
+// finding and does not move doctor's exit code.
+func TestRoundBudgetEmptyRatificationAdvisesAndDoctorIsUntouched(t *testing.T) {
+	dir := remediationRepo(t, "empty-ratify", "", "grill[<] prd[ ]")
+	doctorBefore, _, _ := runCmd(t, "doctor", "--dir", dir)
+	writeRoundRecord(t, dir, "empty-ratify", "round-4.md", "round: 4\nextension-ratified-by:   \n")
+	code, _, errs := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 0 || !strings.Contains(errs, "beyond the 3-round remediation budget") {
+		t.Errorf("empty ratification must still advise: code=%d err=%q", code, errs)
+	}
+	doctorAfter, out, _ := runCmd(t, "doctor", "--dir", dir)
+	if doctorAfter != doctorBefore {
+		t.Errorf("doctor exit code moved: %d -> %d (out=%q)", doctorBefore, doctorAfter, out)
+	}
+	if strings.Contains(out, "remediation budget") {
+		t.Errorf("doctor must not report the round-budget advisory: %q", out)
 	}
 }

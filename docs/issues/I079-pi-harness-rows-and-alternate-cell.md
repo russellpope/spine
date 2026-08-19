@@ -2,7 +2,7 @@
 id: I079
 title: "pi harness rows + alternate cell in the model table"
 severity: med
-status: open
+status: fixed
 affects: [models, model, update, cli]
 blocked-by: []
 execution-mode: subagent-driven
@@ -51,3 +51,16 @@ I073's. claude/codex behavior is unchanged.
 ## Blocked by
 
 - None — can start immediately.
+
+## Resolution
+
+Fixed 2026-08-18 on branch `local-harness-conventions` (commits 9b02de6, 6dfc7f0).
+`models/defaults.json` ships the `pi` harness (JSON key still `flavors`) with
+explicit per-cell efforts and `alternate: {qwen3.8-27b-q8_0, xhigh}`; the pi
+effort vocabulary is data (`low|medium|xhigh`, `high` rejected naming the
+vocabulary); `spine model pi <tier> [--alternate] [--json]`; mirror rows carry
+a trailing `alt: <id> @ <effort>` parsed under inherited/override rules.
+Rulings: gen-10 repos gain pi rows as inherited additions on `spine update`
+(D8), no gen bump; `tierDefaultEffort` gained a per-harness override
+(`tierDefaultEffortByFlavor.pi`) so bare-id pi rows resolve (spec D3 vs pi
+vocabulary contradiction). Task review + scoped re-review clean.

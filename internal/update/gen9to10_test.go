@@ -127,6 +127,9 @@ func TestGen9To10PristineUpdatesCleanly(t *testing.T) {
 				if isGen10ContentDiffLine(line) {
 					continue
 				}
+				if isGen11ContentDiffLine(line) { // gen 11's conscious content edit; see gen10to11_test.go
+					continue
+				}
 				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
 					continue
 				}
@@ -173,8 +176,8 @@ func TestGen9To10MigrationWritesFlavorMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 	gotStr := string(got)
-	if !strings.Contains(gotStr, "template_version: 10") {
-		t.Error("migrated WORKFLOW.md missing template_version: 10")
+	if !strings.Contains(gotStr, "template_version: 11") {
+		t.Error("migrated WORKFLOW.md missing template_version: 11")
 	}
 	for _, row := range model.MirrorRows() {
 		if !containsLine(gotStr, row) {

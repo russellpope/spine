@@ -2,7 +2,7 @@
 id: I082
 title: "spine gate go skeleton + results-contract emitter + tskip, binary-hygiene"
 severity: high
-status: open
+status: fixed
 affects: [gate, cli]
 blocked-by: []
 execution-mode: subagent-driven
@@ -47,3 +47,20 @@ lives in one place.
 ## Blocked by
 
 - None — can start immediately.
+
+## Resolution
+
+Fixed 2026-08-18 on branch `local-harness-conventions` (commits 3d39947, c25f1a6).
+New package `internal/gate`: check registry, one results-contract emitter
+(JSON to `MAIPIPE_RESULTS` when set, else human table), one exit-code owner
+(`gate.Run`), pack constants `go@1` in one place (`PackName`/`PackVersion`,
+`Code(check)`), CLI `spine gate go <check> [--dir D]`. Classes `tskip`
+(go/ast; receivers `t`/`b`/`tb` and `.T()` accessors; allowlist
+`SPINE_GATE_TSKIP_ALLOW` = comma-separated `path` or `path:line`, unset = no
+allowlist) and `binary-hygiene` (tracked files by magic bytes incl. tar at
+offset 257; `go.mod` in a tracked non-root dir = stray module tree). Positive
+control pairs at the CLI seam in `cmd/spine/gate_test.go`. Config env
+convention: `SPINE_GATE_` + upper-snake(gate_pack_config key) via
+`gate.EnvVar`. Recorded constraint: legitimate `tools/go.mod` tool modules
+false-positive under go@1's stray-module rule (escape: `gate_pack_disabled`;
+an allow key is go@2 territory). Task review + scoped re-review clean.
