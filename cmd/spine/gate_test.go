@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+
+	"github.com/russellpope/spine/internal/gate"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -135,23 +137,119 @@ func binaryHygieneFixtures() (good, seeded map[string][]byte) {
 	return good, seeded
 }
 
+// gitignoreControlFixtures: the good repo ignores its declared build
+// output and nothing else; the seeded one inverts both arms — the build
+// output is tracked-able and an entry point is hidden by an ignore rule.
+func gitignoreControlFixtures() (good, seeded map[string][]byte) {
+	good = map[string][]byte{
+		"go.mod":     []byte("module fixture\n\ngo 1.26\n"),
+		".gitignore": []byte("/bin/\n"),
+		"main.go":    []byte("package main\n\nfunc main() {}\n"),
+		"pkg/lib.go": []byte("package pkg\n"),
+	}
+	seeded = map[string][]byte{
+		"go.mod":             []byte("module fixture\n\ngo 1.26\n"),
+		".gitignore":         []byte("/cmd/hidden/\n"),
+		"main.go":            []byte("package main\n\nfunc main() {}\n"),
+		"cmd/hidden/main.go": []byte("package main\n\nfunc main() {}\n"),
+	}
+	return good, seeded
+}
+
+func fixtureManifestFixtures() (good, seeded map[string][]byte) {
+	good = map[string][]byte{
+		"go.mod":               []byte("module fixture\n\ngo 1.26\n"),
+		"testdata/manifest.md": []byte("- case: empty input\n- case: one row\n"),
+	}
+	seeded = map[string][]byte{
+		"go.mod":               []byte("module fixture\n\ngo 1.26\n"),
+		"testdata/manifest.md": []byte("\n   \n"),
+	}
+	return good, seeded
+}
+
+// enumSpec is the spec side of test-enum-vs-spec: one marked block whose
+// backticked tokens are the documented values of one type.
+const enumSpec = `# Fixture spec
+
+Severity values:
+
+<!-- spine:enum Severity -->
+` + "`low`, `med`, `high`" + `
+<!-- /spine:enum -->
+`
+
+const enumCode = `package fixture
+
+type Severity string
+
+const (
+	Low  Severity = "low"
+	Med  Severity = "med"
+	High Severity = "high"
+)
+`
+
+func testEnumVsSpecFixtures() (good, seeded map[string][]byte) {
+	good = map[string][]byte{
+		"go.mod":       []byte("module fixture\n\ngo 1.26\n"),
+		"docs/spec.md": []byte(enumSpec),
+		"severity.go":  []byte(enumCode),
+	}
+	seeded = map[string][]byte{
+		"go.mod": []byte("module fixture\n\ngo 1.26\n"),
+		// The spec documents a value no const declares, and the code
+		// declares one the spec never mentions: one finding per side.
+		"docs/spec.md": []byte(strings.Replace(enumSpec, "`high`", "`high`, `retired`", 1)),
+		"severity.go":  []byte(strings.Replace(enumCode, ")\n", "\tCrit Severity = \"crit\"\n)\n", 1)),
+	}
+	return good, seeded
+}
+
 // TestGatePositiveControls is the positive control pair for each check
 // class: a known-good repo the class passes (exit 0) and a seeded violation
 // it fails (exit 1), with each finding attributable to go@1/<check>.
 func TestGatePositiveControls(t *testing.T) {
 	tskipGood, tskipSeeded := tskipFixtures()
 	binGood, binSeeded := binaryHygieneFixtures()
+	ignGood, ignSeeded := gitignoreControlFixtures()
+	manGood, manSeeded := fixtureManifestFixtures()
+	enumGood, enumSeeded := testEnumVsSpecFixtures()
 	cases := []struct {
 		check  string
 		good   map[string][]byte
 		seeded map[string][]byte
-		want   []string // substrings expected in the seeded run's findings
+		env    map[string]string // gate_pack_config for this class
+		wantN  int               // findings expected from the seeded run
+		want   []string          // substrings expected in the seeded run's findings
 	}{
-		{"tskip", tskipGood, tskipSeeded, []string{"t.Skip call", "tb.SkipNow call", "s.T().Skip call"}},
-		{"binary-hygiene", binGood, binSeeded, []string{"bin/tool", "data/x.tar", "tools/go.mod"}},
+		{"tskip", tskipGood, tskipSeeded, nil, 3, []string{"t.Skip call", "tb.SkipNow call", "s.T().Skip call"}},
+		{"binary-hygiene", binGood, binSeeded, nil, 3, []string{"bin/tool", "data/x.tar", "tools/go.mod"}},
+		{
+			"gitignore-control", ignGood, ignSeeded,
+			map[string]string{"SPINE_GATE_BUILD_OUTPUTS": "bin/spine"}, 2,
+			[]string{"declared build output not ignored", "ignored entry point", "cmd/hidden/main.go"},
+		},
+		{
+			"fixture-manifest", manGood, manSeeded,
+			map[string]string{"SPINE_GATE_FIXTURE_MANIFEST": "testdata/manifest.md"}, 1,
+			[]string{"fixture manifest empty", "testdata/manifest.md"},
+		},
+		{
+			"test-enum-vs-spec", enumGood, enumSeeded,
+			map[string]string{"SPINE_GATE_TEST_ENUM_SPEC": "docs/spec.md"}, 2,
+			[]string{"is declared in code but not enumerated", "no const declares it", "severity.go", "docs/spec.md"},
+		},
 	}
 	for _, tc := range cases {
+		setGateEnv := func(t *testing.T) {
+			t.Helper()
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+		}
 		t.Run(tc.check+"/good", func(t *testing.T) {
+			setGateEnv(t)
 			dir := gateRepo(t, tc.good)
 			code, out, errs := runCmd(t, "gate", "go", tc.check, "--dir", dir)
 			if code != 0 {
@@ -165,6 +263,7 @@ func TestGatePositiveControls(t *testing.T) {
 			}
 		})
 		t.Run(tc.check+"/seeded", func(t *testing.T) {
+			setGateEnv(t)
 			dir := gateRepo(t, tc.seeded)
 			results := filepath.Join(t.TempDir(), "results.json")
 			t.Setenv("MAIPIPE_RESULTS", results)
@@ -173,7 +272,7 @@ func TestGatePositiveControls(t *testing.T) {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 			}
 			r := readResults(t, results)
-			if r.Status != "fail" || len(r.Findings) != len(tc.want) {
+			if r.Status != "fail" || len(r.Findings) != tc.wantN {
 				t.Fatalf("status=%q findings=%+v", r.Status, r.Findings)
 			}
 			for i, f := range r.Findings {
@@ -349,9 +448,96 @@ func TestGateUsageDocumentsPack(t *testing.T) {
 		t.Fatalf("spine help does not mention gate: %q", out)
 	}
 	_, _, errs := runCmd(t, "gate", "go")
-	for _, want := range []string{"go@1", "tskip", "binary-hygiene", "SPINE_GATE_TSKIP_ALLOW", "MAIPIPE_RESULTS", "0 pass, 1 findings, 2 misconfiguration"} {
+	wants := []string{"go@1", "SPINE_GATE_TSKIP_ALLOW", "SPINE_GATE_BUILD_OUTPUTS", "SPINE_GATE_FIXTURE_MANIFEST", "SPINE_GATE_TEST_ENUM_SPEC", "MAIPIPE_RESULTS", "0 pass, 1 findings, 2 misconfiguration"}
+	// The check list is derived from the registry, so a class that ships
+	// without a usage entry is a test failure, not a documentation drift.
+	wants = append(wants, gate.CheckNames()...)
+	for _, want := range wants {
 		if !strings.Contains(errs, want) {
 			t.Errorf("gate usage missing %q:\n%s", want, errs)
 		}
+	}
+}
+
+// TestGateGitignoreControlArmsIndependent is the acceptance criterion for
+// the hidden-entry-point control: a repo that correctly ignores its build
+// outputs (arm 1 clean) still fails on an ignored package main file.
+func TestGateGitignoreControlArmsIndependent(t *testing.T) {
+	dir := gateRepo(t, map[string][]byte{
+		"go.mod":             []byte("module fixture\n\ngo 1.26\n"),
+		".gitignore":         []byte("/bin/\n/cmd/hidden/\n"),
+		"main.go":            []byte("package main\n\nfunc main() {}\n"),
+		"cmd/hidden/main.go": []byte("package main\n\nfunc main() {}\n"),
+	})
+	t.Setenv("SPINE_GATE_BUILD_OUTPUTS", "bin/spine")
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	code, out, errs := runCmd(t, "gate", "go", "gitignore-control", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	r := readResults(t, results)
+	if len(r.Findings) != 1 {
+		t.Fatalf("want exactly the arm 2 finding, got %+v", r.Findings)
+	}
+	f := r.Findings[0]
+	if !strings.Contains(f.Message, "ignored entry point") || f.File != "cmd/hidden/main.go" || f.Line != 1 {
+		t.Errorf("finding=%+v", f)
+	}
+}
+
+// TestGateFixtureManifestMissing: an absent manifest is a finding, not
+// misconfiguration — the manifest is what the class checks.
+func TestGateFixtureManifestMissing(t *testing.T) {
+	dir := gateRepo(t, map[string][]byte{"go.mod": []byte("module fixture\n\ngo 1.26\n")})
+	t.Setenv("SPINE_GATE_FIXTURE_MANIFEST", "testdata/manifest.md")
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	if code, _, errs := runCmd(t, "gate", "go", "fixture-manifest", "--dir", dir); code != 1 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	r := readResults(t, results)
+	if len(r.Findings) != 1 || !strings.Contains(r.Findings[0].Message, "fixture manifest missing") {
+		t.Fatalf("findings=%+v", r.Findings)
+	}
+}
+
+// TestGateConfigMisconfiguration: every config-driven class exits 2 naming
+// the variable an operator has to set, and names the path when the
+// configured input itself is unusable.
+func TestGateConfigMisconfiguration(t *testing.T) {
+	dir := gateRepo(t, map[string][]byte{
+		"go.mod":       []byte("module fixture\n\ngo 1.26\n"),
+		"main.go":      []byte("package main\n\nfunc main() {}\n"),
+		"docs/bare.md": []byte("no markers here\n"),
+	})
+	cases := []struct {
+		name  string
+		check string
+		env   map[string]string
+		want  []string
+	}{
+		{"build outputs unset", "gitignore-control", nil, []string{"SPINE_GATE_BUILD_OUTPUTS"}},
+		{"build outputs empty", "gitignore-control", map[string]string{"SPINE_GATE_BUILD_OUTPUTS": " , "}, []string{"SPINE_GATE_BUILD_OUTPUTS"}},
+		{"manifest unset", "fixture-manifest", nil, []string{"SPINE_GATE_FIXTURE_MANIFEST"}},
+		{"enum spec unset", "test-enum-vs-spec", nil, []string{"SPINE_GATE_TEST_ENUM_SPEC"}},
+		{"enum spec missing", "test-enum-vs-spec", map[string]string{"SPINE_GATE_TEST_ENUM_SPEC": "docs/nope.md"}, []string{"SPINE_GATE_TEST_ENUM_SPEC", "docs/nope.md"}},
+		{"enum spec without marker", "test-enum-vs-spec", map[string]string{"SPINE_GATE_TEST_ENUM_SPEC": "docs/bare.md"}, []string{"SPINE_GATE_TEST_ENUM_SPEC", "docs/bare.md", "spine:enum"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			code, out, errs := runCmd(t, "gate", "go", tc.check, "--dir", dir)
+			if code != 2 {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(errs, want) {
+					t.Errorf("stderr=%q, want %q", errs, want)
+				}
+			}
+		})
 	}
 }

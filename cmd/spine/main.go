@@ -601,17 +601,38 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 var gateUsage = `usage: spine gate <pack> <check> [--dir D]
 
 pack:    ` + gate.PackName + ` (version ` + gate.PackID() + `)
-checks:  tskip, binary-hygiene
+checks:  ` + strings.Join(gate.CheckNames(), ", ") + `
 
-  tskip           any t.Skip/t.Skipf/t.SkipNow (and b.Skip*) call in a
-                  _test.go file under --dir. Zero tolerance by default;
-                  allowlist via ` + gateTskipAllowVar + `, a comma-separated
-                  list of entries, each either a path relative to --dir
-                  (slash-separated) or path:line. Unset means no allowlist.
-  binary-hygiene  tracked files (git ls-files) that are executables or
-                  archives by content, plus stray second module trees (a
-                  tracked go.mod outside the repo root). --dir must be a
-                  git repo.
+  tskip              any t.Skip/t.Skipf/t.SkipNow (and b.Skip*) call in a
+                     _test.go file under --dir. Zero tolerance by default;
+                     allowlist via ` + gateTskipAllowVar + `, a comma-separated
+                     list of entries, each either a path relative to --dir
+                     (slash-separated) or path:line. Unset means no allowlist.
+  binary-hygiene     tracked files (git ls-files) that are executables or
+                     archives by content, plus stray second module trees (a
+                     tracked go.mod outside the repo root). --dir must be a
+                     git repo.
+  gitignore-control  two arms, reported distinctly. Arm 1: every declared
+                     build output in ` + gateBuildOutputsVar + ` (a
+                     comma-separated list of paths relative to --dir, e.g.
+                     bin/spine,dist/) is ignored at that path. Arm 2: no
+                     package main source file under --dir is ignored — the
+                     hidden-entry-point control. --dir must be a git repo;
+                     an unset or empty list is misconfiguration.
+  fixture-manifest   the manifest at ` + gateFixtureManifestVar + ` exists
+                     and is non-empty. A missing or empty manifest is a
+                     finding; content judgment is the evaluator's and is
+                     never done here. An unset variable, or a manifest that
+                     exists but cannot be read, is misconfiguration.
+  test-enum-vs-spec  typed string enums in code vs the values enumerated in
+                     the spec file at ` + gateTestEnumSpecVar + `, reporting
+                     each side's extras. Code side: a const with an explicit
+                     named type and a string literal value (const Low
+                     Severity = "low"), outside _test.go files. Spec side:
+                     every ` + "`backticked`" + ` token inside a marked block —
+                     <!-- spine:enum TypeName --> … <!-- /spine:enum -->.
+                     Only types a marker names are compared; a spec with no
+                     marker is misconfiguration.
 
 exit:    0 pass, 1 findings, 2 misconfiguration
 results: with ` + gate.ResultsEnvVar + ` set, the results contract is written
@@ -624,6 +645,14 @@ results: with ` + gate.ResultsEnvVar + ` set, the results contract is written
 // convention: SPINE_GATE_ + the upper-snake of the WORKFLOW.md
 // gate_pack_config key.
 var gateTskipAllowVar = gate.EnvVar("tskip_allow")
+
+// The other gate_pack_config keys the pack's check classes read, named by
+// the same convention.
+var (
+	gateBuildOutputsVar    = gate.EnvVar("build_outputs")
+	gateFixtureManifestVar = gate.EnvVar("fixture_manifest")
+	gateTestEnumSpecVar    = gate.EnvVar("test_enum_spec")
+)
 
 func cmdAudit(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {

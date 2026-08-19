@@ -84,8 +84,11 @@ type Check func(dir string, cfg Config) ([]Finding, error)
 
 // checks is the check-class registry for the go pack: name -> implementation.
 var checks = map[string]Check{
-	"tskip":          checkTskip,
-	"binary-hygiene": checkBinaryHygiene,
+	"tskip":             checkTskip,
+	"binary-hygiene":    checkBinaryHygiene,
+	"gitignore-control": checkGitignoreControl,
+	"fixture-manifest":  checkFixtureManifest,
+	"test-enum-vs-spec": checkTestEnumVsSpec,
 }
 
 // CheckNames returns the registered check classes, sorted.
