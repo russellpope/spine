@@ -786,42 +786,6 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// cmdCursor is a thin, read-only printer over cursor.Load: it prints the
-// parsed stage cursor plus the live derivation verdict (internal/stages,
-// I019). It always exits 0: a cursor mismatch or parse finding is
-// surfaced, never gated, here — spine audit stages is where that becomes a
-// blocking check. --quiet is for hook use: it silences the "nothing to
-// report" case (no spine repo, no ledger, no cursor block) but never
-// silences a cursor that was actually found, malformed or not — the
-// SessionStart hook (I021) needs real output precisely when a cursor
-// exists.
-//
-// The derivation line is one of three: "clean" (no contradictions), "n/a
-// (cursor malformed)" (I024 — grammar findings on the cursor block itself,
-// e.g. a stages: line that parses to zero stage rows, printed instead of a
-// misleading "clean"), or "blocking" (a stage/artifact contradiction or a
-// stale newest-handoff). Grammar findings win priority over "blocking":
-// with zero parsed stage rows there is nothing coherent to call clean or
-// blocking about the stages themselves — see internal/stages' package doc
-// (CursorFindings never affects Report.Blocking()).
-// cmdCursor is a thin, read-only printer over cursor.Load: it prints the
-// parsed stage cursor plus the live derivation verdict (internal/stages,
-// I019). It always exits 0: a cursor mismatch or parse finding is
-// surfaced, never gated, here — spine audit stages is where that becomes a
-// blocking check. --quiet is for hook use: it silences the "nothing to
-// report" case (no spine repo, no ledger, no cursor block) but never
-// silences a cursor that was actually found, malformed or not — the
-// SessionStart hook (I021) needs real output precisely when a cursor
-// exists.
-//
-// The derivation line is one of three: "clean" (no contradictions), "n/a
-// (cursor malformed)" (I024 — grammar findings on the cursor block itself,
-// e.g. a stages: line that parses to zero stage rows, printed instead of a
-// misleading "clean"), or "blocking" (a stage/artifact contradiction or a
-// stale newest-handoff). Grammar findings win priority over "blocking":
-// with zero parsed stage rows there is nothing coherent to call clean or
-// blocking about the stages themselves — see internal/stages' package doc
-// (CursorFindings never affects Report.Blocking()).
 // checkpointUsage documents the verbs in CONTEXT.md vocabulary: a
 // checkpoint is what a running session distils itself into before a context
 // reload; it holds a model region (the model's own prior claims) and a
@@ -951,6 +915,24 @@ func cmdCheckpointList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// cmdCursor is a thin, read-only printer over cursor.Load: it prints the
+// parsed stage cursor plus the live derivation verdict (internal/stages,
+// I019). It always exits 0: a cursor mismatch or parse finding is
+// surfaced, never gated, here — spine audit stages is where that becomes a
+// blocking check. --quiet is for hook use: it silences the "nothing to
+// report" case (no spine repo, no ledger, no cursor block) but never
+// silences a cursor that was actually found, malformed or not — the
+// SessionStart hook (I021) needs real output precisely when a cursor
+// exists.
+//
+// The derivation line is one of three: "clean" (no contradictions), "n/a
+// (cursor malformed)" (I024 — grammar findings on the cursor block itself,
+// e.g. a stages: line that parses to zero stage rows, printed instead of a
+// misleading "clean"), or "blocking" (a stage/artifact contradiction or a
+// stale newest-handoff). Grammar findings win priority over "blocking":
+// with zero parsed stage rows there is nothing coherent to call clean or
+// blocking about the stages themselves — see internal/stages' package doc
+// (CursorFindings never affects Report.Blocking()).
 func cmdCursor(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 {
 		switch args[0] {
