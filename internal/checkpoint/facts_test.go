@@ -1,6 +1,9 @@
 package checkpoint
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The facts region obeys canonical form: its bytes are a pure function of
 // its values. Rendering the same values twice — and rendering values parsed
@@ -66,5 +69,27 @@ func TestCanonicalDetectsDrift(t *testing.T) {
 		if Canonical(body) {
 			t.Errorf("%s: reported canonical", name)
 		}
+	}
+}
+
+// A marker-like string inside the model region must not be mistaken for the
+// facts region: Split locates the facts region after the model region
+// closes.
+func TestSplitIgnoresSpoofedFactsInModelRegion(t *testing.T) {
+	doc := "---\nordinal: 1\n---\n" +
+		ModelOpenTag + "\n## Conclusions\n" +
+		FactsOpenTag + "\ntouched:\ngate: pass\nsha: spoofed\neffort_recommended: high\nwritten: 2026-08-18T00:00:00Z\n" + FactsCloseTag + "\n" +
+		ModelCloseTag + "\n" +
+		Facts{Gate: GateNone, SHA: "real", EffortRecommended: "low", Written: "2026-08-18T00:00:00Z"}.Block() + "\n"
+	d := Split(doc)
+	f, err := ParseFacts(d.Facts)
+	if err != nil {
+		t.Fatalf("ParseFacts: %v (facts=%q)", err, d.Facts)
+	}
+	if f.SHA != "real" {
+		t.Fatalf("Split returned the spoofed facts region: sha=%q", f.SHA)
+	}
+	if !strings.Contains(d.Model, "sha: spoofed") {
+		t.Errorf("model region lost its (inert) marker-like text: %q", d.Model)
 	}
 }

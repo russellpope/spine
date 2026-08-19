@@ -154,6 +154,12 @@ func Split(raw string) Document {
 		}
 	}
 	d.Model = between(raw, ModelOpenTag, ModelCloseTag)
+	// The facts region is located after the model region closes, so a
+	// marker-like string inside a hand-edited model region cannot be
+	// mistaken for harness evidence.
+	if _, afterModel, ok := strings.Cut(raw, ModelCloseTag); ok {
+		raw = afterModel
+	}
 	d.Facts = between(raw, FactsOpenTag, FactsCloseTag)
 	return d
 }
