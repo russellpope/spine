@@ -155,8 +155,9 @@ var reportChecks = map[string]ReportCheck{
 // and spec story 23 promise ("a pack release never silently changes my
 // gate"), and the other half of an older binary refusing a newer pack name
 // (internal/update/gatepack.go). A new check class therefore reaches a repo
-// only under a pack version the repo opts into. TestGo1FrozenClassList holds
-// the registries and this list to each other (I098).
+// only under a pack version the repo opts into. TestFrozenClassLists holds
+// each version's list here to a golden literal, and the registries to the
+// union of every version's list (I098).
 var packClasses = map[int][]string{
 	1: {
 		"binary-hygiene",
