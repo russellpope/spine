@@ -16,15 +16,18 @@ func TestValidSlugGrammar(t *testing.T) {
 		want bool
 	}{
 		{"acme/x", true},
+		{"a/b", true}, // single-character components
 		{"a-c.m_e/some.repo-1", true},
 		{long + "/" + long, true},
-		{long + "a/x", false}, // 101 bytes
-		{"acme", false},       // no repo component
+		{long + "a/x", false},      // 101-byte owner
+		{"x/" + long + "a", false}, // 101-byte repo
+		{"acme", false},            // no repo component
 		{"acme/", false},
 		{"/x", false},
 		{"-acme/x", false},  // leading punctuation
 		{"acme/x-", false},  // trailing punctuation
 		{"acme/x/y", false}, // three components
+		{"-/x", false},      // lone punctuation component
 		{"ac me/x", false},  // space
 		{"acmé/x", false},   // non-ASCII
 	}

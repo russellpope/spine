@@ -63,14 +63,26 @@ Fixed 2026-08-20 on `i094-maikanban-slug`. Item 3 (the `workflow-init` SKILL.md 
 deepthought) was ruled **out of scope** by the controller and is left to the owner — nothing
 outside this repository was touched.
 
-- `internal/scaffold/slug.go`: `StampSlug` (owner from `origin`, else `--owner`, else global
+- `internal/scaffold/slug.go`: `StampSlug` (slug from `origin`, else `--owner`, else global
   `maikanban.defaultOwner`; never overwrites; silent on non-git dirs and on failure),
-  `ValidSlug` (ADR 0007 grammar), `SlugNote`, `SlugRemedy`, `SlugKey`.
+  `ValidSlug`/`ValidOwner` (ADR 0007 grammar), `SlugNote`, `SlugRemedy`, `SlugKey`.
+- **Deviation from Fix item 1's wording, on review 2026-08-20 (round 1).** Item 1 says the slug
+  is `<owner>/<basename>` with only the owner taken from `origin`. Implemented instead: when
+  `origin` resolves, **both** halves come from the remote (trailing `.git` stripped); the
+  basename is used only on the `--owner` and `maikanban.defaultOwner` paths, where no remote is
+  available to say otherwise. Reason: a clone or worktree checked out under a different
+  directory name (`spine-wt-i094` for `russellpope/spine`) would otherwise be stamped
+  permanently with an identity maikanban cannot resolve. This is a deliberate correction, not
+  an implementation slip; `TestInitStampsSlugFromOrigin` uses a directory name that differs
+  from the remote's repo name so the basename behaviour cannot pass.
 - `cmd/spine/main.go`: `spine init --owner`; the stamp reports as
   `create: git config maikanban.repositorySlug <value>`, otherwise the `note:` line, exit 0.
-- `internal/doctor/doctor.go`: new **D12** (warn) — a repo carrying `docs/issues/` with a
+- `internal/doctor/slug.go`: new **D12** (warn) — a repo carrying `docs/issues/` with a
   missing or malformed slug, message naming `git config maikanban.repositorySlug owner/repo`.
 - `go vet ./...` clean; `make test` green (all 18 packages `ok`, 2026-08-20).
+- Round-1 review fixes: port-bearing ssh remotes (`ssh://git@github.com:22/acme/x.git`) no
+  longer parse the port as the owner; an invalid `--owner` is reported on stderr (exit still 0);
+  `slugCheck` moved to its own file, matching the D11 precedent.
 - Negative controls: unregistering `slugCheck` → `TestD12WarnsOnMissingSlug` and
   `TestD12WarnsOnMalformedSlug` FAIL; neutering `StampSlug` to a no-op →
   `TestInitStampsSlugFromOrigin`, `TestInitNoOwnerPrintsNote`,

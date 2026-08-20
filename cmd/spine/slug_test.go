@@ -48,11 +48,14 @@ func slugOf(t *testing.T, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestInitStampsSlugFromOrigin is the primary path: an origin remote names the
-// owner, the repo directory names the repo, and the stamp is reported as a
-// created item. Re-running init leaves the value alone.
+// TestInitStampsSlugFromOrigin is the primary path: an origin remote names
+// BOTH halves of the slug, and the stamp is reported as a created item.
+// Re-running init leaves the value alone. The working directory is
+// deliberately named something other than the remote's repo (the case of a
+// clone or worktree under a different name) so the test fails if the repo half
+// ever falls back to the directory basename.
 func TestInitStampsSlugFromOrigin(t *testing.T) {
-	dir := slugRepo(t, "x", "git@github.com:acme/x.git")
+	dir := slugRepo(t, "x-checkout", "git@github.com:acme/x.git")
 	code, out, errs := runCmd(t, "init", "--dir", dir, "--profile", "library-cli", "--name", "x")
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
@@ -129,7 +132,7 @@ func TestInitDefaultOwnerConfigStamps(t *testing.T) {
 // TestInitLeavesPreExistingSlugUntouched: a repo whose owner already chose a
 // slug keeps it, even when origin would resolve to something else.
 func TestInitLeavesPreExistingSlugUntouched(t *testing.T) {
-	dir := slugRepo(t, "x", "git@github.com:acme/x.git")
+	dir := slugRepo(t, "x-checkout", "git@github.com:acme/x.git")
 	git(t, dir, "config", scaffold.SlugKey, "chosen/name")
 	code, out, errs := runCmd(t, "init", "--dir", dir, "--profile", "library-cli", "--name", "x")
 	if code != 0 {
@@ -140,5 +143,24 @@ func TestInitLeavesPreExistingSlugUntouched(t *testing.T) {
 	}
 	if got := slugOf(t, dir); got != "chosen/name" {
 		t.Fatalf("slug = %q, want chosen/name", got)
+	}
+}
+
+// TestInitRejectsInvalidOwnerFlag: an unusable --owner is reported on stderr
+// rather than silently falling through to the note line. Init still exits 0.
+func TestInitRejectsInvalidOwnerFlag(t *testing.T) {
+	dir := slugRepo(t, "widget", "")
+	code, out, errs := runCmd(t, "init", "--dir", dir, "--profile", "library-cli", "--name", "widget", "--owner", "bad owner")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	if !strings.Contains(errs, `ignoring --owner "bad owner"`) {
+		t.Errorf("invalid --owner not reported: stderr=%q", errs)
+	}
+	if !strings.Contains(out, scaffold.SlugNote) {
+		t.Errorf("note line missing: out=%q", out)
+	}
+	if got := slugOf(t, dir); got != "" {
+		t.Fatalf("slug written from an invalid owner: %q", got)
 	}
 }
