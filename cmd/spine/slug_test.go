@@ -154,7 +154,7 @@ func TestInitRejectsInvalidOwnerFlag(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
-	if !strings.Contains(errs, `ignoring --owner "bad owner"`) {
+	if !strings.Contains(errs, `--owner "bad owner" is not a valid slug component`) {
 		t.Errorf("invalid --owner not reported: stderr=%q", errs)
 	}
 	if !strings.Contains(out, scaffold.SlugNote) {
@@ -162,5 +162,53 @@ func TestInitRejectsInvalidOwnerFlag(t *testing.T) {
 	}
 	if got := slugOf(t, dir); got != "" {
 		t.Fatalf("slug written from an invalid owner: %q", got)
+	}
+}
+
+// TestInitOriginBeatsOwnerFlag pins the resolution order the ticket
+// specifies and the controller ruled stays: a GitHub origin outranks an
+// explicit --owner. A "helpful" reorder must fail here.
+func TestInitOriginBeatsOwnerFlag(t *testing.T) {
+	dir := slugRepo(t, "x-checkout", "git@github.com:acme/x.git")
+	code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "library-cli", "--name", "x", "--owner", "other")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	if got := slugOf(t, dir); got != "acme/x" {
+		t.Fatalf("slug = %q, want acme/x (origin outranks --owner)", got)
+	}
+}
+
+// TestInitUnparseableOriginRefusesToStamp is the Important-1 control: an
+// origin on another host is evidence that the directory basename is NOT the
+// repository name, so the silent maikanban.defaultOwner path must not stamp.
+// Before this rule the fixture below was stamped `fleetco/x-checkout` — both
+// halves wrong, permanently, with nothing printed.
+func TestInitUnparseableOriginRefusesToStamp(t *testing.T) {
+	dir := slugRepo(t, "x-checkout", "git@gitlab.com:realowner/x.git")
+	git(t, dir, "config", "--global", "maikanban.defaultOwner", "fleetco")
+	code, out, errs := runCmd(t, "init", "--dir", dir, "--profile", "library-cli", "--name", "x")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	if !strings.Contains(out, scaffold.SlugNote) {
+		t.Errorf("note line missing: out=%q", out)
+	}
+	if got := slugOf(t, dir); got != "" {
+		t.Fatalf("stamped %q from an origin spine cannot parse", got)
+	}
+}
+
+// TestInitUnparseableOriginHonoursOwnerFlag: the refusal above is about the
+// silent path. An operator who types --owner has said what they mean, and
+// that behaviour is deliberately unchanged.
+func TestInitUnparseableOriginHonoursOwnerFlag(t *testing.T) {
+	dir := slugRepo(t, "widget", "git@gitlab.com:realowner/x.git")
+	code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "library-cli", "--name", "widget", "--owner", "acme")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errs)
+	}
+	if got := slugOf(t, dir); got != "acme/widget" {
+		t.Fatalf("slug = %q, want acme/widget", got)
 	}
 }

@@ -117,7 +117,9 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 	}
 	// I094: fleet identity for maikanban, stamped once and never overwritten.
 	if *owner != "" && !scaffold.ValidOwner(*owner) {
-		fmt.Fprintf(stderr, "init: ignoring --owner %q: not a valid slug component\n", *owner)
+		// Phrased as a property of the value, not as a cause: origin may well
+		// have named the slug, in which case the flag was never consulted.
+		fmt.Fprintf(stderr, "init: --owner %q is not a valid slug component and cannot be used\n", *owner)
 	}
 	slug, noted := scaffold.StampSlug(*dir, *owner)
 	if slug != "" {

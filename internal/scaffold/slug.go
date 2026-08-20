@@ -51,11 +51,18 @@ func validSlugComponent(c string) bool {
 // StampSlug sets maikanban.repositorySlug on dir when the repo carries
 // docs/issues/ (what maikanban's fleet discovery scans for) and the key is
 // unset. The value comes from the `origin` remote (both halves), else from
-// the flag value ownerFlag, else from the global maikanban.defaultOwner —
-// the latter two paired with the directory basename. It returns
-// the value it wrote, or noted=true when no owner resolved and the caller
-// should print SlugNote. An existing value is never overwritten, and every
-// failure is silent — init does not fail over fleet identity.
+// the flag value ownerFlag, else from the global maikanban.defaultOwner — the
+// latter two paired with the directory basename, and see resolveSlug for when
+// each applies. It returns the value it wrote, or noted=true when nothing
+// resolved and the caller should print SlugNote. An existing value is never
+// overwritten, and every failure is silent — init does not fail over fleet
+// identity.
+//
+// Known property: `dir` is used as-is, so scaffolding into a subdirectory of a
+// repo (`spine init --dir sub`) writes the *enclosing* repo's config, and
+// maikanban would then identify `sub/` by the parent's slug. That is
+// deliberate — scaffolding docs into a subdirectory of a repo you own is a
+// legitimate use, and gating on `rev-parse --show-toplevel` would break it.
 func StampSlug(dir, ownerFlag string) (slug string, noted bool) {
 	if fi, err := os.Stat(filepath.Join(dir, "docs", "issues")); err != nil || !fi.IsDir() {
 		return "", false
@@ -76,17 +83,31 @@ func StampSlug(dir, ownerFlag string) (slug string, noted bool) {
 	return slug, false
 }
 
-// resolveSlug returns the whole `owner/repo` to stamp. A GitHub `origin`
-// names both halves, and it is the authority on the repo name: a clone into a
-// differently named directory (a worktree, a second checkout) must still carry
-// the remote's identity, since that is what maikanban resolves against. Only
-// the --owner and maikanban.defaultOwner paths, where no remote is available
-// to say otherwise, fall back to the directory basename.
+// resolveSlug returns the whole `owner/repo` to stamp, or "" when spine must
+// refuse and leave the note instead. A GitHub `origin` names both halves and
+// is the authority on the repo name: a clone into a differently named
+// directory (a worktree, a second checkout) must still carry the remote's
+// identity, since that is what maikanban resolves against.
+//
+// The presence of *any* origin is evidence that the directory basename is not
+// authoritative, so an origin spine cannot parse (a non-GitHub host, an
+// unusual form) refuses rather than falling through to the silent
+// maikanban.defaultOwner path: refusing is visible and fixable, a wrong stamp
+// is silent and permanent. An explicit --owner is deliberately still honoured
+// there — the operator typing the flag has said what they mean.
+//
+// The basename fallback therefore applies only when there is no origin at all
+// (both the --owner and the maikanban.defaultOwner paths), plus the explicit
+// --owner case above.
 func resolveSlug(dir, ownerFlag string) string {
-	if url, ok := gitConfig(dir, "--get", "remote.origin.url"); ok {
+	if url, ok := gitConfig(dir, "--get", "remote.origin.url"); ok && url != "" {
 		if slug := slugFromRemote(url); slug != "" {
 			return slug
 		}
+		if !ValidOwner(ownerFlag) {
+			return ""
+		}
+		return basenameSlug(dir, ownerFlag)
 	}
 	owner := ownerFlag
 	if !ValidOwner(owner) {
@@ -96,6 +117,10 @@ func resolveSlug(dir, ownerFlag string) string {
 		}
 		owner = v
 	}
+	return basenameSlug(dir, owner)
+}
+
+func basenameSlug(dir, owner string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return ""
@@ -105,7 +130,14 @@ func resolveSlug(dir, ownerFlag string) string {
 
 // slugFromRemote pulls `<owner>/<repo>` out of a github.com[:/]<owner>/<repo>
 // remote URL — ssh, https and scp-style forms alike, with any trailing `.git`
-// and `/` stripped. Non-GitHub remotes yield "".
+// and `/` stripped. The host is matched as a substring anywhere in the URL,
+// which is what lets one pass cover the scp, ssh:// and https forms.
+//
+// GitHub only, by design: maikanban slugs are GitHub `owner/repo` identities,
+// and every other host yields "" so that resolveSlug refuses and init leaves
+// the note. Do not add a branch for another host here — that reintroduces
+// exactly the silent wrong-stamp path this branch removed twice (a host whose
+// path layout differs would produce a grammar-valid, permanent, wrong slug).
 func slugFromRemote(url string) string {
 	// `/` first: `ssh://git@github.com:22/acme/x.git` matches both separators,
 	// and only the `/` reading puts the owner (not the port) first.

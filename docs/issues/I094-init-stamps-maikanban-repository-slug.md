@@ -26,10 +26,14 @@ first place.
 ## Fix
 
 1. `spine init` (`cmd/spine/main.go:cmdInit` → `internal/scaffold.Init`): after creating
-   `docs/issues/`, if the dir is a Git repo and `maikanban.repositorySlug` is unset, set it to
-   `<owner>/<basename>` where owner is parsed from `origin` (`github.com[:/]<owner>/…`), else
-   from a new `--owner` flag, else from the global `maikanban.defaultOwner` git config if set;
-   if no owner can be determined, print `note: set git config maikanban.repositorySlug
+   `docs/issues/`, if the dir is a Git repo and `maikanban.repositorySlug` is unset, set it
+   from `origin` when that is a GitHub remote (`github.com[:/]<owner>/<repo>`, which names
+   **both** halves — amended on review, see Evidence), else to `<owner>/<basename>` where owner
+   comes from a new `--owner` flag, else from the global `maikanban.defaultOwner` git config if
+   set. An `origin` spine cannot parse (another host, an unusual form) is evidence that the
+   basename is not the repository name: the silent `maikanban.defaultOwner` fallback is then
+   refused and the note is printed instead; an explicit `--owner` is still honoured there.
+   If nothing resolves, print `note: set git config maikanban.repositorySlug
    owner/repo (maikanban fleet identity)` and exit 0 (never fail init over it). Report
    `create: git config maikanban.repositorySlug <value>` in the created list; never overwrite
    an existing value. Honour the slug grammar from maikanban ADR 0007 (1–100 ASCII bytes per
@@ -47,7 +51,9 @@ first place.
 - [x] `spine init` in a temp git repo with `origin=git@github.com:acme/x.git` sets
       `maikanban.repositorySlug=acme/x` and lists it under `create:`; re-running does not change it
 - [x] No origin / no `--owner` / no `maikanban.defaultOwner` → init exits 0 and prints the
-      `note:` line; `--owner acme` sets `acme/<basename>`
+      `note:` line; with no origin, `--owner acme` sets `acme/<basename>`
+- [x] An `origin` on another host with `maikanban.defaultOwner` set → note printed, nothing
+      stamped (the basename is not authoritative once a remote exists)
 - [x] `spine doctor` warns on a `docs/issues/` repo with missing or malformed slug, with the command
 - [~] `workflow-init` SKILL.md note committed (deepthought) — **out of scope**, ruled by the
       controller 2026-08-20: it is a side effect in another repository and stays with the owner.
@@ -75,6 +81,17 @@ outside this repository was touched.
   permanently with an identity maikanban cannot resolve. This is a deliberate correction, not
   an implementation slip; `TestInitStampsSlugFromOrigin` uses a directory name that differs
   from the remote's repo name so the basename behaviour cannot pass.
+- **Second deviation, final whole-branch review 2026-08-20.** The ticket listed
+  `maikanban.defaultOwner` as an unconditional last fallback without saying what happens when an
+  origin exists on another host. Probed behaviour before the fix: origin
+  `git@gitlab.com:realowner/x.git` in a directory named `x-checkout` with
+  `maikanban.defaultOwner=fleetco` stamped `fleetco/x-checkout` — both halves wrong, silent,
+  permanent. Ruled and implemented: any unparseable `origin` refuses the silent path and prints
+  the note; an explicit `--owner` still stamps. Fix item 1 above is amended to match. Same
+  principle as the first deviation — refusing is visible and fixable, a wrong stamp is not.
+- Known, deliberate property (ruled document-don't-gate): `spine init --dir sub` inside a repo
+  writes the *enclosing* repo's config, so maikanban would identify `sub/` by the parent's slug.
+  Recorded in `StampSlug`'s doc comment.
 - `cmd/spine/main.go`: `spine init --owner`; the stamp reports as
   `create: git config maikanban.repositorySlug <value>`, otherwise the `note:` line, exit 0.
 - `internal/doctor/slug.go`: new **D12** (warn) — a repo carrying `docs/issues/` with a
@@ -83,6 +100,13 @@ outside this repository was touched.
 - Round-1 review fixes: port-bearing ssh remotes (`ssh://git@github.com:22/acme/x.git`) no
   longer parse the port as the owner; an invalid `--owner` is reported on stderr (exit still 0);
   `slugCheck` moved to its own file, matching the D11 precedent.
+- Final-review negative controls: restoring the fall-through (unparseable origin →
+  `defaultOwner` + basename) → `TestInitUnparseableOriginRefusesToStamp` FAILs with
+  `stamped "fleetco/x-checkout"`; consulting `--owner` before `origin` →
+  `TestInitOriginBeatsOwnerFlag` FAILs with `slug = "other/x-checkout"`.
+- Deferred to the release note: D12 adds a warn, which changes `spine doctor`'s exit code on
+  unstamped fleet repos. No stage pack or template executes `spine doctor`, so no CI lane goes
+  red.
 - Negative controls: unregistering `slugCheck` → `TestD12WarnsOnMissingSlug` and
   `TestD12WarnsOnMalformedSlug` FAIL; neutering `StampSlug` to a no-op →
   `TestInitStampsSlugFromOrigin`, `TestInitNoOwnerPrintsNote`,
