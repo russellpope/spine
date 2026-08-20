@@ -172,15 +172,22 @@ func Run(opts Options) ([]FileReport, error) {
 	if opts.Write {
 		// The gate-pack region is spliced as a string, so the only thing
 		// between a bad splice and a maipipe.toml no lane in the repo can
-		// load is this check (I096). It runs before any file is written:
-		// a refusal leaves the whole tree untouched.
+		// load is this check (I096). It runs before any file is written,
+		// and a refusal aborts the whole run: update presents one plan and
+		// applies it as a whole, and a partial application would leave a
+		// rendered region stale against a WORKFLOW.md that already moved —
+		// a state the reader has to reason about instead of retrying. The
+		// refusal says so, because an error naming only maipipe.toml would
+		// read as if maipipe.toml were the only file skipped.
 		for i := range reports {
 			r := &reports[i]
 			if r.Path != MaipipeFile || r.State != Pending {
 				continue
 			}
 			if err := checkMaipipeContent(filepath.Join(opts.Dir, r.Path), r.newContent); err != nil {
-				return reports, err
+				return reports, fmt.Errorf(
+					"%w\nno files were written: spine update applies its plan as a whole, so every other pending file (WORKFLOW.md included) is unchanged too — fix %s and re-run",
+					err, MaipipeFile)
 			}
 		}
 		for i := range reports {

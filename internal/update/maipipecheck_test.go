@@ -13,10 +13,20 @@ import (
 // maipipeOnPATH reports whether the grammar check can run at all. Tests that
 // are meaningless without the binary carry the condition in their name; the
 // rest say in their log which half of the check they exercised.
+//
+// A test that returns early asserts nothing while still reporting PASS, which
+// is the failure class this repo's own gate pack exists to catch. Setting
+// SPINE_REQUIRE_MAIPIPE=1 turns the missing binary into a failure, so CI can
+// state that the maipipe-dependent controls really ran.
 func maipipeOnPATH(t *testing.T) bool {
 	t.Helper()
-	_, err := exec.LookPath("maipipe")
-	return err == nil
+	if _, err := exec.LookPath("maipipe"); err == nil {
+		return true
+	}
+	if os.Getenv("SPINE_REQUIRE_MAIPIPE") == "1" {
+		t.Fatal("SPINE_REQUIRE_MAIPIPE=1 but no maipipe on PATH: the maipipe-dependent controls would assert nothing")
+	}
+	return false
 }
 
 // movedStageFixture is the ticket's first negative control: a
@@ -221,6 +231,22 @@ func pendingMaipipe(t *testing.T, dir string) string {
 func TestParseTOML(t *testing.T) {
 	valid := []string{
 		"schema = 0\n\n[pipelines.fast]\n\n[[pipelines.fast.stage]]\nname = \"vet\"\nneeds = [\"a\", \"b\"]\n",
+		// Quoted keys and quoted table-header segments: legal TOML that an
+		// earlier cut of the scanner dropped along with the string, leaving
+		// `[]` and ` = 1` behind. See TestScanKeepsQuotedSegments.
+		"[pipelines.\"e2e.smoke\"]\nprofile = \"full\"\n",
+		"[[pipelines.\"e2e smoke\".stage]]\nname = \"x\"\n",
+		"\"my key\" = 1\n\"other key\" = 2\n",
+		"a.\"b.c\" = 1\na . b = 2\n",
+		"[pipelines.\"a\"]\n[pipelines.\"b\"]\n",
+		// A standard table under an array-of-tables entry belongs to that
+		// entry, so the pair repeats legally.
+		"[[a]]\n[a.b]\nk = 1\n\n[[a]]\n[a.b]\nk = 2\n",
+		"x = \"\"\"one line\"\"\"\ny = 1\n",
+		"lit = 'C:\\path\\'\nz = 2\n",
+		"esc = \"a \\\" b\"\nq = 3\n",
+		"[a] # trailing comment\nk = 1\n",
+		"schema = 0\r\n\r\n[pipelines.fast]\r\n",
 		"# only comments\n\n",
 		"a = \"] # [not a comment\"\nb = 1\n",
 		"env = { A = \"x\", B = \"y\" }\n",
@@ -235,6 +261,8 @@ func TestParseTOML(t *testing.T) {
 	}
 	invalid := []string{
 		"[pipelines.gate-go]\n[pipelines.gate-go]\n",
+		"[pipelines.\"a\"]\n[pipelines.\"a\"]\n",
+		"\"my key\" = 1\n\"my key\" = 2\n",
 		"[[a]]\n[a]\n",
 		"[a]\nk = 1\nk = 2\n",
 		"[pipelines.fast\nname = \"x\"\n",
@@ -247,5 +275,88 @@ func TestParseTOML(t *testing.T) {
 		if err := parseTOML(in); err == nil {
 			t.Errorf("invalid TOML accepted:\n%s", in)
 		}
+	}
+}
+
+// Fix round 1, Important 1 — the negative control for the quoted-key fix.
+// The bug was structural: the scanner dropped a string's text instead of
+// standing in for it, so `[pipelines."e2e.smoke"]` reached the header parser
+// as `[]` and `"my key" = 1` as ` = 1`. This pins the property whose absence
+// caused it — a consumed string leaves a placeholder behind and restores to
+// exactly what the file said — so a scanner that drops strings again fails
+// here, not only in the parse table.
+func TestScanKeepsQuotedSegments(t *testing.T) {
+	for _, tc := range []struct {
+		line, want string
+	}{
+		{`[pipelines."e2e.smoke"]`, `[pipelines."e2e.smoke"]`},
+		{`"my key" = 1`, `"my key" = 1`},
+		{`run = "spine gate go tskip" # note`, `run = "spine gate go tskip" `},
+	} {
+		var st tomlScan
+		code, strs, err := st.scan(tc.line)
+		if err != nil {
+			t.Fatalf("scan(%q): %v", tc.line, err)
+		}
+		if len(strs) == 0 {
+			t.Errorf("scan(%q) consumed no string: dropped, not replaced", tc.line)
+		}
+		if !strings.Contains(code, strPlaceholder) {
+			t.Errorf("scan(%q) = %q, want a placeholder standing in for the string", tc.line, code)
+		}
+		if got := restoreStrings(code, strs); got != tc.want {
+			t.Errorf("restoreStrings(scan(%q)) = %q, want %q", tc.line, got, tc.want)
+		}
+	}
+}
+
+// Fix round 1, Important 1 — cross-check against the grammar authority: a
+// quoted pipeline name is a file maipipe really does load, so accepting it
+// is not spine's opinion of TOML but maipipe's.
+func TestQuotedPipelineNameLoads_requiresMaipipeOnPATH(t *testing.T) {
+	if !maipipeOnPATH(t) {
+		t.Log("no maipipe on PATH: the quoted-name case is checked by the parse table only")
+		return
+	}
+	content := "schema = 0\n\n[pipelines.\"e2e.smoke\"]\nprofile = \"fast\"\n\n[[pipelines.\"e2e.smoke\".stage]]\nname = \"x\"\nrun = \"true\"\n"
+	if err := checkMaipipeContent(filepath.Join(t.TempDir(), MaipipeFile), content); err != nil {
+		t.Fatalf("spine refuses a maipipe.toml maipipe loads: %v", err)
+	}
+}
+
+// Fix round 1, Important 2 (controller ruling) — the refusal is all-or-
+// nothing by design, and has to say so: a pending WORKFLOW.md is left
+// unwritten too, and the message tells the reader that rather than naming
+// maipipe.toml as if it were the only casualty.
+func TestRefusalLeavesEveryPendingFileUnwrittenAndSaysSo(t *testing.T) {
+	dir, mpPath := duplicateTableFixture(t)
+	wfPath := filepath.Join(dir, "WORKFLOW.md")
+	// Restamp WORKFLOW.md to an older generation so update has a real
+	// pending change for it alongside the doomed maipipe.toml.
+	before := setKey(readFile(t, wfPath), "template_version", "10")
+	if err := os.WriteFile(wfPath, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wf := report(t, plan, "WORKFLOW.md"); wf.State != Pending {
+		t.Fatalf("fixture assumption broken: WORKFLOW.md state = %v, want Pending", wf.State)
+	}
+	mpBefore := readFile(t, mpPath)
+	_, err = Run(Options{Dir: dir, Write: true})
+	if err == nil {
+		t.Fatal("no refusal")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no files were written") || !strings.Contains(msg, "WORKFLOW.md") {
+		t.Errorf("refusal does not say the whole run was abandoned:\n%s", msg)
+	}
+	if got := readFile(t, wfPath); got != before {
+		t.Error("WORKFLOW.md was written despite the refusal")
+	}
+	if got := readFile(t, mpPath); got != mpBefore {
+		t.Error("maipipe.toml was written despite the refusal")
 	}
 }

@@ -81,12 +81,37 @@ stage now sits outside the markers. With no binary on PATH the refusal says
 `maipipe validate skipped: no maipipe binary on PATH`. Refusal, not repair:
 nothing outside the region is moved or rewritten.
 
-One behaviour change beyond the fixtures: a repo whose existing maipipe.toml
-lacks the top-level `schema` key can no longer be written by `spine update
---write` — `maipipe validate` rejects it, and it was already unloadable
-before spine touched it. Two existing user-lane fixtures in
-`gatepack_test.go` were carrying that defect and now carry `schema = 0` the
-way a real repo does.
+**Escalation beyond the ticket's wording (fix round 1, controller ruling).**
+The ticket says refuse "before `WriteFileAtomic` in the maipipe.toml path";
+the refusal is in fact all-or-nothing — no file is written, WORKFLOW.md
+included. `spine update` presents one plan and applies it as a whole, and a
+partial application would leave a rendered region stale against a WORKFLOW.md
+that already moved. The refusal message says so explicitly ("no files were
+written…"), because an error naming only maipipe.toml would read as if
+maipipe.toml were the only file skipped. `--force` does not bypass it.
+
+**AC5 wording (fix round 1, ruled).** The brief says "the report says
+validation was skipped" while AC5 says the *refusal* fires and the report
+states it. AC5 is normative and is what is implemented: the note rides in
+the refusal string. A standing "validate skipped" line on the successful
+path is a follow-up nicety, not a gap here — noted so the next reader does
+not re-derive the question.
+
+**Behaviour change for existing repos.** "The normal path is unchanged" is
+not literally true for every repo: `maipipe validate` rejects a maipipe.toml
+with no top-level `schema` key, so a repo carrying that pre-existing defect
+can no longer run `spine update --write` until it adds the key. The file was
+already unloadable by maipipe before spine touched it, and the refusal names
+the exact problem. Two existing user-lane fixtures in `gatepack_test.go`
+were carrying that defect and now carry `schema = 0` the way a real repo
+does.
+
+**Parser (fix round 1, Important 1).** `parseTOML`'s scanner replaces each
+consumed string with a placeholder instead of dropping it: dropping made
+`[pipelines."e2e.smoke"]` and `"my key" = 1` — both legal TOML — look
+malformed, which would have hard-blocked writes in any repo using a quoted
+key. A standard table under an array-of-tables entry is qualified by that
+entry, so `[[a]] [a.b] [[a]] [a.b]` is not read as a duplicate.
 
 ## Evidence
 
@@ -109,7 +134,11 @@ way a real repo does.
   own repo-root maipipe.toml passes parse + `maipipe validate`; the normal
   `Run(Write: true)` path still renders and writes the region.
 - No `t.Skip` anywhere: the maipipe-dependent tests carry the condition in
-  their name and log which half of the check ran.
+  their name and log which half of the check ran; `SPINE_REQUIRE_MAIPIPE=1`
+  turns a missing binary into a failure so CI can assert they really ran.
+- Quoted-key negative control (fix round 1): reverting the scanner to drop
+  strings fails `TestParseTOML` (`empty key`, `duplicate table
+  [pipelines.]`) and `TestScanKeepsQuotedSegments`.
 
 ## Notes
 
