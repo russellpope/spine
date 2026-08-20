@@ -120,7 +120,10 @@ func TestGatePackDisabledMutateOmitsPipeline(t *testing.T) {
 // lanes untouched, and nothing reported as a local edit.
 func TestGatePackPreMutationRegionRefreshes(t *testing.T) {
 	dir := gateRepo(t, "[]", nil)
-	lanes := "[pipelines.full]\n\n[[pipelines.full.stage]]\nname = \"build\"\nrun = \"make build\"\n"
+	// maipipe requires the top-level schema key (I091), and update now
+	// refuses to write a maipipe.toml maipipe could not load (I096), so the
+	// user-lane fixture carries it the way a real repo does.
+	lanes := "schema = 0\n\n[pipelines.full]\n\n[[pipelines.full.stage]]\nname = \"build\"\nrun = \"make build\"\n"
 	path := filepath.Join(dir, MaipipeFile)
 	if err := os.WriteFile(path, []byte(lanes+"\n"+preMutationRegion), 0o644); err != nil {
 		t.Fatal(err)
@@ -253,7 +256,10 @@ func TestGatePackEditedEnvValueRefreshesWithoutForce(t *testing.T) {
 // byte-for-byte; the region is appended, then refreshed in place.
 func TestGatePackPreservesUserLanes(t *testing.T) {
 	dir := gateRepo(t, "[]", nil)
-	lanes := "[pipelines.full]\n\n[[pipelines.full.stage]]\nname = \"build\"\nrun = \"make build\"\n"
+	// maipipe requires the top-level schema key (I091), and update now
+	// refuses to write a maipipe.toml maipipe could not load (I096), so the
+	// user-lane fixture carries it the way a real repo does.
+	lanes := "schema = 0\n\n[pipelines.full]\n\n[[pipelines.full.stage]]\nname = \"build\"\nrun = \"make build\"\n"
 	path := filepath.Join(dir, MaipipeFile)
 	if err := os.WriteFile(path, []byte(lanes), 0o644); err != nil {
 		t.Fatal(err)

@@ -170,6 +170,19 @@ func Run(opts Options) ([]FileReport, error) {
 		}
 	}
 	if opts.Write {
+		// The gate-pack region is spliced as a string, so the only thing
+		// between a bad splice and a maipipe.toml no lane in the repo can
+		// load is this check (I096). It runs before any file is written:
+		// a refusal leaves the whole tree untouched.
+		for i := range reports {
+			r := &reports[i]
+			if r.Path != MaipipeFile || r.State != Pending {
+				continue
+			}
+			if err := checkMaipipeContent(filepath.Join(opts.Dir, r.Path), r.newContent); err != nil {
+				return reports, err
+			}
+		}
 		for i := range reports {
 			r := &reports[i]
 			if r.State != Pending {
