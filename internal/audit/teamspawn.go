@@ -248,15 +248,31 @@ func segmentFields(seg string) []string {
 func commandSegments(command string) []string {
 	var segs []string
 	for _, line := range strings.Split(stripHeredocBodies(command), "\n") {
+		// A segment that only exists because a shell metacharacter appeared
+		// AFTER a '#' is prose inside a trailing comment, not a command:
+		// `cat notes # (herdr agent start … --model …)` would otherwise
+		// yield a segment beginning with `herdr`. The comment itself is not
+		// stripped — a spawn command's trailing `# I402` is real ticket
+		// attribution, and it lives in the line's FIRST segment, which
+		// starts at 0 and is always kept. A '#' inside a quoted payload
+		// likewise suppresses only later segments on that line: a false
+		// negative (the ticket degrades to no-transcript), never a false
+		// dispatch.
+		comment := strings.IndexByte(line, '#')
 		start := 0
+		keep := func(seg string, at int) {
+			if comment < 0 || at <= comment {
+				segs = append(segs, seg)
+			}
+		}
 		for i := 0; i < len(line); i++ {
 			switch line[i] {
 			case ';', '|', '&', '(', ')', '{', '}':
-				segs = append(segs, line[start:i])
+				keep(line[start:i], start)
 				start = i + 1
 			}
 		}
-		segs = append(segs, line[start:])
+		keep(line[start:], start)
 	}
 	return segs
 }

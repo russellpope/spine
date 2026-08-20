@@ -85,6 +85,117 @@ func TestTeamSpawnLookalikesAreNotDispatches(t *testing.T) {
 	}
 }
 
+// The misattribution guards (ticket I090), end to end. A claude-team lead
+// runs several workers at once, so a spawn borrowing the WRONG worker's
+// prompt is this parser's one dangerous failure mode. The teampair fixture
+// starts two workers back-to-back and briefs them in the same order, which
+// is the arrangement that discriminates: pairing by worker handle gives each
+// ticket its own spawn's model, while ignoring the handle (or attributing to
+// the most recent spawn regardless) hands I601 the second worker's model.
+func TestTeamSpawnPairsByWorkerHandle(t *testing.T) {
+	rows := rowsByID(t, runFixture(t, "teampair"))
+	for _, tc := range []struct {
+		id      string
+		actual  string
+		verdict Verdict
+		why     string
+	}{
+		{"I601", "claude-sonnet-5", VerdictMatch, "impl-a's own spawn, not impl-b's"},
+		{"I602", "claude-fable-5", VerdictMatch, "impl-b's own spawn"},
+		// A worker restarted before it was ever briefed: the live process is
+		// the second spawn, so the most recent unattributed spawn for that
+		// handle wins — scanning forward would credit the dead one.
+		{"I604", "claude-fable-5", VerdictMatch, "impl-c's restart, not its first start"},
+	} {
+		r := rows[tc.id]
+		if r.Verdict != tc.verdict {
+			t.Errorf("%s verdict = %s (%s), want %s — %s", tc.id, r.Verdict, r.Detail, tc.verdict, tc.why)
+		}
+		if got := strings.Join(r.Actuals, ","); got != tc.actual {
+			t.Errorf("%s actuals = %q, want %q — %s", tc.id, got, tc.actual, tc.why)
+		}
+	}
+	// A second prompt to an already-briefed worker is follow-up
+	// conversation, not a new assignment: the ticket it names stays
+	// visibly unjudged rather than inheriting a spawn it never had.
+	if r := rows["I603"]; r.Verdict != VerdictNoTranscript {
+		t.Errorf("I603 verdict = %s (%s), want no-transcript", r.Verdict, r.Detail)
+	}
+}
+
+// Unit coverage for the same guards, plus the spawn-token-wins rule: when a
+// spawn command names its own ticket, a following prompt naming a different
+// one must not overwrite it — otherwise a worker's second assignment would
+// drag its first ticket's evidence along.
+func TestAttributeTeamPrompt(t *testing.T) {
+	spawn := func(target, desc string) dispatch {
+		return dispatch{description: desc, teamTarget: target}
+	}
+	for _, tc := range []struct {
+		name    string
+		spawns  []dispatch
+		prompt  teamPrompt
+		wantIdx int // index of the spawn expected to take the prompt; -1 for none
+	}{
+		{
+			name:    "pairs by worker handle, not recency",
+			spawns:  []dispatch{spawn("impl-a", "start a"), spawn("impl-b", "start b")},
+			prompt:  teamPrompt{target: "impl-a", text: "work I601"},
+			wantIdx: 0,
+		},
+		{
+			name:    "most recent spawn for the handle wins",
+			spawns:  []dispatch{spawn("impl-c", "start c"), spawn("impl-c", "restart c")},
+			prompt:  teamPrompt{target: "impl-c", text: "work I604"},
+			wantIdx: 1,
+		},
+		{
+			name:    "no spawn for the handle: nothing borrows",
+			spawns:  []dispatch{spawn("impl-a", "start a")},
+			prompt:  teamPrompt{target: "impl-z", text: "work I605"},
+			wantIdx: -1,
+		},
+		{
+			name:    "prompt with no handle attributes nothing",
+			spawns:  []dispatch{spawn("impl-a", "start a")},
+			prompt:  teamPrompt{text: "work I605"},
+			wantIdx: -1,
+		},
+		{
+			name:    "spawn naming its own ticket keeps it",
+			spawns:  []dispatch{spawn("impl-b", "start b # I402")},
+			prompt:  teamPrompt{target: "impl-b", text: "now do I407"},
+			wantIdx: -1,
+		},
+		{
+			name: "already-attributed spawn ignores a second prompt",
+			spawns: []dispatch{
+				{description: "start a", teamTarget: "impl-a", prompt: "work I601"},
+			},
+			prompt:  teamPrompt{target: "impl-a", text: "also I603"},
+			wantIdx: -1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ds := append([]dispatch(nil), tc.spawns...)
+			before := make([]string, len(ds))
+			for i, d := range ds {
+				before[i] = d.prompt
+			}
+			attributeTeamPrompt(ds, tc.prompt)
+			for i, d := range ds {
+				want := before[i]
+				if i == tc.wantIdx {
+					want = tc.prompt.text
+				}
+				if d.prompt != want {
+					t.Errorf("spawn %d (%s) prompt = %q, want %q", i, d.teamTarget, d.prompt, want)
+				}
+			}
+		})
+	}
+}
+
 // Command-shape unit coverage for the recognizer itself, including the
 // effort extraction the report surfaces on unmatched dispatches.
 func TestParseTeamSpawn(t *testing.T) {
@@ -124,6 +235,15 @@ func TestParseTeamSpawn(t *testing.T) {
 		{name: "start without a model", command: "herdr agent start impl-1 --kind claude --pane %3"},
 		{name: "cmux send running something else", command: "cmux send --pane %2 'make test'"},
 		{name: "spawn named mid-sentence", command: "echo 'we use herdr agent start x -- claude --model claude-opus-5'"},
+		{
+			name:    "spawn parenthesized inside a trailing comment",
+			command: "cat notes # (herdr agent start x --kind claude -- claude --model claude-opus-5)",
+		},
+		{
+			name:    "trailing comment still carries the ticket for a real spawn",
+			command: "herdr agent start impl-2 --kind claude -- claude --model claude-opus-5 # I402",
+			want:    teamSpawn{model: "claude-opus-5", target: "impl-2"},
+		},
 		{
 			name:    "spawn quoted in a heredoc body",
 			command: "cat > doc.md <<'EOF'\nherdr agent start x --kind claude -- claude --model claude-opus-5\nEOF",
