@@ -2,7 +2,7 @@
 id: I099
 title: "Gate-pack contract drift: D10 reports outside its specified scope, and `mutation-go` is rendered but composed nowhere"
 severity: low
-status: open
+status: fixed
 affects: [I085, I086, I089]
 blocked-by: []
 execution-mode: subagent-driven
@@ -61,8 +61,8 @@ records the gap.
 - [x] D10's emitted findings match a written scope, whichever way it is settled
 - [x] The staleness message distinguishes the two causes, or I095 records why it
       cannot yet
-- [ ] ADR 0016 Consequences names the I204 dependency
-- [ ] spine's own `maipipe.toml` either composes `mutation-go` in an audit lane
+- [x] ADR 0016 Consequences names the I204 dependency
+- [x] spine's own `maipipe.toml` either composes `mutation-go` in an audit lane
       or the omission is recorded with its reason
 
 ## Evidence
@@ -105,6 +105,30 @@ now names four; the "three" in the Fix text is a miscount, not a scope change.
 Tests: one fixture repo per emitted D10 case in `internal/doctor/doctor_test.go`,
 plus `TestUnknownGatePackIsD4OnWorkflowNotD10` as the negative control. Full
 `make test` and `go vet ./...` green at `243fda7`.
+
+**Fix item 2 — settled 2026-08-20.**
+
+ADR 0016's Consequences gained a bullet recording that the composing edit the
+Decision asks the repo for is scaffolded on neither side: the full lane is
+composed by hand, the audit lane is not, and the scaffolding that would write
+it is maipipe's ticket I204 (open, blocked by I202+I203). Until I204 lands,
+`mutation-go` is reachable only as `maipipe run mutation-go`. The bullet is an
+inline dated amendment in the same shape as the I091 one already in that
+section, and records a gap rather than changing the Decision — the ADR
+convention's immutability rule (`docs/adr/README.md`) reserves new superseding
+ADRs for reversing or amending a *decision*, which this is not.
+
+**The omission in spine's own `maipipe.toml` is recorded, not filled.** A
+comment in the owner-managed part of the file (below the `full` lane, outside
+the spine-managed region) names the absence, its reason, and the workaround.
+Writing the lane by hand was considered and declined: I204 is open and will
+scaffold audit lanes, so a hand-written one here is work I204 would then have
+to reconcile — and the gap this ticket exists to document would be papered
+over in the one repo where it is observable.
+
+Tests: `TestD10RegionMissing` gained the blast-radius assertion its siblings
+carry (no D4 from the removed file, no other finding). Full `make test` and
+`go vet ./...` green.
 
 ## Notes
 

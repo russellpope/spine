@@ -814,6 +814,16 @@ func TestD10RegionMissing(t *testing.T) {
 	if got[0].Path != update.MaipipeFile {
 		t.Errorf("D10 path = %q, want %q", got[0].Path, update.MaipipeFile)
 	}
+	// Pin the fixture's blast radius like its siblings'. Deleting the whole
+	// file is a bigger edit than they make, so the D4 set is worth stating
+	// rather than assuming: maipipe.toml is not a spine-scaffolded file, so
+	// its absence draws no D4 and nothing else besides the one D10.
+	if ids(fs)["D4"] != 0 {
+		t.Errorf("missing maipipe.toml also reported as D4: %#v", fs)
+	}
+	if len(fs) != 1 {
+		t.Errorf("missing region produced collateral findings: %#v", fs)
+	}
 }
 
 // AC (I099): a region that is well formed and made of recognized pack lines

@@ -67,3 +67,11 @@ pipeline = "fast"
 name = "gates"
 pipeline = "gate-go"
 needs = ["fast"]
+
+# No audit lane composing `mutation-go` — deliberate, recorded 2026-08-20
+# under I099. ADR 0016 asks the repo to compose the advisory battery with a
+# `pipeline = "mutation-go"` stage, but the scaffolding that writes an audit
+# lane is maipipe-side (its ticket I204, open, blocked by I202+I203). A lane
+# hand-written here would be work I204 then has to reconcile, so until it
+# lands the battery is run by name: `maipipe run mutation-go`. See ADR 0016's
+# Consequences.
