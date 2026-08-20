@@ -250,7 +250,7 @@ Gate pack (per ADR 0015/0016)
   `gate_pack_config`) and `[pipelines.mutation-go]` (profile audit, one
   stage). A pure projection of WORKFLOW.md, re-rendered by `spine update`;
   in-region edits are discarded on refresh and the plan diff is the review
-  surface (amended 2026-08-20, I095 — ADR 0002's preservation rule does not
+  surface (amended 2026-08-20, I095 / ADR 0017 — ADR 0002's preservation rule does not
   apply inside the region); created with `schema = 0` plus the region when
   the file is absent (amended 2026-08-19, I091). Stage arrays are maipipe's
   singular `[[pipelines.<name>.stage]]`.

@@ -237,7 +237,7 @@ func gateRegionBounds(content string) (int, int, error) {
 
 // unrecognizedRegionLines returns the lines inside an existing region that
 // no configuration of the pack could have rendered. The region is a pure
-// projection of WORKFLOW.md (ADR 0016 as amended by I095): no value inside
+// projection of WORKFLOW.md (ADR 0017, I095): no value inside
 // it is a user choice, so recognition is by shape rather than by exact
 // text — a changed gate_pack_config value or a newly disabled class
 // refreshes without --force and the plan diff shows what drops. Only a

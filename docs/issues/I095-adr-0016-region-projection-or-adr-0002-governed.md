@@ -64,7 +64,7 @@ changed" from "region edited", since today both render as staleness.
 
 ## Acceptance criteria
 
-- [x] Decision recorded as an ADR 0016 amendment with its reason
+- [x] Decision recorded as an ADR 0016 amendment with its reason (as ADR 0017 superseding 0016 — the convention forbids in-place reversal)
 - [x] `gatepack.go:238-243`'s comment cites an ADR that supports what the code
       does
 - [ ] If (B): the marker-line fingerprint is specified and `spine update`
@@ -82,16 +82,20 @@ choice; ADR 0002's choice-vs-default rule does not apply to it. No
 fingerprint, no last-render record, no sidecar. The (B) box above stays
 unticked by design.
 
-- `docs/adr/0016`: Decision sentence replaced with the projection wording
-  (edits discarded on refresh, plan diff is the review surface) plus a dated
-  amendment note carrying the reason — a hand-edit and a legitimate
-  `gate_pack_config` change produce byte-identical plan states, so
-  "preserve divergent values" is undecidable without a last-render record,
-  and every region knob already has a WORKFLOW.md key. New Consequence
-  names the `spine update` plan diff as the review surface. In-place dated
-  amendment follows the I091 precedent on this same ADR.
+- **ADR 0017** supersedes ADR 0016 (`spine adr new --supersedes 16`; 0016
+  flipped to `Superseded by 0017`, body untouched). 0017 carries the whole
+  decision as one record — 0016's region ownership, I091's render
+  correction, and reading (A) as the Decision: edits discarded on refresh,
+  the `spine update` plan diff is the review surface. Rationale section
+  below the rule: a hand-edit and a legitimate `gate_pack_config` change
+  produce byte-identical plan states, so "preserve divergent values" is
+  undecidable without a last-render record, and every region knob already
+  has a WORKFLOW.md key. Explicit carve-out: `unrecognizedRegionLines`
+  stays as ADR 0002's generic shape stop (`--force` before the drop), not
+  preservation. Recorded as a superseding ADR, not an in-place note,
+  because this reverses a sentence of 0016 (`docs/adr/README.md`).
 - `internal/update/gatepack.go` `unrecognizedRegionLines` doc comment now
-  cites ADR 0016-as-amended for the silent value refresh, and names the
+  cites ADR 0017 for the silent value refresh, and names the
   shape matcher as ADR 0002's generic unrecognized-edit stop, not
   preservation. No code change.
 - `docs/specs/2026-08-18-local-harness-conventions-design.md` §Rendering:
