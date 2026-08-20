@@ -404,7 +404,10 @@ func fakeMaipipe(t *testing.T, body string) string {
 // never answered says nothing about the content, and telling the reader
 // their file was rejected sends them hunting for a defect that is not there.
 func TestValidateTimeoutIsNotAVerdict(t *testing.T) {
-	fakeMaipipe(t, "/bin/sleep 30")
+	// exec, so the killed process *is* the sleep: a shell wrapper would
+	// leave the sleep holding the output pipe and CombinedOutput would
+	// block for its full duration despite the deadline.
+	fakeMaipipe(t, "exec /bin/sleep 5")
 	old := maipipeTimeout
 	maipipeTimeout = 150 * time.Millisecond
 	t.Cleanup(func() { maipipeTimeout = old })
