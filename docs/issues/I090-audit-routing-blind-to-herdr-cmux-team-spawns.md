@@ -69,17 +69,17 @@ dispatched. Fail-open was the one direction this audit must not fail in.
 
 **Residual gaps, both filed:**
 
-- **I095** — the owner's real dispatch flow inlines the brief
+- **I101** — the owner's real dispatch flow inlines the brief
   (`herdr agent prompt lhc-implementer "$(cat $WS/dispatch-task-2-implementer.md)"`),
   so no ticket token appears in the command or the prompt. Against the real
   local-harness lead transcript, 27 of 27 spawns are recognized and none is
   attributable: I079–I087 remain `no-transcript`, now alongside a footer
   saying 27 spawns were seen. Closing that needs brief-file resolution.
-- **I095 (related note)** — `DefaultTranscriptsDir` maps only the exact repo
+- **I101 (related note)** — `DefaultTranscriptsDir` maps only the exact repo
   path, so a lead that ran in a worktree (`spine-wt-local-harness`) is not
   scanned by default discovery at all; the live check below needs an explicit
   `--transcripts`. Out of scope here, recorded for honesty.
-- **I096** — `codex.go` carries a second recognizer for the same commands
+- **I102** — `codex.go` carries a second recognizer for the same commands
   with different pairing semantics (accumulate-all vs first-prompt-only).
   Cross-referenced in both files; unification deferred.
 
@@ -123,7 +123,7 @@ what remains is a distinct, filed, and now-visible attribution gap.
       --model claude-opus-5 --effort low  [claude-opus-5 @ low]
     …
     note: 27 team spawn(s) recognised but unattributable (brief delivered via `$(cat file)`
-    names no ticket in the command); see I095
+    names no ticket in the command); see I101
   ```
 
   The manufactured `match` / `escalated-no-reason` rows on I079/I082–I086 are

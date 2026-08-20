@@ -838,10 +838,10 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 		// I090's residual blind spot, stated rather than left silent: a
 		// recognized spawn whose brief was delivered by file reference
 		// carries no ticket token anywhere in the command or its prompt,
-		// so it cannot be attributed. See ticket I095.
+		// so it cannot be attributed. See ticket I101.
 		if teamSpawns > 0 {
 			fmt.Fprintf(stdout,
-				"  note: %d team spawn(s) recognised but unattributable (brief delivered via `$(cat file)` names no ticket in the command); see I095\n",
+				"  note: %d team spawn(s) recognised but unattributable (brief delivered via `$(cat file)` names no ticket in the command); see I101\n",
 				teamSpawns)
 		}
 	}

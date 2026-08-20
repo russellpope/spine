@@ -26,7 +26,7 @@ import (
 // transcripts. The two pair a worker with its prompt differently — this one
 // takes the FIRST prompt after a spawn, codex accumulates ALL of a worker's
 // prompt text. Both readings are defensible; that they differ by flavor is
-// not. Ticket I096 tracks sharing one worker-keyed pairing.
+// not. Ticket I102 tracks sharing one worker-keyed pairing.
 //
 // and the follow-up prompt commands (`herdr agent prompt <name> …`,
 // a `cmux send` carrying no claude invocation) that a spawn borrows its

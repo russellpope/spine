@@ -68,7 +68,7 @@ import (
 // I090) for Bash tool_use blocks. It pairs a worker with the FIRST prompt
 // that follows its spawn, where the accumulation below takes ALL of a
 // worker's prompt text. The divergence is known and deliberate for now;
-// ticket I096 tracks sharing one worker-keyed pairing across both flavors.
+// ticket I102 tracks sharing one worker-keyed pairing across both flavors.
 //
 // codexTeamSpawnStartRe matches a team spawn "start" command — herdr agent
 // start <worker> … -- -m <model> (I009's verified example) or the cmux

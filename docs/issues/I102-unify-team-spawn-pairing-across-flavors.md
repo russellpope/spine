@@ -1,5 +1,5 @@
 ---
-id: I096
+id: I102
 title: "two team-spawn recognizers with divergent worker-prompt pairing (claude teamspawn.go vs codex codex.go)"
 severity: low
 status: open

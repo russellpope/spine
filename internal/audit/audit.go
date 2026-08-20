@@ -169,7 +169,7 @@ type DispatchInfo struct {
 	// reference (`"$(cat …dispatch-task-2.md)"`), so neither the spawn
 	// command nor its prompt carries a ticket token and the worker cannot
 	// be attributed. Counted in the report footer so the gap stays
-	// visible rather than silent. Ticket I095 tracks closing it.
+	// visible rather than silent. Ticket I101 tracks closing it.
 	TeamSpawn bool
 }
 

@@ -866,7 +866,7 @@ func TestAuditRoutingEndToEnd(t *testing.T) {
 	}
 	// I090's residual gap is stated, not silent: unattributable team spawns
 	// are counted in the footer and point at the follow-up ticket.
-	if !strings.Contains(out, "team spawn(s) recognised but unattributable") || !strings.Contains(out, "I095") {
+	if !strings.Contains(out, "team spawn(s) recognised but unattributable") || !strings.Contains(out, "I101") {
 		t.Errorf("team out should carry the unattributable-spawn footer: %q", out)
 	}
 	// A multi-line spawn command (brief written and worker started in one
