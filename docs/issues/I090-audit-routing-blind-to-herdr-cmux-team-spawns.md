@@ -42,48 +42,91 @@ any Bash block mentions `herdr agent start`.
 
 ## Resolution (2026-08-20)
 
-`internal/audit/teamspawn.go` (new): recognizes `herdr agent start … --model
-<id> [--effort <e>]` and a `cmux send` whose payload invokes `claude …
---model <id>` inside a Bash tool_use block's command text, and the follow-up
-prompt commands (`herdr agent prompt`, a non-claude `cmux send`) a spawn
-borrows ticket attribution from when its own command names no ticket.
-Recognition is confined to command position and to text outside heredoc
-bodies, so a query command, a non-claude send, and a spawn quoted in prose
-are not dispatches. `parseLine` emits these as ordinary `dispatch` records
-(plus the extracted `effort`, surfaced on unmatched dispatches) — repo
-qualification, attribution and the model-vs-tier judgement are the existing
-logic, unforked. The interim footer disclosure the ticket proposed was not
-needed: the blind spot is closed rather than documented.
+**What this delivers, precisely:** claude-team Bash spawns are recognized
+and judged **when the spawn command or its following prompt command names
+the ticket**. When the brief is delivered by file reference, the spawn is
+surfaced as an unmatched dispatch with its model and effort, and counted in
+a footer line — a stated gap instead of silence. Both halves of the ticket's
+"fix" and "until then" clauses therefore shipped; the footer clause is not
+moot.
 
-Fixtures: `testdata/team` (three team-built tickets — herdr spawn attributed
-by the following prompt → match; herdr spawn naming its ticket, routine model
-on a `tier: primary` ticket → silent-descent; cmux send → match) and
-`testdata/teamnoise` (one lookalike command per negative bullet, all
-no-transcript). Tests in `internal/audit/i090_test.go`.
+`internal/audit/teamspawn.go` (new) recognizes `herdr agent start … --model
+<id> [--effort <e>]` and a `cmux send --surface|--pane <id>` whose payload
+invokes `claude … --model <id>`, plus the follow-up prompt commands
+(`herdr agent prompt`, a non-claude `cmux send`) a spawn borrows ticket
+attribution from when its own command names none. Recognition is confined to
+command position, outside heredoc bodies, and outside trailing comments.
+`parseLine` emits these as ordinary `dispatch` records; repo qualification,
+attribution and the model-vs-tier judgement are the existing logic, unforked.
+Effort is reported, never judged. `cmd/spine` prints `[model @ effort]` and
+the footer count.
+
+**Attribution reads only the heredoc-stripped command** (final-review C1).
+A lead routinely writes the worker's brief and starts the worker in one Bash
+call, and the brief names the ticket under work plus others "for context";
+attributing on the raw text manufactured `match` verdicts for tickets nobody
+dispatched. Fail-open was the one direction this audit must not fail in.
+
+**Residual gaps, both filed:**
+
+- **I095** — the owner's real dispatch flow inlines the brief
+  (`herdr agent prompt lhc-implementer "$(cat $WS/dispatch-task-2-implementer.md)"`),
+  so no ticket token appears in the command or the prompt. Against the real
+  local-harness lead transcript, 27 of 27 spawns are recognized and none is
+  attributable: I079–I087 remain `no-transcript`, now alongside a footer
+  saying 27 spawns were seen. Closing that needs brief-file resolution.
+- **I095 (related note)** — `DefaultTranscriptsDir` maps only the exact repo
+  path, so a lead that ran in a worktree (`spine-wt-local-harness`) is not
+  scanned by default discovery at all; the live check below needs an explicit
+  `--transcripts`. Out of scope here, recorded for honesty.
+- **I096** — `codex.go` carries a second recognizer for the same commands
+  with different pairing semantics (accumulate-all vs first-prompt-only).
+  Cross-referenced in both files; unification deferred.
+
+`status: fixed` is kept on that narrowed reading: the blind spot the ticket
+names — team spawns producing no dispatch record at all — is closed, and
+what remains is a distinct, filed, and now-visible attribution gap.
 
 ## Evidence
 
-- `go test ./internal/audit/ -run 'I090|Team' -v` → all pass, including
-  `TestTeamSpawnsAreJudged`, `TestTeamSpawnLookalikesAreNotDispatches`,
-  `TestParseTeamSpawn` (12 subtests).
+- `go test ./internal/audit/ -run 'Team|I090|Attribute'` → all pass:
+  `TestTeamSpawnsAreJudged`, `TestTeamSpawnPairsByWorkerHandle`,
+  `TestTeamSpawnLookalikesAreNotDispatches`, `TestAttributeTeamPrompt`
+  (7 rows), `TestParseTeamSpawn` (15 rows),
+  `TestUnmatchedTeamSpawnCarriesEffort`.
 - Load-bearing check `TestTeamSpawnRecognitionIsLoadBearing`: with
-  `recognizeTeamSpawns = false`, all three team fixture tickets report
+  `recognizeTeamSpawns = false` every team fixture ticket reports
   `no-transcript` — the pre-fix behaviour.
-- Negative controls, one mutation each, all caught:
-  - relax `isTool(f, "herdr", "agent", "start")` to `…"agent"` → `I501
-    verdict = escalated-no-reason …, want no-transcript`.
-  - drop the `claude`-payload requirement in `cmuxClaudeSend` → `I502
-    verdict = escalated-no-reason …, want no-transcript`.
-  - skip `stripHeredocBodies` → `I503 verdict = escalated-no-reason …, want
-    no-transcript`.
-- Misattribution guards (review round 1): fixture `testdata/teampair` — two
-  workers started back-to-back and briefed in the same order, a worker
-  restarted before being briefed, and a follow-up prompt naming a third
-  ticket — plus the `TestAttributeTeamPrompt` table. One mutation per guard,
-  all five caught: ignoring the worker handle → `I601 actuals =
-  "claude-fable-5", want "claude-sonnet-5"`; scanning forward → `I604 …
-  silent-descent … want match`; dropping first-prompt-only → `I603 verdict =
-  match, want no-transcript`; dropping spawn-token-wins →
-  `spawn 0 (impl-b) prompt = "now do I407", want ""`; dropping the `#` guard
-  → `spawn_parenthesized_inside_a_trailing_comment` fails.
+- One mutation per guard, every one caught:
+  - raw command as the attribution text → `I504`/`I505` judged
+    `escalated-no-reason`, want `no-transcript` (the C1 regression).
+  - relax `isTool(…, "agent", "start")` → `I501` judged.
+  - drop the claude-payload requirement → `I502` judged.
+  - skip `stripHeredocBodies` → `I503` judged.
+  - drop `--surface` from the handle flags → `I605` back to `no-transcript`
+    and `cmux_send_addressing_a_surface` fails.
+  - ignore the worker handle → `I601 actuals = "claude-fable-5", want
+    "claude-sonnet-5"`; scan forward → `I604` silent-descent; drop
+    first-prompt-only → `I603` judged; drop spawn-token-wins →
+    `spawn 0 (impl-b) prompt = "now do I407", want ""`; drop the `#` guard →
+    `spawn_parenthesized_inside_a_trailing_comment` fails.
+- Live check against the real lead transcript (2026-08-20), the run that
+  found C1:
+
+  ```
+  $ spine audit routing --dir ~/Projects/github.com/spine \
+      --transcripts ~/.claude/projects/-Users-ldh-Projects-github-com-spine-wt-local-harness
+  I079    routine     -    no-transcript    no dispatch or transcript evidence found
+  … (identical for I080–I089)
+  unmatched dispatches (no ticket id or not repo-qualified; not judged):
+    herdr agent start lhc-implementer --kind claude --pane w19:p2 -- --permission-mode auto
+      --model claude-opus-5 --effort low  [claude-opus-5 @ low]
+    …
+    note: 27 team spawn(s) recognised but unattributable (brief delivered via `$(cat file)`
+    names no ticket in the command); see I095
+  ```
+
+  The manufactured `match` / `escalated-no-reason` rows on I079/I082–I086 are
+  gone.
 - `go vet ./...` clean; `make test` green across all 18 packages.
+
