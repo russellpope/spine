@@ -96,5 +96,15 @@ the repo adds its lanes.
   that could tell the two apart.
 - Region integrity (markers present, canonical content) is a doctor
   finding, mirroring D3 for markdown files.
+- Composing the pack is left to each repo, and as of 2026-08-20 only half of
+  that composition exists anywhere: the full-lane stage
+  (`pipeline = "gate-go"`) is composed, the audit-lane stage
+  (`pipeline = "mutation-go"`) is not — not in spine's own `maipipe.toml`,
+  not in any other repo that has adopted the pack. The scaffolding that
+  would write an audit lane belongs to maipipe (its ticket I204 — open,
+  blocked by I202+I203), so until I204 lands the advisory battery of
+  ADR 0013 is reachable only by naming it directly: `maipipe run
+  mutation-go`. The durable records of this gap are the standalone note in
+  spine's own `maipipe.toml` and ticket I099.
 - Should maipipe later add an include mechanism, moving the region to a
   sibling file is a new ADR superseding this one.

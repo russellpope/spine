@@ -108,6 +108,16 @@ unticked by design.
   making the env branch report the line fails the test
   (`state=2 unrec=[env = { … "docs/elsewhere.md" }]`).
 - Evidence: `go vet ./...` clean; `make test` → all 18 packages `ok`.
+- **Why the D10 message cannot yet distinguish "WORKFLOW.md changed" from
+  "region edited"** (the acceptance line above asks for the split *or* for
+  I095 to record why it cannot): telling the two causes apart requires
+  knowing what spine last rendered, and reading (A) deliberately keeps no
+  such record — no fingerprint, no sidecar, nothing in-band on the marker
+  line. Both causes therefore reach D10 as the same byte-level delta, and a
+  message claiming to name the cause would be guessing. The split becomes
+  implementable only under a decision that reintroduces a last-render
+  record (reading (B)). Reasoning also carried in ticket I099 and in the
+  D10 doc comment in `internal/doctor/doctor.go`.
 - Out of scope here, left to their owners: the D10 message split
   (I099 / concurrent doctor team); whether the region header comment should
   mention the plan diff (changing it re-renders every adopter's bytes and
