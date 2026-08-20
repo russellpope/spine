@@ -44,6 +44,26 @@ type FileReport struct {
 	// deliberate per-repo choices (matched no shipped default). WORKFLOW.md
 	// only.
 	ModelOverrides []ModelOverride
+	// StagesAdded and StagesRemoved name the gate-pack stages this render
+	// adds to, or drops from, the region already in maipipe.toml. maipipe.toml
+	// only, and only when the file already carries a region — a region being
+	// written for the first time is wholly visible in the plan diff. The plan
+	// prints them so the cost is visible before --write (I098): an added stage
+	// is a new step in a gating lane, and either change rewrites the region's
+	// bytes and so maipipe's definition_hash.
+	StagesAdded   []string
+	StagesRemoved []string
+	// Refusal is why applying this file's pending content would be refused
+	// (maipipe.toml only, I096). It is computed during the plan pass, not at
+	// write time, because the plan diff is the review surface (ADR 0017): a
+	// blocker the dry-run cannot show is a blocker the reader meets for the
+	// first time when --write fails.
+	Refusal string
+	// StructuralOnly is set when the pre-flight passed but only its
+	// structural half ran — no maipipe binary was resolvable, so the grammar
+	// check maipipe itself would apply never happened. The plan says so
+	// rather than letting a pass read as a full one.
+	StructuralOnly bool
 	newContent     string
 }
 
@@ -129,9 +149,10 @@ func Run(opts Options) ([]FileReport, error) {
 	case err != nil && !os.IsNotExist(err):
 		return nil, err
 	}
-	// The gate pack's delivery region in maipipe.toml (ADR 0016) is planned
-	// from the WORKFLOW.md this run produces, so an owner who sets
-	// gate_pack: and runs update once gets both the key and the region.
+	// The gate pack's delivery region in maipipe.toml (ADR 0017, superseding
+	// 0016) is planned from the WORKFLOW.md this run produces, so an owner
+	// who sets gate_pack: and runs update once gets both the key and the
+	// region.
 	workflow := wf.newContent
 	if workflow == "" {
 		raw, err := os.ReadFile(filepath.Join(opts.Dir, "WORKFLOW.md"))
@@ -169,7 +190,39 @@ func Run(opts Options) ([]FileReport, error) {
 			}
 		}
 	}
+	// The gate-pack region is spliced as a string, so the only thing between
+	// a bad splice and a maipipe.toml no lane in the repo can load is this
+	// check (I096). It runs in the plan pass, on every run — not only under
+	// --write — because the plan is what a reader reviews before applying it
+	// (ADR 0017), and a dry-run that showed a clean diff for content --write
+	// then refuses would be a review surface that hides the one thing that
+	// matters (final review, Important 1).
+	structuralOnly := !maipipeOnPath()
+	for i := range reports {
+		r := &reports[i]
+		if r.Path != MaipipeFile || r.State != Pending {
+			continue
+		}
+		r.StructuralOnly = structuralOnly
+		if err := checkMaipipeContent(filepath.Join(opts.Dir, r.Path), r.newContent); err != nil {
+			r.Refusal = err.Error()
+			r.StructuralOnly = false // the refusal itself names which half ran
+		}
+	}
 	if opts.Write {
+		// A refusal aborts the whole run: update presents one plan and
+		// applies it as a whole, and a partial application would leave a
+		// rendered region stale against a WORKFLOW.md that already moved —
+		// a state the reader has to reason about instead of retrying. The
+		// refusal says so, because an error naming only maipipe.toml would
+		// read as if maipipe.toml were the only file skipped.
+		for i := range reports {
+			if r := &reports[i]; r.Refusal != "" {
+				return reports, fmt.Errorf(
+					"%s\nno files were written: spine update applies its plan as a whole, so every other pending file (WORKFLOW.md included) is unchanged too — fix %s and re-run",
+					r.Refusal, MaipipeFile)
+			}
+		}
 		for i := range reports {
 			r := &reports[i]
 			if r.State != Pending {

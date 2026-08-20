@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -11,9 +12,10 @@ import (
 )
 
 // The gate pack's delivery region lives in maipipe.toml at the repo root
-// (ADR 0016): maipipe reads exactly one file with no include mechanism, so
-// the pack must be present inside a file the repo also owns. spine owns the
-// region between these two marker lines and nothing else in the file.
+// (ADR 0017, superseding 0016): maipipe reads exactly one file with no
+// include mechanism, so the pack must be present inside a file the repo also
+// owns. spine owns the region between these two marker lines and nothing else
+// in the file.
 const (
 	MaipipeFile     = "maipipe.toml"
 	gateRegionBegin = "# spine:begin gate-pack "
@@ -97,20 +99,29 @@ func parseList(v string) []string {
 	return out
 }
 
+// packClassesFor resolves a pinned pack identifier to its frozen class list.
+// It is a variable so a test can stand in a binary that ships a later pack
+// and prove the pin still renders its own list (I098); nothing but a test
+// ever replaces it.
+var packClassesFor = gate.PackClassesFor
+
 // renderGateRegion is the canonical region for (pack, disabled, config): a
 // pure function of its inputs, byte-deterministic, ending in a newline.
-// gate-go carries one stage per enabled check class in gate.CheckNames()
-// order, except mutate; mutation-go carries mutate alone. Disabling mutate
-// omits the mutation-go pipeline entirely, the same way disabling any other
-// class omits its stage.
+// gate-go carries one stage per enabled class of the *pinned pack version*
+// (I098) — not per registered check — in sorted order, except mutate;
+// mutation-go carries mutate alone. Disabling mutate omits the mutation-go
+// pipeline entirely, the same way disabling any other class omits its stage.
+// The caller has already established that the pin is a pack this binary
+// ships, so an unshipped pin renders no stages rather than guessing.
 func renderGateRegion(s gatePackSettings) string {
+	classes, _ := packClassesFor(s.pack)
 	var b strings.Builder
 	b.WriteString(gateRegionBegin + s.pack + "\n")
 	for _, c := range gateRegionComment {
 		b.WriteString(c + "\n")
 	}
 	b.WriteString("\n[pipelines." + gatePipelineName + "]\nprofile = \"full\"\n")
-	for _, check := range gate.CheckNames() {
+	for _, check := range classes {
 		if s.disabled[check] || check == mutateCheck {
 			continue
 		}
@@ -123,7 +134,7 @@ func renderGateRegion(s gatePackSettings) string {
 			}
 		}
 	}
-	if !s.disabled[mutateCheck] {
+	if slices.Contains(classes, mutateCheck) && !s.disabled[mutateCheck] {
 		b.WriteString("\n[pipelines." + mutationPipelineName + "]\nprofile = \"audit\"\n")
 		b.WriteString("\n[[pipelines." + mutationPipelineName + ".stage]]\n")
 		fmt.Fprintf(&b, "name = %q\n", mutateCheck)
@@ -143,12 +154,14 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		return FileReport{}, false, nil
 	}
 	report := FileReport{Path: MaipipeFile}
-	if s.pack != gate.PackID() {
+	classes, shipped := packClassesFor(s.pack)
+	if !shipped {
 		// An unknown pack is never rendered and never guessed at: the repo
 		// pinned a version this binary does not ship (ADR 0015).
 		report.State = SkippedUnrecognized
 		report.Unrecognized = []string{fmt.Sprintf(
-			"gate_pack: %s is not a pack this spine binary ships (known: %s)", s.pack, gate.PackID())}
+			"gate_pack: %s is not a pack this spine binary ships (known: %s)",
+			s.pack, strings.Join(gate.PackIDs(), ", "))}
 		return report, true, nil
 	}
 	region := renderGateRegion(s)
@@ -190,7 +203,9 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		newContent = prefix + region
 	} else {
 		lines := splitLines(old)
-		report.Unrecognized = unrecognizedRegionLines(lines[begin+1 : end])
+		report.Unrecognized = unrecognizedRegionLines(lines[begin+1:end], classes)
+		report.StagesAdded, report.StagesRemoved = stageDelta(
+			regionStageNames(lines[begin+1:end]), regionStageNames(splitLines(region)))
 		newContent = strings.Join(append(append(append([]string{}, lines[:begin]...),
 			splitLines(strings.TrimSuffix(region, "\n"))...), lines[end+1:]...), "\n")
 	}
@@ -200,6 +215,44 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		report.newContent = newContent
 	}
 	return report, true, nil
+}
+
+// regionStageNames returns the stage names inside a region's lines, in the
+// order they appear. A stage name is the one `name = "…"` line each stage
+// table carries.
+func regionStageNames(lines []string) []string {
+	var out []string
+	for _, raw := range lines {
+		if v, ok := quotedValue(strings.TrimRight(raw, " "), "name = "); ok {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// stageDelta reports which stages this render adds to, and drops from, the
+// region already on disk. Both costs are worth naming before --write (I098):
+// an added stage is a new step in a gating lane, and either change rewrites
+// the region's bytes, hence the file's blob, hence maipipe's
+// definition_hash — so the repo has to re-approve the definition.
+func stageDelta(old, new []string) (added, removed []string) {
+	had := map[string]bool{}
+	for _, s := range old {
+		had[s] = true
+	}
+	has := map[string]bool{}
+	for _, s := range new {
+		has[s] = true
+		if !had[s] {
+			added = append(added, s)
+		}
+	}
+	for _, s := range old {
+		if !has[s] {
+			removed = append(removed, s)
+		}
+	}
+	return added, removed
 }
 
 // gateRegionBounds locates the region's marker lines by index. It returns
@@ -236,14 +289,23 @@ func gateRegionBounds(content string) (int, int, error) {
 }
 
 // unrecognizedRegionLines returns the lines inside an existing region that
-// no configuration of the pack could have rendered. Recognition is by shape
-// rather than by exact text so that a changed gate_pack_config value or a
-// newly disabled class refreshes silently (it is spine's own render of the
-// repo's own choices, ADR 0002), while a hand-edited stage — a rewritten
-// run line, an invented env var, a stray comment — is reported.
-func unrecognizedRegionLines(lines []string) []string {
+// no configuration of the pack could have rendered. The region is a pure
+// projection of WORKFLOW.md (ADR 0017, I095): no value inside
+// it is a user choice, so recognition is by shape rather than by exact
+// text — a changed gate_pack_config value or a newly disabled class
+// refreshes without --force and the plan diff shows what drops. Only a
+// line outside every possible render — a rewritten run line, an invented
+// env var, a stray comment — is reported, which is ADR 0002's generic
+// unrecognized-edit stop before the drop, not preservation.
+//
+// Recognition is against the *pinned* pack's frozen class list (I098 review
+// round 1), not the live registry: in a go@1 repo a stage named after a class
+// this binary ships only under a later pack is region content no render of
+// go@1 could have produced, and saying so is the same freeze the renderer
+// enforces.
+func unrecognizedRegionLines(lines []string, classes []string) []string {
 	checks := map[string]bool{}
-	for _, c := range gate.CheckNames() {
+	for _, c := range classes {
 		checks[c] = true
 	}
 	envVars := map[string]bool{}

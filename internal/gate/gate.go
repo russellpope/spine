@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -142,6 +143,67 @@ var checks = map[string]Check{
 // judgement. A name lives in exactly one of the two registries.
 var reportChecks = map[string]ReportCheck{
 	"mutate": checkMutate,
+}
+
+// packClasses is the frozen class list of every pack version this binary
+// ships: version -> the exact check classes `gate_pack: go@<version>`
+// renders, sorted.
+//
+// The pin is a frozen list, not an attribution string. A repo that pins
+// go@1 gets the go@1 classes and only those, from any spine binary, however
+// many later packs that binary also ships — which is what ADR 0015 item 2
+// and spec story 23 promise ("a pack release never silently changes my
+// gate"), and the other half of an older binary refusing a newer pack name
+// (internal/update/gatepack.go). A new check class therefore reaches a repo
+// only under a pack version the repo opts into. TestFrozenClassLists holds
+// each version's list here to a golden literal, and the registries to the
+// union of every version's list (I098).
+var packClasses = map[int][]string{
+	1: {
+		"binary-hygiene",
+		"dead-code-callgraph",
+		"deferred-cleanup-errcheck",
+		"fixture-manifest",
+		"gitignore-control",
+		"mutate",
+		"n-plus-one",
+		"test-enum-vs-spec",
+		"tskip",
+	},
+}
+
+// PackClassesFor returns the frozen class list for a versioned pack
+// identifier ("go@1"), and whether this binary ships that pack at all. The
+// returned slice is a copy: it is the pin's contract, not a scratch buffer.
+func PackClassesFor(id string) ([]string, bool) {
+	name, ver, ok := strings.Cut(id, "@")
+	if !ok || name != PackName {
+		return nil, false
+	}
+	v, err := strconv.Atoi(ver)
+	if err != nil {
+		return nil, false
+	}
+	classes, ok := packClasses[v]
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), classes...), true
+}
+
+// PackIDs returns every pack identifier this binary ships, ascending, for
+// messages that have to name what a repo could pin.
+func PackIDs() []string {
+	vs := make([]int, 0, len(packClasses))
+	for v := range packClasses {
+		vs = append(vs, v)
+	}
+	sort.Ints(vs)
+	ids := make([]string, 0, len(vs))
+	for _, v := range vs {
+		ids = append(ids, fmt.Sprintf("%s@%d", PackName, v))
+	}
+	return ids
 }
 
 // CheckNames returns the registered check classes, sorted.

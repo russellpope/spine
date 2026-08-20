@@ -1,7 +1,7 @@
 ---
 id: "0016"
 title: "spine owns a machine-managed region inside maipipe.toml"
-status: Accepted
+status: Superseded by 0017
 date: 2026-08-18
 ---
 
