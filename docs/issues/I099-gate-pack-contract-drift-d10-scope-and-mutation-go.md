@@ -126,9 +126,31 @@ scaffold audit lanes, so a hand-written one here is work I204 would then have
 to reconcile — and the gap this ticket exists to document would be papered
 over in the one repo where it is observable.
 
+**The durable record of the gap is this ticket and `maipipe.toml`**, not the
+ADR bullet: ADR 0016 is expected to be superseded (I095, region projection),
+and a reader following a status pointer to its successor would otherwise lose
+the record. `maipipe.toml`'s note therefore names the gap, its owner (maipipe
+I204) and the workaround without requiring a hop to an ADR whose number is in
+flight, and the ADR bullet is worded against the pack's composition
+requirement rather than against 0016's decision, so it still reads correctly
+once the document is superseded.
+
 Tests: `TestD10RegionMissing` gained the blast-radius assertion its siblings
-carry (no D4 from the removed file, no other finding). Full `make test` and
-`go vet ./...` green.
+carry (no D4 from the removed file, no other finding).
+
+```
+$ go vet ./...
+$ make test
+go test ./...
+ok  	github.com/russellpope/spine/cmd/spine	(cached)
+...
+ok  	github.com/russellpope/spine/internal/doctor	0.502s
+ok  	github.com/russellpope/spine/internal/update	(cached)
+ok  	github.com/russellpope/spine/templates	(cached)
+```
+
+Negative control: flipping the new `len(fs) != 1` to `!= 0` fails the test
+with the single expected D10 in the dump, so the assertion is load-bearing.
 
 ## Notes
 

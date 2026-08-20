@@ -56,12 +56,16 @@ what the region renders.
   finding, mirroring D3 for markdown files.
 - Should maipipe later add an include mechanism, moving the region to a
   sibling file is a new ADR superseding this one.
-- The composing edit this decision asks the repo for is not scaffolded on
-  either side yet. The full lane (`pipeline = "gate-go"`) is composed by
-  hand; the **audit lane (`pipeline = "mutation-go"`) is not**, in spine's
-  own `maipipe.toml` or anywhere else. The scaffolding that would write it
-  belongs to maipipe (its ticket I204 — open, blocked by I202+I203), so
-  until I204 lands the advisory battery of ADR 0013 is reachable only by
-  naming it directly: `maipipe run mutation-go`. It is rendered, runnable,
-  and composed nowhere. *(Amended 2026-08-20, I099 — recording the gap, not
-  changing the decision above: the repo still composes the pack itself.)*
+- Composing the pack is an edit the repo makes for itself, and as of
+  2026-08-20 only half of it is made anywhere. The full lane
+  (`pipeline = "gate-go"`) is composed by hand; the **audit lane
+  (`pipeline = "mutation-go"`) is not**, in spine's own `maipipe.toml` or in
+  any other repo that has adopted the pack. The scaffolding that would write
+  an audit lane belongs to maipipe (its ticket I204 — open, blocked by
+  I202+I203), so until I204 lands the advisory battery of ADR 0013 is
+  reachable only by naming it directly: `maipipe run mutation-go`.
+  *(Amended 2026-08-20, I099 — a record of a gap, not a change to the
+  decision above. The gap is a property of the pack's composition
+  requirement rather than of this ADR, so it outlives this document: it is
+  carried forward into the Consequences of the ADR that supersedes this one,
+  and the durable records are maipipe.toml's own note and issue I099.)*
