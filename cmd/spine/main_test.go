@@ -15,6 +15,66 @@ import (
 	"github.com/russellpope/spine/internal/tmpl"
 )
 
+// TestMain scrubs the gate stage's environment before any test runs. spine's
+// own suite executes under the go@1 pack's `fast/test` stage, which exports
+// MAIPIPE_RESULTS and the SPINE_GATE_* config; the gate tests below drive
+// results-emitting commands, so an inherited MAIPIPE_RESULTS makes them write
+// their fixture findings into the stage's real results file and fail the run.
+// Tests that need either variable set it themselves with t.Setenv.
+func TestMain(m *testing.M) {
+	scrubStageEnv()
+	os.Exit(m.Run())
+}
+
+// scrubStageEnv removes the gate stage's own variables from this process.
+func scrubStageEnv() {
+	os.Unsetenv("MAIPIPE_RESULTS")
+	for _, kv := range os.Environ() {
+		if k, _, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(k, "SPINE_GATE_") {
+			os.Unsetenv(k)
+		}
+	}
+}
+
+// TestScrubStageEnvRemovesStageVars is the unit half of the scrub: both
+// families go, nothing else is touched.
+func TestScrubStageEnvRemovesStageVars(t *testing.T) {
+	t.Setenv("MAIPIPE_RESULTS", filepath.Join(t.TempDir(), "results.json"))
+	t.Setenv("SPINE_GATE_N_PLUS_ONE_CLIENTS", "Query")
+	t.Setenv("SPINE_KEEP", "keep")
+	scrubStageEnv()
+	if v := os.Getenv("MAIPIPE_RESULTS"); v != "" {
+		t.Errorf("MAIPIPE_RESULTS=%q", v)
+	}
+	if v := os.Getenv("SPINE_GATE_N_PLUS_ONE_CLIENTS"); v != "" {
+		t.Errorf("SPINE_GATE_N_PLUS_ONE_CLIENTS=%q", v)
+	}
+	if v := os.Getenv("SPINE_KEEP"); v != "keep" {
+		t.Errorf("unrelated variable scrubbed: SPINE_KEEP=%q", v)
+	}
+}
+
+// TestSuiteWritesNoResultsFileUnderAStage is the end-to-end control for the
+// scrub: this package's own suite, run the way the `fast/test` stage runs it
+// (MAIPIPE_RESULTS exported), must leave that path untouched. The child runs
+// the seeded gate test that leaked before — it emits two findings and, without
+// TestMain's scrub, writes them into the stage's results file, turning a green
+// `go test ./...` into a failed gate stage. The -run filter excludes this test,
+// so the child does not recurse.
+func TestSuiteWritesNoResultsFileUnderAStage(t *testing.T) {
+	results := filepath.Join(t.TempDir(), "results.json")
+	cmd := exec.Command("go", "test", "-count=1",
+		"-run", "^TestGateSyntacticClassesTolerateTestdata$", ".")
+	cmd.Env = append(os.Environ(), "MAIPIPE_RESULTS="+results)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child suite failed: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(results); !os.IsNotExist(err) {
+		got, _ := os.ReadFile(results)
+		t.Fatalf("stage results path written by the tree's own suite: err=%v contents=%s", err, got)
+	}
+}
+
 func runCmd(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	var out, errb bytes.Buffer
