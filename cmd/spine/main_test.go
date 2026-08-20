@@ -866,7 +866,7 @@ func TestAuditRoutingEndToEnd(t *testing.T) {
 	}
 	// I090's residual gap is stated, not silent: unattributable team spawns
 	// are counted in the footer and point at the follow-up ticket.
-	if !strings.Contains(out, "team spawn(s) recognised but unattributable") || !strings.Contains(out, "I101") {
+	if !strings.Contains(out, "team spawn(s) recognised but not attributed") || !strings.Contains(out, "I101") {
 		t.Errorf("team out should carry the unattributable-spawn footer: %q", out)
 	}
 	// A multi-line spawn command (brief written and worker started in one
@@ -880,6 +880,15 @@ func TestAuditRoutingEndToEnd(t *testing.T) {
 		if strings.HasPrefix(line, "herdr ") || strings.HasPrefix(line, "cat ") {
 			t.Errorf("unmatched dispatch broke the indent: %q", line)
 		}
+	}
+	// The same footer fires here, where no brief was delivered by file
+	// reference at all (the spawn simply names no ticket outside its
+	// heredoc). It must therefore state the fact without guessing a cause.
+	if !strings.Contains(out, "team spawn(s) recognised but not attributed") {
+		t.Errorf("teamnoise out should carry the footer: %q", out)
+	}
+	if strings.Contains(out, "$(cat") {
+		t.Errorf("footer must not attribute a cause it cannot know: %q", out)
 	}
 	// degraded fixture: warnings on stderr, exit 0
 	code, _, errs = runCmd(t, "audit", "routing",

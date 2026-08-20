@@ -835,13 +835,17 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 			}
 			fmt.Fprintf(stdout, "  %s  [%s]\n", desc, model)
 		}
-		// I090's residual blind spot, stated rather than left silent: a
-		// recognized spawn whose brief was delivered by file reference
-		// carries no ticket token anywhere in the command or its prompt,
-		// so it cannot be attributed. See ticket I101.
+		// I090's residual blind spot, stated rather than left silent. The
+		// wording names only what this code knows — that these spawns were
+		// recognized and not attributed — not WHY. A record lands here for
+		// several reasons (no ticket token in the command or its prompt,
+		// the token naming another repo, the command failing repo
+		// qualification), and the brief-delivered-by-file case that
+		// motivated ticket I101 is only the most common one on real input.
+		// Guessing a single cause in the footer was wrong for the others.
 		if teamSpawns > 0 {
 			fmt.Fprintf(stdout,
-				"  note: %d team spawn(s) recognised but unattributable (brief delivered via `$(cat file)` names no ticket in the command); see I101\n",
+				"  note: %d team spawn(s) recognised but not attributed (no ticket token in the command or its prompt, or not repo-qualified); see I101\n",
 				teamSpawns)
 		}
 	}

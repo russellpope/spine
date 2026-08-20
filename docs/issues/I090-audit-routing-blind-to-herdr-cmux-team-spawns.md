@@ -44,9 +44,11 @@ any Bash block mentions `herdr agent start`.
 
 **What this delivers, precisely:** claude-team Bash spawns are recognized
 and judged **when the spawn command or its following prompt command names
-the ticket**. When the brief is delivered by file reference, the spawn is
-surfaced as an unmatched dispatch with its model and effort, and counted in
-a footer line — a stated gap instead of silence. Both halves of the ticket's
+the ticket**. Any spawn that cannot be attributed — the brief delivered by
+file reference, a token naming another repo, a command that fails repo
+qualification — is surfaced as an unmatched dispatch with its model and
+effort, and counted in a footer line that states the fact without guessing
+which cause applied: a stated gap instead of silence. Both halves of the ticket's
 "fix" and "until then" clauses therefore shipped; the footer clause is not
 moot.
 
@@ -122,8 +124,8 @@ what remains is a distinct, filed, and now-visible attribution gap.
     herdr agent start lhc-implementer --kind claude --pane w19:p2 -- --permission-mode auto
       --model claude-opus-5 --effort low  [claude-opus-5 @ low]
     …
-    note: 27 team spawn(s) recognised but unattributable (brief delivered via `$(cat file)`
-    names no ticket in the command); see I101
+    note: 27 team spawn(s) recognised but not attributed (no ticket token in the command
+    or its prompt, or not repo-qualified); see I101
   ```
 
   The manufactured `match` / `escalated-no-reason` rows on I079/I082–I086 are

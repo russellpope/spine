@@ -165,11 +165,14 @@ type DispatchInfo struct {
 	Effort string
 	// TeamSpawn marks a claude-team worker spawn (I090). An unmatched one
 	// is the residual blind spot the ticket's footer clause was written
-	// for: the lead's real dispatch flow delivers the brief by file
-	// reference (`"$(cat …dispatch-task-2.md)"`), so neither the spawn
-	// command nor its prompt carries a ticket token and the worker cannot
-	// be attributed. Counted in the report footer so the gap stays
-	// visible rather than silent. Ticket I101 tracks closing it.
+	// for: the spawn was recognized but could not be attributed to any
+	// ticket — no ticket token in the command or its prompt, a token
+	// naming another repo, or a command that fails repo qualification.
+	// The most common cause on real input is a brief delivered by file
+	// reference (`"$(cat …dispatch-task-2.md)"`), whose expansion the
+	// transcript never records; ticket I101 tracks that one. Counted in
+	// the report footer so the gap stays visible rather than silent — the
+	// footer states the fact, not a guessed cause.
 	TeamSpawn bool
 }
 
