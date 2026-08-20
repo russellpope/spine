@@ -153,7 +153,8 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		return FileReport{}, false, nil
 	}
 	report := FileReport{Path: MaipipeFile}
-	if _, shipped := packClassesFor(s.pack); !shipped {
+	classes, shipped := packClassesFor(s.pack)
+	if !shipped {
 		// An unknown pack is never rendered and never guessed at: the repo
 		// pinned a version this binary does not ship (ADR 0015).
 		report.State = SkippedUnrecognized
@@ -201,7 +202,7 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		newContent = prefix + region
 	} else {
 		lines := splitLines(old)
-		report.Unrecognized = unrecognizedRegionLines(lines[begin+1 : end])
+		report.Unrecognized = unrecognizedRegionLines(lines[begin+1:end], classes)
 		report.StagesAdded, report.StagesRemoved = stageDelta(
 			regionStageNames(lines[begin+1:end]), regionStageNames(splitLines(region)))
 		newContent = strings.Join(append(append(append([]string{}, lines[:begin]...),
@@ -295,9 +296,15 @@ func gateRegionBounds(content string) (int, int, error) {
 // line outside every possible render — a rewritten run line, an invented
 // env var, a stray comment — is reported, which is ADR 0002's generic
 // unrecognized-edit stop before the drop, not preservation.
-func unrecognizedRegionLines(lines []string) []string {
+//
+// Recognition is against the *pinned* pack's frozen class list (I098 review
+// round 1), not the live registry: in a go@1 repo a stage named after a class
+// this binary ships only under a later pack is region content no render of
+// go@1 could have produced, and saying so is the same freeze the renderer
+// enforces.
+func unrecognizedRegionLines(lines []string, classes []string) []string {
 	checks := map[string]bool{}
-	for _, c := range gate.CheckNames() {
+	for _, c := range classes {
 		checks[c] = true
 	}
 	envVars := map[string]bool{}

@@ -65,8 +65,11 @@ Bind the registry to the version with a test rather than prose:
 
 - [x] Golden-list test present; adding a dummy check to `checks` fails it, and
       the failure message names the pin contract
-- [x] Pinning semantics recorded in ADR 0015 (amendment) and reflected in the
-      spec's story 23 wording
+- [x] Pinning semantics recorded — in the spec's story 23 wording, in
+      `gate.packClasses`' doc comment, and in the golden-list test's failure
+      message, each citing ADR 0015 as the source of the promise. **Not** as
+      an ADR 0015 amendment: see deviation 1 in the Resolution below for why
+      the accepted ADR was deliberately left unedited.
 - [x] If the frozen-list reading wins: rendering `go@1` from a binary that also
       ships `go@2` produces exactly the go@1 class list, with a test
 - [x] `spine update` plan flags added/removed stages for an adopting repo
@@ -82,14 +85,23 @@ The pin is now a **frozen class list**, and the render is keyed by it.
   version's frozen list (not `gate.CheckNames()`), and `planMaipipe` accepts
   any pack version this binary ships, naming all of them when it refuses one
   it does not.
-- `internal/gate/gate_test.go`: `TestGo1FrozenClassList` holds both
-  registries and the go@1 list to a literal golden list; its failure message
-  states the pin contract and the two legitimate ways out (fork a list under
-  a new `PackVersion`, or edit go@1's with a recorded reason).
+- `internal/gate/gate_test.go`: `TestFrozenClassLists` holds each shipped pack
+  version's list to a golden literal, and the registries to the **union** of
+  all shipped versions' lists — so shipping go@2 is a normal edit rather than
+  a false alarm blaming the registry for disagreeing with go@1 (review round
+  1, Important 2). Its two failure messages state the pin contract and the
+  registry/pack closure rule respectively.
 - `internal/update/gatepin_test.go`: a test seam (`packClassesFor`) stands in
-  a binary shipping go@1 **and** go@2; go@1 renders exactly the go@1 classes
-  and no trace of go@2's, at both the render and the full-`update` level,
-  while go@2 renders its own list.
+  a binary shipping go@1 **and** go@2, with go@1's list deliberately narrower
+  than the live registry (review round 1, Important 1) so a render that went
+  back to enumerating the registry fails the go@1 assertion itself. go@1
+  renders exactly its own classes at both the render and full-`update` level;
+  go@2 renders its own.
+- `unrecognizedRegionLines` recognises stage names against the **pinned**
+  pack's class list rather than the live registry, so a stage named after a
+  class shipped only under a later pack is unrecognized region content in a
+  go@1 repo — the same freeze the renderer enforces (review round 1,
+  controller-resolved item).
 - `FileReport.StagesAdded/StagesRemoved` + `cmd/spine/main.go`: the plan
   prints "maipipe.toml: this render adds N stage(s) not previously present:
   …" and names the `maipipe gate approve-definition` re-approval the changed
@@ -120,18 +132,26 @@ The pin is now a **frozen class list**, and the render is keyed by it.
 - `go vet ./...` — clean.
 - `make test` (`go test ./...`) — all packages ok, including
   `cmd/spine` and `internal/{gate,update}`. No test skipped.
-- New tests: `TestGo1FrozenClassList`,
+- New tests: `TestFrozenClassLists`,
   `TestPackClassesForRejectsPacksNotShipped`,
   `TestPackClassesForReturnsACopy` (gate);
   `TestPinnedPackRendersItsOwnFrozenClassList`,
   `TestPinnedRepoUpdateIgnoresLaterPackClasses`,
   `TestPlanReportsAddedAndRemovedStages`, `TestUnchangedStageListReportsNoChurn`
   (update); `TestUpdatePlanFlagsAddedGateStages` (cmd/spine).
-- **Negative control (required):** adding `"dummy-negative-control"` to
-  `checks` and running `go test ./internal/gate/ -run TestGo1FrozenClassList`
-  → `FAIL`, with `the check registry and the go@1 class list disagree:` and
-  the contract text "``gate_pack: go@1`` pins a frozen class list (ADR 0015
-  item 2, spec story 23)…". Reverted.
+- **Negative control (golden list):** adding `"dummy-negative-control"` to
+  `checks` and running `go test ./internal/gate/ -run TestFrozenClassLists`
+  → `FAIL: the check registry and the classes the shipped packs name
+  disagree:`, followed by the closure rule ("Registering a check is therefore
+  two edits, not one…") and the frozen-list contract ("ship it under a NEW
+  pack version… leaving the existing versions' lists untouched"). Reverted.
+- **Negative control (the freeze itself):** reverting `renderGateRegion` to
+  iterate `gate.CheckNames()` → `FAIL:
+  TestPinnedPackRendersItsOwnFrozenClassList`, on the **go@1** leg
+  (`go@1 did not render its frozen class list: got [9 classes] want
+  [binary-hygiene mutate tskip]`) and on the per-class assertion
+  (`class "dead-code-callgraph" reached a repo pinned at go@1`), not only via
+  the go@2 leg. Reverted.
 - **Negative control (churn reporting):** `TestUnchangedStageListReportsNoChurn`
   — a `gate_pack_config` change re-renders the region and reports no added or
   removed stage, so the plan's stage lines are not "the region changed" by

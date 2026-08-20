@@ -3,6 +3,7 @@ package update
 import (
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -10,24 +11,32 @@ import (
 	"github.com/russellpope/spine/internal/gate"
 )
 
-// futureClass is the class a later pack ships and go@1 does not.
+// futureClass is the class a later pack ships and the pinned pack does not.
 const futureClass = "future-class"
 
-// shipsGo2 stands in a spine binary that ships both go@1 and a later pack:
-// go@2's class list is go@1's plus one new class. It is the only thing a
-// second pack version needs for the pin to be testable — the registry and
-// the real packClasses map stay untouched.
-func shipsGo2(t *testing.T) {
+// narrowGo1 is a go@1 class list deliberately *narrower* than the live
+// registry: three classes, one of them the advisory mutate. A stub go@1 that
+// merely equalled CheckNames() would let a render that ignored the pin pass
+// this file's assertions, since today the two happen to coincide — the exact
+// "passes for the wrong reason" shape this ticket exists to eliminate.
+var narrowGo1 = []string{"binary-hygiene", "mutate", "tskip"}
+
+// narrowGo2 is the later pack: narrowGo1 plus one class go@1 never had.
+var narrowGo2 = append(append([]string(nil), narrowGo1...), futureClass)
+
+// shipsTwoPacks stands in a spine binary shipping both go@1 and a later
+// go@2, with go@1's list narrower than the registry. Nothing but
+// packClassesFor is replaced: the registry and gate.packClasses stay as they
+// are, so what the render follows is observable.
+func shipsTwoPacks(t *testing.T) {
 	t.Helper()
 	real := packClassesFor
-	go1, ok := real(gate.PackID())
-	if !ok {
-		t.Fatalf("this binary does not ship %s", gate.PackID())
-	}
-	go2 := append(append([]string(nil), go1...), futureClass)
 	packClassesFor = func(id string) ([]string, bool) {
-		if id == "go@2" {
-			return append([]string(nil), go2...), true
+		switch id {
+		case gate.PackID():
+			return append([]string(nil), narrowGo1...), true
+		case "go@2":
+			return append([]string(nil), narrowGo2...), true
 		}
 		return real(id)
 	}
@@ -46,48 +55,56 @@ func sorted(in []string) []string {
 // renders `gate_pack: go@1` as exactly the go@1 classes — the new class is
 // reachable only by moving the pin, which is what ADR 0015 item 2 and spec
 // story 23 promise.
+//
+// go@1 is stubbed narrower than the live registry, so a render that went back
+// to enumerating gate.CheckNames() fails here — on the go@1 leg, not only via
+// the go@2 one.
 func TestPinnedPackRendersItsOwnFrozenClassList(t *testing.T) {
-	shipsGo2(t)
-	go1, _ := gate.PackClassesFor(gate.PackID())
+	shipsTwoPacks(t)
 
 	pinned := renderGateRegion(gatePackSettings{
 		pack: gate.PackID(), disabled: map[string]bool{}, config: map[string]string{}})
 	// mutate renders last, in its own advisory pipeline, so the region's
 	// stage order is not the class list's — compare the sets.
-	got := sorted(regionStageNames(splitLines(pinned)))
-	if !reflect.DeepEqual(got, go1) {
-		t.Errorf("go@1 rendered from a binary shipping go@2:\n got %v\nwant %v", got, go1)
+	if got := sorted(regionStageNames(splitLines(pinned))); !reflect.DeepEqual(got, sorted(narrowGo1)) {
+		t.Errorf("%s did not render its frozen class list:\n got %v\nwant %v",
+			gate.PackID(), got, sorted(narrowGo1))
 	}
-	if strings.Contains(pinned, futureClass) {
-		t.Errorf("a class this binary added reached a repo pinned at %s:\n%s", gate.PackID(), pinned)
+	// Named individually: a registered class outside the pin must not appear,
+	// whether it comes from the registry or from the later pack.
+	for _, c := range append(gate.CheckNames(), futureClass) {
+		if slices.Contains(narrowGo1, c) {
+			continue
+		}
+		if strings.Contains(pinned, "\""+c+"\"") {
+			t.Errorf("class %q reached a repo pinned at %s:\n%s", c, gate.PackID(), pinned)
+		}
 	}
 
 	// The other direction: the later pack does render its own list, so the
-	// test above is about the pin and not about the class being unrenderable.
+	// test above is about the pin and not about a class being unrenderable.
 	moved := renderGateRegion(gatePackSettings{
 		pack: "go@2", disabled: map[string]bool{}, config: map[string]string{}})
-	wantGo2 := sorted(append(append([]string(nil), go1...), futureClass))
-	if !reflect.DeepEqual(sorted(regionStageNames(splitLines(moved))), wantGo2) {
-		t.Errorf("go@2 did not render its own class list:\n%s", moved)
+	if got := sorted(regionStageNames(splitLines(moved))); !reflect.DeepEqual(got, sorted(narrowGo2)) {
+		t.Errorf("go@2 did not render its own class list:\n got %v\nwant %v", got, sorted(narrowGo2))
 	}
 }
 
 // AC (I098), end to end: a full update of a repo pinned at go@1 on a binary
-// that also ships go@2 writes a maipipe.toml with no trace of the later
-// pack's class.
+// whose registry has grown past go@1 writes a maipipe.toml carrying exactly
+// the go@1 stages.
 func TestPinnedRepoUpdateIgnoresLaterPackClasses(t *testing.T) {
-	shipsGo2(t)
+	shipsTwoPacks(t)
 	dir := gateRepo(t, "[]", nil)
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
 		t.Fatal(err)
 	}
 	got := readFile(t, filepath.Join(dir, MaipipeFile))
-	if strings.Contains(got, futureClass) {
-		t.Fatalf("go@1 repo got a go@2 class after update:\n%s", got)
+	if names := sorted(regionStageNames(splitLines(got))); !reflect.DeepEqual(names, sorted(narrowGo1)) {
+		t.Fatalf("rendered stages:\n got %v\nwant %v\n\n%s", names, sorted(narrowGo1), got)
 	}
-	go1, _ := gate.PackClassesFor(gate.PackID())
-	if names := sorted(regionStageNames(splitLines(got))); !reflect.DeepEqual(names, go1) {
-		t.Errorf("rendered stages:\n got %v\nwant %v", names, go1)
+	if strings.Contains(got, futureClass) {
+		t.Errorf("a go@1 repo got a go@2 class after update:\n%s", got)
 	}
 }
 
