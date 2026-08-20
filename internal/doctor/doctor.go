@@ -174,10 +174,11 @@ func unknownGatePack(r update.FileReport) bool {
 }
 
 // gatePackCheck is D10: the integrity of spine's machine-managed gate-pack
-// region in maipipe.toml (ADR 0016) — markers present and well formed, and
-// content canonical for the pinned pack version. It fires only when the repo
-// sets gate_pack; a repo without a pack has no region and no maipipe.toml to
-// answer for (the fleet negative control). A canonical region is silent.
+// region in maipipe.toml (ADR 0017, superseding 0016) — markers present and
+// well formed, and content canonical for the pinned pack version. It fires
+// only when the repo sets gate_pack; a repo without a pack has no region and
+// no maipipe.toml to answer for (the fleet negative control). A canonical
+// region is silent.
 // An unknown gate_pack: value is not region integrity and is D4's (I099).
 func gatePackCheck(dir string) []Finding {
 	wf, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
