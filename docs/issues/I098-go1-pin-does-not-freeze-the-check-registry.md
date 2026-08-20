@@ -162,6 +162,11 @@ The pin is now a **frozen class list**, and the render is keyed by it.
 
 ## Notes
 
+The pin's *other* half is not enforced: findings are still attributed with the
+binary's `PackVersion`, not the repo's pin, so a go@1 repo will emit
+`go@2/<check>` codes once go@2 ships. Filed as **I103** from the final
+whole-branch review; out of scope here, which fixed the class set.
+
 The estate's blast radius is currently one repo (spine's own), which is why this
 is filed now rather than after the second adopter — it is cheap while the golden
 list has one consumer.

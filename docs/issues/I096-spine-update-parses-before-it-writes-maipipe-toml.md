@@ -73,7 +73,7 @@ This is a refusal, not a repair: spine must not move the user's stage back.
 `internal/update/maipipecheck.go`: `checkMaipipeContent(path, content)` runs
 before any file is written by `update.Run` — a refusal leaves the whole tree
 untouched, not just maipipe.toml. It parses the candidate as TOML
-(`parseTOML`, hand-rolled: ADR 0001 keeps spine on zero third-party
+(`checkStructure`, hand-rolled: ADR 0001 keeps spine on zero third-party
 dependencies) and, when `exec.LookPath("maipipe")` resolves, runs `maipipe
 validate` against a temp copy, quoting maipipe's message verbatim. A
 `duplicate stage name` in that message carries the hint that a copy of the
@@ -117,12 +117,33 @@ being used as identity and re-quoted only for messages; canonical segments
 join on a byte no key can contain, so `"a.b"` (one segment) stays distinct
 from `a.b` (two).
 
-**Parser (fix round 1, Important 1).** `parseTOML`'s scanner replaces each
+**Parser (fix round 1, Important 1).** `checkStructure`'s scanner replaces each
 consumed string with a placeholder instead of dropping it: dropping made
 `[pipelines."e2e.smoke"]` and `"my key" = 1` — both legal TOML — look
 malformed, which would have hard-blocked writes in any repo using a quoted
 key. A standard table under an array-of-tables entry is qualified by that
 entry, so `[[a]] [a.b] [[a]] [a.b]` is not read as a duplicate.
+
+**Gap in this ticket, closed in the final-review fix wave (2026-08-20).**
+The ticket says refuse "before `WriteFileAtomic`", and the implementation
+did exactly that — so the check ran only under `--write`. A reader could see
+a clean plan with a diff and exit 1, run `--write`, and be refused: the plan
+diff is the review surface (ADR 0017), yet the one thing that would stop the
+write was invisible on it. Recorded here as a gap in the ticket's wording
+rather than a slip in the code. The pre-flight now runs in the plan pass on
+every run; the verdict rides on `FileReport.Refusal` and the plan prints it
+before that file's diff, and `--write` returns the same verdict. Also closing
+the AC5 follow-up noted above: on a *passing* run with no maipipe on PATH the
+plan now says the pre-flight was structural only, so silence no longer reads
+as a full check (`FileReport.StructuralOnly`).
+
+**Naming (final review, Important 3).** `parseTOML` is renamed
+`checkStructure`, and its doc comment, `TestCheckStructure`'s comment and the
+no-binary note now describe what it is — a duplicate-table/duplicate-key and
+bracket-balance scan, not a TOML parser. Text it accepts that TOML rejects
+(`a b = 1`, `a = = 1`, `"\101"`) is recorded, with the rest of the residual
+list and the question of whether the scanner should exist at all, in **I104**.
+The scanner itself was deliberately not changed again.
 
 ## Evidence
 
@@ -149,10 +170,10 @@ entry, so `[[a]] [a.b] [[a]] [a.b]` is not read as a duplicate.
   turns a missing binary into a failure so CI can assert they really ran.
 - Round-2 negative controls: reverting the deadline ordering makes
   `TestValidateTimeoutIsNotAVerdict` report `rejected the result: signal:
-  killed`; reverting the unquoting makes `TestParseTOML` accept all seven
+  killed`; reverting the unquoting makes `TestCheckStructure` accept all seven
   quoted/bare duplicate pairs.
 - Quoted-key negative control (fix round 1): reverting the scanner to drop
-  strings fails `TestParseTOML` (`empty key`, `duplicate table
+  strings fails `TestCheckStructure` (`empty key`, `duplicate table
   [pipelines.]`) and `TestScanKeepsQuotedSegments`.
 
 ## Notes
