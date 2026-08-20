@@ -259,7 +259,7 @@ Gate pack (per ADR 0015/0016)
   build_outputs, n_plus_one_clients, tskip_allow}`. Rendering omits disabled
   classes. Template generation bumps to 11 for the new keys and
   `docs/remediation/`.
-- Doctor: D10 emits exactly four findings, all about the region and nothing
+- Doctor: D10 emits exactly four kinds of finding, all about the region and nothing
   else per repo — damaged markers (error, hand repair); region lines that are
   not canonical for the pinned pack (warn); `gate_pack` set but no region at
   all (warn); and a well-formed, recognized region that differs from what the

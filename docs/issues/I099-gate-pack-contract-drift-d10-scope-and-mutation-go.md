@@ -97,6 +97,13 @@ story 18 and the Doctor line now enumerate the four findings D10 emits: damaged
 markers (error), non-canonical region lines (warn), `gate_pack` set with no
 region (warn), and a region differing from the rendering (warn).
 
+*Filing note:* the Problem section above says the staleness warn is "the only
+signal a hand-edited region produces today". That overstates, and the Problem
+section is left as filed. A hand-edit that introduces lines the pack does not
+recognize produces the non-canonical warn; only an edit made entirely out of
+recognized pack lines falls through to the staleness warn, and that is the
+indistinguishable case reading (A) declines to resolve.
+
 *Requirements note:* the Fix item above says "the three D10 cases actually
 implemented". Counted from the switch arms, D10 emits four findings (the
 unrecognized arm splits into a marker error and a non-canonical warn). The spec

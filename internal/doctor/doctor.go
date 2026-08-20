@@ -116,6 +116,9 @@ func stagesCheck(dir string) []Finding {
 }
 
 // updateChecks maps a dry-run of update onto D2 (stale) and D4 (unrecognized).
+// D4 is not warn-only: alongside its info/warn arms it carries an error arm for
+// unrecognized content update refuses to render at all — today, an unknown
+// gate_pack: value in WORKFLOW.md (I099).
 func updateChecks(dir string) []Finding {
 	var findings []Finding
 	reports, err := update.Run(update.Options{Dir: dir})
