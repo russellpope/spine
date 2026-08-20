@@ -126,6 +126,13 @@ func updateChecks(dir string) []Finding {
 		if r.Path == update.MaipipeFile {
 			// The gate pack's delivery region is D10's, whole: one finding
 			// per problem, phrased for a region rather than a whole file.
+			// The one exception (I099) is the unknown-pack report: update
+			// files it against maipipe.toml because that is the file it
+			// declined to render, but the defect and its remedy are both a
+			// WORKFLOW.md gate_pack: value, so it is D4's, on WORKFLOW.md.
+			if unknownGatePack(r) {
+				findings = append(findings, Finding{"D4", "error", "WORKFLOW.md", r.Unrecognized[0]})
+			}
 			continue
 		}
 		if r.Preserved {
@@ -153,11 +160,22 @@ func updateChecks(dir string) []Finding {
 	return findings
 }
 
+// unknownGatePack reports whether a maipipe.toml update report is the
+// unknown-pack refusal — WORKFLOW.md pinned a gate_pack: this binary does
+// not ship, so update rendered no region at all. It is recognised by the
+// message prefix update stamps on it; no other unrecognized line for this
+// file starts with a WORKFLOW.md key name.
+func unknownGatePack(r update.FileReport) bool {
+	return r.Path == update.MaipipeFile && len(r.Unrecognized) > 0 &&
+		strings.HasPrefix(r.Unrecognized[0], "gate_pack:")
+}
+
 // gatePackCheck is D10: the integrity of spine's machine-managed gate-pack
 // region in maipipe.toml (ADR 0016) — markers present and well formed, and
 // content canonical for the pinned pack version. It fires only when the repo
 // sets gate_pack; a repo without a pack has no region and no maipipe.toml to
 // answer for (the fleet negative control). A canonical region is silent.
+// An unknown gate_pack: value is not region integrity and is D4's (I099).
 func gatePackCheck(dir string) []Finding {
 	wf, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
 	if err != nil {
@@ -176,13 +194,13 @@ func gatePackCheck(dir string) []Finding {
 			continue
 		}
 		switch {
+		case unknownGatePack(r):
+			// Reported as D4 on WORKFLOW.md; no region exists to judge.
 		case len(r.Unrecognized) > 0:
 			sev := "warn"
 			msg := fmt.Sprintf("%d line(s) in the spine gate-pack region are not canonical for the pinned pack — reconcile or spine update --force", len(r.Unrecognized))
 			if strings.Contains(r.Unrecognized[0], "markers") {
 				// --force deliberately cannot repair marker damage.
-				sev, msg = "error", r.Unrecognized[0]
-			} else if strings.HasPrefix(r.Unrecognized[0], "gate_pack:") {
 				sev, msg = "error", r.Unrecognized[0]
 			}
 			findings = append(findings, Finding{"D10", sev, r.Path, msg})
@@ -190,8 +208,17 @@ func gatePackCheck(dir string) []Finding {
 			findings = append(findings, Finding{"D10", "warn", r.Path,
 				"gate_pack is set but the gate-pack region is missing — run spine update"})
 		case r.State == update.Pending:
+			// The region differs from what this pack renders from the current
+			// WORKFLOW.md. Two causes reach here — WORKFLOW.md changed and the
+			// region has not been refreshed, or the region was edited into some
+			// other shape this pack does not render — and the message does not
+			// distinguish them because doctor cannot: under I095 reading (A) the
+			// region is a pure projection of WORKFLOW.md with deliberately no
+			// record of what spine last rendered (no fingerprint, no sidecar),
+			// and telling the two apart needs exactly that record. The remedy is
+			// the same either way, so the message names the remedy, not a cause.
 			findings = append(findings, Finding{"D10", "warn", r.Path,
-				"gate-pack region is stale for the pinned pack — run spine update"})
+				"gate-pack region differs from what the pinned pack renders — run spine update"})
 		}
 	}
 	return findings
