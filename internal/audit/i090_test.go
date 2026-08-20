@@ -35,6 +35,26 @@ func TestTeamSpawnsAreJudged(t *testing.T) {
 	}
 }
 
+// A spawn matching no ticket is listed informationally like any other
+// unmatched dispatch, carrying the effort the command declared — reported,
+// never judged.
+func TestUnmatchedTeamSpawnCarriesEffort(t *testing.T) {
+	rep := runFixture(t, "team")
+	got := map[string]string{}
+	for _, d := range rep.Unmatched {
+		got[d.Model] = d.Effort
+	}
+	if len(got) != 2 {
+		t.Fatalf("want the 2 scratch spawns unmatched, got %+v", rep.Unmatched)
+	}
+	if got["claude-fable-5"] != "high" {
+		t.Errorf("scratch spawn effort = %q, want high", got["claude-fable-5"])
+	}
+	if got["claude-opus-4-8"] != "" {
+		t.Errorf("spawn declaring no effort must report none, got %q", got["claude-opus-4-8"])
+	}
+}
+
 // The load-bearing check for the positive control above: with I090's
 // recognition switched off, every team-built ticket falls back to the
 // no-transcript verdict the ticket was filed about. If this fails, the

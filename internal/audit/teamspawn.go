@@ -53,6 +53,14 @@ type teamPrompt struct {
 // transcript line, well before any ticket list is in reach, and a spawn that
 // names some OTHER repo's ticket must still not silently borrow the next
 // prompt's attribution.
+//
+// The shape is broader than any real id — an unrelated token such as ISO8601
+// or SHA256 reads as "names a ticket" too. That direction is deliberate: a
+// false positive only stops the spawn from borrowing the following prompt's
+// attribution, so the ticket degrades to no-transcript (the pre-I090
+// verdict, visibly unjudged) rather than being attributed to a ticket nobody
+// dispatched. Misattribution is the failure this audit must never make;
+// under-attribution it already reports honestly.
 var ticketTokenRe = regexp.MustCompile(`(^|[^A-Za-z0-9])[A-Z]{1,4}[0-9]{2,5}([^A-Za-z0-9]|$)`)
 
 // namesATicket reports whether text carries a ticket-id-shaped token.

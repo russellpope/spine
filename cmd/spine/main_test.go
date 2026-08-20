@@ -850,6 +850,20 @@ func TestAuditRoutingEndToEnd(t *testing.T) {
 	if !strings.Contains(out, "housekeeping") {
 		t.Errorf("mixed out should list the unmatched dispatch: %q", out)
 	}
+	// team fixture (I090): claude-team Bash spawns are judged — the
+	// under-tiered one exits 1 — and an unmatched spawn renders the effort
+	// its command declared, while one that declared none renders bare.
+	code, out, _ = runCmd(t, "audit", "routing",
+		"--dir", fixture("team", "repo"), "--transcripts", fixture("team", "transcripts"), "--codex-sessions", noCodex)
+	if code != 1 || !strings.Contains(out, "silent-descent") {
+		t.Fatalf("team: code=%d (want 1) out=%q", code, out)
+	}
+	if !strings.Contains(out, "[claude-fable-5 @ high]") {
+		t.Errorf("team out should render the unmatched spawn's effort: %q", out)
+	}
+	if !strings.Contains(out, "[claude-opus-4-8]") {
+		t.Errorf("a spawn declaring no effort must render bare: %q", out)
+	}
 	// degraded fixture: warnings on stderr, exit 0
 	code, _, errs = runCmd(t, "audit", "routing",
 		"--dir", fixture("degraded", "repo"), "--transcripts", fixture("degraded", "transcripts"), "--codex-sessions", noCodex)

@@ -157,7 +157,12 @@ type TicketRow struct {
 type DispatchInfo struct {
 	Description string
 	Model       string
-	Effort      string // declared worker effort, claude-team spawns only (I090); "" otherwise
+	// Effort is the worker effort a claude-team spawn declared (I090); ""
+	// for every other dispatch shape. It is reported, never judged: the
+	// routing contract's enforcement is model-vs-tier, and comparing effort
+	// against a ticket's effort: frontmatter would be a second, separate
+	// contract. Out of scope for I090 by design, not an oversight.
+	Effort string
 }
 
 // Report is the audit result.
@@ -935,7 +940,7 @@ type dispatch struct {
 	description string
 	prompt      string
 	model       string
-	effort      string // declared worker effort, claude-team spawns only (I090); "" otherwise
+	effort      string // declared worker effort, claude-team spawns only (I090); reported, never judged — see DispatchInfo.Effort
 	flavor      string // the transcript source's flavor (I040 per-token seam)
 	sourceFile  string // source transcript file (D24, codex only); "" for claude
 	cwd         string // D28 (I047): the event line's own cwd, claude only; "" for codex (D22 scopes it separately)
