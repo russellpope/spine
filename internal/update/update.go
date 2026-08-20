@@ -44,7 +44,16 @@ type FileReport struct {
 	// deliberate per-repo choices (matched no shipped default). WORKFLOW.md
 	// only.
 	ModelOverrides []ModelOverride
-	newContent     string
+	// StagesAdded and StagesRemoved name the gate-pack stages this render
+	// adds to, or drops from, the region already in maipipe.toml. maipipe.toml
+	// only, and only when the file already carries a region — a region being
+	// written for the first time is wholly visible in the plan diff. The plan
+	// prints them so the cost is visible before --write (I098): an added stage
+	// is a new step in a gating lane, and either change rewrites the region's
+	// bytes and so maipipe's definition_hash.
+	StagesAdded   []string
+	StagesRemoved []string
+	newContent    string
 }
 
 // Options configures Run. Zero value = dry-run on ".". AdoptProfile switches

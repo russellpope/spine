@@ -161,6 +161,23 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 	}
+	// gate-pack stage churn (I098): an added stage is a new step in a gating
+	// lane, and any stage change rewrites the region's bytes and so maipipe's
+	// definition_hash — both are things to see before --write, not after.
+	// Skipped files print neither: nothing about them is applied.
+	stageNotes := func(r update.FileReport) {
+		if len(r.StagesAdded) > 0 {
+			fmt.Fprintf(stdout, "%s: this render adds %d stage(s) not previously present: %s\n",
+				r.Path, len(r.StagesAdded), strings.Join(r.StagesAdded, ", "))
+		}
+		if len(r.StagesRemoved) > 0 {
+			fmt.Fprintf(stdout, "%s: this render drops %d stage(s) present today: %s\n",
+				r.Path, len(r.StagesRemoved), strings.Join(r.StagesRemoved, ", "))
+		}
+		if len(r.StagesAdded) > 0 || len(r.StagesRemoved) > 0 {
+			fmt.Fprintf(stdout, "%s: the region's bytes change, so maipipe's definition_hash does too — re-run `maipipe gate approve-definition`\n", r.Path)
+		}
+	}
 	for _, r := range reports {
 		switch r.State {
 		case update.UpToDate:
@@ -178,9 +195,11 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 					fmt.Fprintf(stdout, "updated: %s\n", r.Path)
 				}
 				modelNotes(r)
+				stageNotes(r)
 			} else {
 				outstanding++
 				modelNotes(r)
+				stageNotes(r)
 				fmt.Fprint(stdout, r.Diff)
 			}
 		case update.SkippedUnrecognized:

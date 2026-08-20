@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -97,20 +98,29 @@ func parseList(v string) []string {
 	return out
 }
 
+// packClassesFor resolves a pinned pack identifier to its frozen class list.
+// It is a variable so a test can stand in a binary that ships a later pack
+// and prove the pin still renders its own list (I098); nothing but a test
+// ever replaces it.
+var packClassesFor = gate.PackClassesFor
+
 // renderGateRegion is the canonical region for (pack, disabled, config): a
 // pure function of its inputs, byte-deterministic, ending in a newline.
-// gate-go carries one stage per enabled check class in gate.CheckNames()
-// order, except mutate; mutation-go carries mutate alone. Disabling mutate
-// omits the mutation-go pipeline entirely, the same way disabling any other
-// class omits its stage.
+// gate-go carries one stage per enabled class of the *pinned pack version*
+// (I098) — not per registered check — in sorted order, except mutate;
+// mutation-go carries mutate alone. Disabling mutate omits the mutation-go
+// pipeline entirely, the same way disabling any other class omits its stage.
+// The caller has already established that the pin is a pack this binary
+// ships, so an unshipped pin renders no stages rather than guessing.
 func renderGateRegion(s gatePackSettings) string {
+	classes, _ := packClassesFor(s.pack)
 	var b strings.Builder
 	b.WriteString(gateRegionBegin + s.pack + "\n")
 	for _, c := range gateRegionComment {
 		b.WriteString(c + "\n")
 	}
 	b.WriteString("\n[pipelines." + gatePipelineName + "]\nprofile = \"full\"\n")
-	for _, check := range gate.CheckNames() {
+	for _, check := range classes {
 		if s.disabled[check] || check == mutateCheck {
 			continue
 		}
@@ -123,7 +133,7 @@ func renderGateRegion(s gatePackSettings) string {
 			}
 		}
 	}
-	if !s.disabled[mutateCheck] {
+	if slices.Contains(classes, mutateCheck) && !s.disabled[mutateCheck] {
 		b.WriteString("\n[pipelines." + mutationPipelineName + "]\nprofile = \"audit\"\n")
 		b.WriteString("\n[[pipelines." + mutationPipelineName + ".stage]]\n")
 		fmt.Fprintf(&b, "name = %q\n", mutateCheck)
@@ -143,12 +153,13 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		return FileReport{}, false, nil
 	}
 	report := FileReport{Path: MaipipeFile}
-	if s.pack != gate.PackID() {
+	if _, shipped := packClassesFor(s.pack); !shipped {
 		// An unknown pack is never rendered and never guessed at: the repo
 		// pinned a version this binary does not ship (ADR 0015).
 		report.State = SkippedUnrecognized
 		report.Unrecognized = []string{fmt.Sprintf(
-			"gate_pack: %s is not a pack this spine binary ships (known: %s)", s.pack, gate.PackID())}
+			"gate_pack: %s is not a pack this spine binary ships (known: %s)",
+			s.pack, strings.Join(gate.PackIDs(), ", "))}
 		return report, true, nil
 	}
 	region := renderGateRegion(s)
@@ -191,6 +202,8 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 	} else {
 		lines := splitLines(old)
 		report.Unrecognized = unrecognizedRegionLines(lines[begin+1 : end])
+		report.StagesAdded, report.StagesRemoved = stageDelta(
+			regionStageNames(lines[begin+1:end]), regionStageNames(splitLines(region)))
 		newContent = strings.Join(append(append(append([]string{}, lines[:begin]...),
 			splitLines(strings.TrimSuffix(region, "\n"))...), lines[end+1:]...), "\n")
 	}
@@ -200,6 +213,44 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		report.newContent = newContent
 	}
 	return report, true, nil
+}
+
+// regionStageNames returns the stage names inside a region's lines, in the
+// order they appear. A stage name is the one `name = "…"` line each stage
+// table carries.
+func regionStageNames(lines []string) []string {
+	var out []string
+	for _, raw := range lines {
+		if v, ok := quotedValue(strings.TrimRight(raw, " "), "name = "); ok {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// stageDelta reports which stages this render adds to, and drops from, the
+// region already on disk. Both costs are worth naming before --write (I098):
+// an added stage is a new step in a gating lane, and either change rewrites
+// the region's bytes, hence the file's blob, hence maipipe's
+// definition_hash — so the repo has to re-approve the definition.
+func stageDelta(old, new []string) (added, removed []string) {
+	had := map[string]bool{}
+	for _, s := range old {
+		had[s] = true
+	}
+	has := map[string]bool{}
+	for _, s := range new {
+		has[s] = true
+		if !had[s] {
+			added = append(added, s)
+		}
+	}
+	for _, s := range old {
+		if !has[s] {
+			removed = append(removed, s)
+		}
+	}
+	return added, removed
 }
 
 // gateRegionBounds locates the region's marker lines by index. It returns

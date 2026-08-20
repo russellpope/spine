@@ -2268,3 +2268,58 @@ func TestRoundBudgetEmptyRatificationAdvisesAndDoctorIsUntouched(t *testing.T) {
 		t.Errorf("doctor must not report the round-budget advisory: %q", out)
 	}
 }
+
+// AC (I098): the update plan names the stages a render adds to the region
+// already on disk, and the definition_hash re-approval they cost, before
+// --write — a new stage in the gating lane is not something to discover
+// from a diff.
+func TestUpdatePlanFlagsAddedGateStages(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	setGateKeys := func(pack, disabled string) {
+		t.Helper()
+		path := filepath.Join(dir, "WORKFLOW.md")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(raw)
+		for _, r := range [][2]string{
+			{"gate_pack:", "gate_pack: " + pack},
+			{"gate_pack_disabled:", "gate_pack_disabled: " + disabled},
+		} {
+			i := strings.Index(content, r[0])
+			if i < 0 {
+				t.Fatalf("scaffolded WORKFLOW.md has no %s key", r[0])
+			}
+			end := i + strings.Index(content[i:], "#")
+			content = content[:i] + r[1] + "    " + content[end:]
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setGateKeys("go@1", "[tskip, n-plus-one]")
+	if code, out, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 0 {
+		t.Fatalf("write code=%d out=%q err=%q", code, out, errs)
+	}
+
+	setGateKeys("go@1", "[]")
+	code, out, _ := runCmd(t, "update", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("dry-run code=%d out=%q", code, out)
+	}
+	want := "maipipe.toml: this render adds 2 stage(s) not previously present: n-plus-one, tskip"
+	if !strings.Contains(out, want) {
+		t.Errorf("plan missing the added-stage line %q, out=%q", want, out)
+	}
+	if !strings.Contains(out, "maipipe gate approve-definition") {
+		t.Errorf("plan does not name the definition_hash re-approval, out=%q", out)
+	}
+	// A plan that adds stages says nothing about dropping any.
+	if strings.Contains(out, "stage(s) present today") {
+		t.Errorf("plan reports dropped stages for an add-only render, out=%q", out)
+	}
+}
