@@ -76,4 +76,14 @@ no-transcript). Tests in `internal/audit/i090_test.go`.
     verdict = escalated-no-reason …, want no-transcript`.
   - skip `stripHeredocBodies` → `I503 verdict = escalated-no-reason …, want
     no-transcript`.
+- Misattribution guards (review round 1): fixture `testdata/teampair` — two
+  workers started back-to-back and briefed in the same order, a worker
+  restarted before being briefed, and a follow-up prompt naming a third
+  ticket — plus the `TestAttributeTeamPrompt` table. One mutation per guard,
+  all five caught: ignoring the worker handle → `I601 actuals =
+  "claude-fable-5", want "claude-sonnet-5"`; scanning forward → `I604 …
+  silent-descent … want match`; dropping first-prompt-only → `I603 verdict =
+  match, want no-transcript`; dropping spawn-token-wins →
+  `spawn 0 (impl-b) prompt = "now do I407", want ""`; dropping the `#` guard
+  → `spawn_parenthesized_inside_a_trailing_comment` fails.
 - `go vet ./...` clean; `make test` green across all 18 packages.
