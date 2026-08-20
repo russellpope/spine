@@ -121,8 +121,11 @@ Gate pack
 17. As a spine maintainer, I want every check class to ship a positive
     control pair (known-good passes, seeded violation fails) in spine's
     test suite, so that a check that cannot fail cannot ship.
-18. As a repo owner, I want `spine doctor` to check region integrity only
-    (markers, canonical content), so that per-repo doctor cost is one file.
+18. As a repo owner, I want `spine doctor`'s D10 to check region integrity
+    only — the region's markers, its content, and its presence when
+    `gate_pack` is set — so that per-repo doctor cost is one file. A defect
+    in the `gate_pack:` value itself is a WORKFLOW.md finding (D4), not
+    D10's, because its remedy is a WORKFLOW.md edit (I099).
 19. As a Go repo owner, I want the eight go@1 classes — `tskip`,
     `deferred-cleanup-errcheck`, `dead-code-callgraph`, `test-enum-vs-spec`,
     `n-plus-one`, `binary-hygiene`, `gitignore-control`, `fixture-manifest`
@@ -256,8 +259,16 @@ Gate pack (per ADR 0015/0016)
   build_outputs, n_plus_one_clients, tskip_allow}`. Rendering omits disabled
   classes. Template generation bumps to 11 for the new keys and
   `docs/remediation/`.
-- Doctor: region markers present and content canonical for the pinned pack
-  version; nothing else per repo.
+- Doctor: D10 emits exactly four kinds of finding, all about the region and nothing
+  else per repo — damaged markers (error, hand repair); region lines that are
+  not canonical for the pinned pack (warn); `gate_pack` set but no region at
+  all (warn); and a well-formed, recognized region that differs from what the
+  pack renders from the current WORKFLOW.md (warn). That last one names the
+  remedy rather than a cause: under I095 reading (A) the region is a pure
+  projection with deliberately no record of what spine last rendered, so
+  "WORKFLOW.md changed and the region is not refreshed" and "the region was
+  edited into another shape" cannot be told apart. An unknown `gate_pack:`
+  value is D4 error on WORKFLOW.md, not a D10 finding (I099).
 - Positive controls: fixture repos per check under spine's testdata, each
   with a passing and a seeded-violation variant, run at the CLI seam.
 - Supersedes ADR 0013 items 2 and 4; the `/model-eval` skill's Python

@@ -67,3 +67,14 @@ pipeline = "fast"
 name = "gates"
 pipeline = "gate-go"
 needs = ["fast"]
+
+# No audit lane composing `mutation-go` — deliberate, recorded 2026-08-20
+# under issue I099. The gate pack asks each repo to compose the advisory
+# mutation battery itself, with a stage `pipeline = "mutation-go"` in an
+# audit lane. No repo does, spine included: the scaffolding that writes an
+# audit lane is maipipe's to build (its ticket I204 — open, blocked by
+# I202+I203), and a lane hand-written here would be work I204 then has to
+# reconcile. Until I204 lands, run the battery by name:
+#     maipipe run mutation-go
+# Owner of the gap: maipipe I204. Background: docs/issues/I099, and the
+# Consequences of the ADR covering spine's region in this file.

@@ -755,3 +755,132 @@ func TestD10SilentWithoutGatePack(t *testing.T) {
 		t.Fatalf("D10 fired without gate_pack: %#v", fs)
 	}
 }
+
+// setWorkflowKey rewrites the value of one `key: value` row of a repo's
+// WORKFLOW.md, preserving any trailing `#` comment so the row stays the
+// template's — the point of these fixtures is a changed value, not a
+// changed file shape.
+func setWorkflowKey(t *testing.T, dir, key, value string) {
+	t.Helper()
+	path := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	found := false
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), key+":") {
+			row := key + ": " + value
+			// Reproduce the renderer's spacing for a value-filled row —
+			// four spaces before the trailing comment — so WORKFLOW.md
+			// stays canonical and its own drift finding cannot mask the
+			// gate-pack finding under test.
+			if c := strings.Index(l, "#"); c >= 0 {
+				row += "    " + l[c:]
+			}
+			lines[i] = row
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("%s: row not found in WORKFLOW.md", key)
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// AC (I099): gate_pack set but no region at all — D10 warn, region missing.
+func TestD10RegionMissing(t *testing.T) {
+	dir := gatePackRepo(t)
+	if err := os.Remove(filepath.Join(dir, update.MaipipeFile)); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []doctor.Finding
+	for _, f := range fs {
+		if f.ID == "D10" {
+			got = append(got, f)
+		}
+	}
+	if len(got) != 1 || got[0].Severity != "warn" || !strings.Contains(got[0].Message, "region is missing") {
+		t.Fatalf("want one D10 warn about a missing region, got %#v (all: %#v)", got, fs)
+	}
+	if got[0].Path != update.MaipipeFile {
+		t.Errorf("D10 path = %q, want %q", got[0].Path, update.MaipipeFile)
+	}
+	// Pin the fixture's blast radius like its siblings'. Deleting the whole
+	// file is a bigger edit than they make, so the D4 set is worth stating
+	// rather than assuming: maipipe.toml is not a spine-scaffolded file, so
+	// its absence draws no D4 and nothing else besides the one D10.
+	if ids(fs)["D4"] != 0 {
+		t.Errorf("missing maipipe.toml also reported as D4: %#v", fs)
+	}
+	if len(fs) != 1 {
+		t.Errorf("missing region produced collateral findings: %#v", fs)
+	}
+}
+
+// AC (I099): a region that is well formed and made of recognized pack lines
+// but is no longer what the pack renders (here: WORKFLOW.md disabled a class
+// after the region was written) — D10 warn, phrased as a difference rather
+// than a cause, since under I095 reading (A) doctor keeps no record of what
+// spine last rendered and so cannot tell the two causes apart.
+func TestD10RegionDiffersFromRendering(t *testing.T) {
+	dir := gatePackRepo(t)
+	setWorkflowKey(t, dir, "gate_pack_disabled", "[tskip]")
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []doctor.Finding
+	for _, f := range fs {
+		if f.ID == "D10" {
+			got = append(got, f)
+		}
+	}
+	if len(got) != 1 || got[0].Severity != "warn" ||
+		!strings.Contains(got[0].Message, "differs from what the pinned pack renders") {
+		t.Fatalf("want one D10 warn about a differing region, got %#v (all: %#v)", got, fs)
+	}
+	if len(fs) != 1 {
+		t.Errorf("region drift produced collateral findings: %#v", fs)
+	}
+}
+
+// AC (I099) negative control: an unknown gate_pack: value is a WORKFLOW.md
+// defect with a WORKFLOW.md remedy, so it surfaces as a D4 error on
+// WORKFLOW.md and no longer as a D10 error wearing a maipipe.toml path.
+func TestUnknownGatePackIsD4OnWorkflowNotD10(t *testing.T) {
+	dir := gatePackRepo(t)
+	setWorkflowKey(t, dir, "gate_pack", "go@99")
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []doctor.Finding
+	for _, f := range fs {
+		if strings.Contains(f.Message, "is not a pack this spine binary ships") {
+			got = append(got, f)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("want exactly one unknown-pack finding, got %#v (all: %#v)", got, fs)
+	}
+	if got[0].ID != "D4" || got[0].Severity != "error" || got[0].Path != "WORKFLOW.md" {
+		t.Errorf("unknown-pack finding = %#v, want D4 error on WORKFLOW.md", got[0])
+	}
+	for _, f := range fs {
+		if f.ID == "D10" {
+			t.Errorf("D10 still fires for an unknown pack: %#v", f)
+		}
+	}
+	if len(fs) != 1 {
+		t.Errorf("unknown pack produced collateral findings: %#v", fs)
+	}
+}
