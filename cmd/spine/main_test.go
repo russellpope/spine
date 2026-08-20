@@ -2269,6 +2269,94 @@ func TestRoundBudgetEmptyRatificationAdvisesAndDoctorIsUntouched(t *testing.T) {
 	}
 }
 
+// Final review, Important 1: the dry-run plan prints the refusal --write
+// would hit, before that file's diff — the plan is the review surface
+// (ADR 0017), so the blocker cannot be something the reader discovers by
+// running --write. Minor 6: a pass with no maipipe on PATH says which half of
+// the pre-flight ran.
+func TestUpdateDryRunPrintsTheRefusalBeforeTheDiff(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	setGateKeys(t, dir, "go@1", "[]")
+
+	// A [pipelines.gate-go] table of the repo's own, which the region spine
+	// appends then declares a second time.
+	path := filepath.Join(dir, "maipipe.toml")
+	if err := os.WriteFile(path, []byte("schema = 0\n\n[pipelines.gate-go]\nprofile = \"fast\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, _ := runCmd(t, "update", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("dry-run code=%d out=%q", code, out)
+	}
+	refusal := strings.Index(out, "refusing to write")
+	if refusal < 0 {
+		t.Fatalf("dry-run plan does not show the refusal, out=%q", out)
+	}
+	if !strings.Contains(out, "duplicate table") {
+		t.Errorf("refusal does not name the problem, out=%q", out)
+	}
+	if !strings.Contains(out, "--write would refuse this plan as a whole") {
+		t.Errorf("plan does not say the refusal aborts the whole run, out=%q", out)
+	}
+	if diff := strings.Index(out, "--- maipipe.toml"); diff < 0 || diff < refusal {
+		t.Errorf("refusal at %d is not printed before the diff at %d, out=%q", refusal, diff, out)
+	}
+	if after, err := os.ReadFile(path); err != nil || string(after) != string(before) {
+		t.Errorf("a dry-run touched maipipe.toml (err=%v)", err)
+	}
+	// And --write does refuse, so the plan told the truth.
+	if code, _, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 2 ||
+		!strings.Contains(errs, "no files were written") {
+		t.Errorf("write code=%d err=%q; want a refusal naming the whole-run abort", code, errs)
+	}
+}
+
+// setGateKeys rewrites the two gate_pack keys in a scaffolded WORKFLOW.md.
+// Each key's value is replaced to the end of *its own* line, with any trailing
+// comment kept: the earlier cut cut at the next "#" anywhere after the key and
+// worked only because the template happens to carry a trailing comment on both
+// of these lines (final review, Minor 5).
+func setGateKeys(t *testing.T, dir, pack, disabled string) {
+	t.Helper()
+	path := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"gate_pack:": pack, "gate_pack_disabled:": disabled}
+	set := map[string]bool{}
+	lines := strings.Split(string(raw), "\n")
+	for i, line := range lines {
+		for key, val := range want {
+			if set[key] || !strings.HasPrefix(strings.TrimSpace(line), key) {
+				continue
+			}
+			trailer := ""
+			if j := strings.Index(line, "#"); j >= 0 {
+				trailer = "    " + line[j:]
+			}
+			lines[i] = key + " " + val + trailer
+			set[key] = true
+		}
+	}
+	for key := range want {
+		if !set[key] {
+			t.Fatalf("scaffolded WORKFLOW.md has no %s key", key)
+		}
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // AC (I098): the update plan names the stages a render adds to the region
 // already on disk, and the definition_hash re-approval they cost, before
 // --write — a new stage in the gating lane is not something to discover
@@ -2278,35 +2366,12 @@ func TestUpdatePlanFlagsAddedGateStages(t *testing.T) {
 	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
 		t.Fatal(errs)
 	}
-	setGateKeys := func(pack, disabled string) {
-		t.Helper()
-		path := filepath.Join(dir, "WORKFLOW.md")
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		content := string(raw)
-		for _, r := range [][2]string{
-			{"gate_pack:", "gate_pack: " + pack},
-			{"gate_pack_disabled:", "gate_pack_disabled: " + disabled},
-		} {
-			i := strings.Index(content, r[0])
-			if i < 0 {
-				t.Fatalf("scaffolded WORKFLOW.md has no %s key", r[0])
-			}
-			end := i + strings.Index(content[i:], "#")
-			content = content[:i] + r[1] + "    " + content[end:]
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	setGateKeys("go@1", "[tskip, n-plus-one]")
+	setGateKeys(t, dir, "go@1", "[tskip, n-plus-one]")
 	if code, out, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 0 {
 		t.Fatalf("write code=%d out=%q err=%q", code, out, errs)
 	}
 
-	setGateKeys("go@1", "[]")
+	setGateKeys(t, dir, "go@1", "[]")
 	code, out, _ := runCmd(t, "update", "--dir", dir)
 	if code != 1 {
 		t.Fatalf("dry-run code=%d out=%q", code, out)

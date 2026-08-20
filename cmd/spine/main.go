@@ -178,6 +178,21 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s: the region's bytes change, so maipipe's definition_hash does too — re-run `maipipe gate approve-definition`\n", r.Path)
 		}
 	}
+	// The pre-flight's verdict belongs on the plan, not only on the write
+	// (final review, Important 1): the diff is the review surface, so the one
+	// thing that will stop --write is printed with it rather than sprung
+	// afterwards. On a pass, say which half of the check ran — a pass with no
+	// maipipe on PATH is a structural pass, not a grammar one (Minor 6).
+	preflightNotes := func(r update.FileReport) {
+		if r.Refusal != "" {
+			fmt.Fprintln(stdout, r.Refusal)
+			fmt.Fprintf(stdout, "%s: --write would refuse this plan as a whole — no files would be written until this is fixed\n", r.Path)
+			return
+		}
+		if r.StructuralOnly {
+			fmt.Fprintf(stdout, "%s: pre-flight was structural only — no maipipe binary on PATH, so the grammar check maipipe would apply did not run\n", r.Path)
+		}
+	}
 	for _, r := range reports {
 		switch r.State {
 		case update.UpToDate:
@@ -196,10 +211,12 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 				}
 				modelNotes(r)
 				stageNotes(r)
+				preflightNotes(r)
 			} else {
 				outstanding++
 				modelNotes(r)
 				stageNotes(r)
+				preflightNotes(r)
 				fmt.Fprint(stdout, r.Diff)
 			}
 		case update.SkippedUnrecognized:

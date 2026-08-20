@@ -115,6 +115,57 @@ func TestPreExistingGatePipelineRefusesWrite(t *testing.T) {
 	}
 }
 
+// Final review, Important 1: the dry-run is the review surface (ADR 0017), so
+// a plan whose content --write would refuse says so on the plan — the reader
+// must not meet the blocker for the first time by running --write.
+func TestDryRunSurfacesTheRefusalItWouldHitOnWrite(t *testing.T) {
+	dir, path := duplicateTableFixture(t)
+	before := readFile(t, path)
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatalf("a dry-run must not error, it reports: %v", err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != Pending {
+		t.Fatalf("fixture no longer produces a pending %s: state=%v", MaipipeFile, mp.State)
+	}
+	for _, want := range []string{"refusing to write", MaipipeFile, "duplicate table", gatePipelineName} {
+		if !strings.Contains(mp.Refusal, want) {
+			t.Errorf("plan refusal does not mention %q:\n%s", want, mp.Refusal)
+		}
+	}
+	if mp.StructuralOnly {
+		t.Error("a refused plan reports StructuralOnly as well; the refusal already names which half ran")
+	}
+	if got := readFile(t, path); got != before {
+		t.Errorf("a dry-run touched the file:\n%s", got)
+	}
+	// And the write still refuses, with the same verdict — the plan pass did
+	// not consume it.
+	if _, err := Run(Options{Dir: dir, Write: true}); err == nil {
+		t.Fatal("--write applied a plan the dry-run said it would refuse")
+	}
+}
+
+// Minor 6: a pass with no maipipe on PATH is a structural pass, not a grammar
+// one, and the plan says which it was rather than letting silence read as a
+// full check.
+func TestPlanSaysWhenOnlyTheStructuralHalfRan(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.Refusal != "" {
+		t.Fatalf("a clean fixture was refused: %s", mp.Refusal)
+	}
+	if want := !maipipeOnPATH(t); mp.StructuralOnly != want {
+		t.Errorf("StructuralOnly = %v, want %v (maipipe on PATH = %v)",
+			mp.StructuralOnly, want, !want)
+	}
+}
+
 // AC 4 (I096), fixture 2: with the check removed — the candidate written
 // straight to disk, which is what spine did before this ticket — the file is
 // unloadable. Proves the guard is load-bearing rather than decorative.
@@ -124,7 +175,7 @@ func TestCheckIsLoadBearingForDuplicateTable(t *testing.T) {
 	if err := os.WriteFile(path, []byte(candidate), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := parseTOML(candidate); err == nil {
+	if err := checkStructure(candidate); err == nil {
 		t.Fatal("check removed: the candidate parses as TOML, so the guard proves nothing")
 	} else {
 		t.Logf("check removed, file on disk is unloadable: %v", err)
@@ -152,7 +203,7 @@ func TestCheckIsLoadBearingForMovedStage_requiresMaipipeOnPATH(t *testing.T) {
 	if err := os.WriteFile(path, []byte(candidate), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := parseTOML(candidate); err != nil {
+	if err := checkStructure(candidate); err != nil {
 		t.Fatalf("fixture assumption broken, the moved stage should still be valid TOML: %v", err)
 	}
 	out, err := exec.Command("maipipe", "validate", path).CombinedOutput()
@@ -227,10 +278,15 @@ func pendingMaipipe(t *testing.T, dir string) string {
 	return mp.newContent
 }
 
-// The parse is a real TOML check, not a duplicate-table special case: it
-// reads maipipe's grammar-bearing shapes and refuses only what TOML refuses.
-func TestParseTOML(t *testing.T) {
-	valid := []string{
+// The structural scan is not a duplicate-table special case: it reads
+// maipipe's grammar-bearing shapes — quoted keys, array-of-tables entries,
+// multi-line strings, inline tables — well enough that none of them is
+// mistaken for a duplicate. It is not a TOML parser either, and does not
+// claim to be (final review, Important 3): the "accepted" list below is what
+// it must not refuse, and text outside both lists may be accepted although
+// TOML would reject it. maipipe is the authority whenever it is on PATH.
+func TestCheckStructure(t *testing.T) {
+	accepted := []string{
 		"schema = 0\n\n[pipelines.fast]\n\n[[pipelines.fast.stage]]\nname = \"vet\"\nneeds = [\"a\", \"b\"]\n",
 		// Quoted keys and quoted table-header segments: legal TOML that an
 		// earlier cut of the scanner dropped along with the string, leaving
@@ -262,12 +318,12 @@ func TestParseTOML(t *testing.T) {
 		"text = \"\"\"\n[not.a.table]\n\"\"\"\nk = 1\n",
 		"[a.b]\n[a]\n[[a.c]]\nname = \"x\"\n\n[[a.c]]\nname = \"x\"\n",
 	}
-	for _, in := range valid {
-		if err := parseTOML(in); err != nil {
+	for _, in := range accepted {
+		if err := checkStructure(in); err != nil {
 			t.Errorf("valid TOML refused: %v\n%s", err, in)
 		}
 	}
-	invalid := []string{
+	refused := []string{
 		"[pipelines.gate-go]\n[pipelines.gate-go]\n",
 		"[pipelines.\"a\"]\n[pipelines.\"a\"]\n",
 		"\"my key\" = 1\n\"my key\" = 2\n",
@@ -295,9 +351,9 @@ func TestParseTOML(t *testing.T) {
 		"text = \"\"\"\nunterminated\n",
 		"name = \"unterminated\n",
 	}
-	for _, in := range invalid {
-		if err := parseTOML(in); err == nil {
-			t.Errorf("invalid TOML accepted:\n%s", in)
+	for _, in := range refused {
+		if err := checkStructure(in); err == nil {
+			t.Errorf("content the scan must refuse was accepted:\n%s", in)
 		}
 	}
 }
@@ -452,7 +508,7 @@ func TestQuotedAndBareKeyAreOneTable_requiresMaipipeOnPATH(t *testing.T) {
 		return
 	}
 	content := "schema = 0\n\n[pipelines.\"a\"]\nprofile = \"fast\"\n\n[pipelines.a]\nprofile = \"fast\"\n"
-	if err := parseTOML(content); err == nil {
+	if err := checkStructure(content); err == nil {
 		t.Error("spine's parse accepts a quoted/bare duplicate")
 	}
 	dir := t.TempDir()

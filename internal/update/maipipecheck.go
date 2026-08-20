@@ -19,8 +19,18 @@ import (
 var maipipeTimeout = 30 * time.Second
 
 // noMaipipeNote is what a refusal says when no maipipe binary was resolvable:
-// the TOML parse still ran, the grammar check maipipe would add did not.
-const noMaipipeNote = "maipipe validate skipped: no maipipe binary on PATH"
+// the structural scan still ran, the grammar check maipipe would apply did
+// not. It names the scan for what it is (see checkStructure) so a reader does
+// not take a pass on this half for a verdict on the file's TOML.
+const noMaipipeNote = "maipipe validate skipped: no maipipe binary on PATH — the check was structural only " +
+	"(duplicate tables/keys and bracket balance), not a TOML parse"
+
+// maipipeOnPath reports whether a maipipe binary is resolvable, so the plan
+// can say which half of the pre-flight a passing check actually ran.
+func maipipeOnPath() bool {
+	_, err := exec.LookPath("maipipe")
+	return err == nil
+}
 
 // duplicateStageHint names the likely cause of the one failure spine can
 // diagnose from maipipe's message (I096 Fix 3). A stage name is unique per
@@ -40,7 +50,7 @@ func checkMaipipeContent(path, content string) error {
 	if lookErr != nil {
 		note = " [" + noMaipipeNote + "]"
 	}
-	if err := parseTOML(content); err != nil {
+	if err := checkStructure(content); err != nil {
 		return fmt.Errorf("refusing to write %s: %v%s", path, err, note)
 	}
 	if lookErr != nil {
@@ -96,12 +106,20 @@ func checkMaipipeContent(path, content string) error {
 	return fmt.Errorf("refusing to write %s: maipipe validate rejected the result:\n%s", path, msg)
 }
 
-// parseTOML reports whether content parses as TOML, structurally: table
-// headers, array-of-tables entries and key lines, with duplicate tables and
-// duplicate keys within a table treated as the parse errors they are. It
-// does not interpret values — spine only needs to know maipipe can load the
-// file, and the values inside the region are its own render.
-func parseTOML(content string) error {
+// checkStructure is a duplicate-and-balance scan over candidate content, not
+// a TOML parser: it reads table headers, array-of-tables entries and key
+// lines well enough to reject a duplicate table, a duplicate key within a
+// table, and an unbalanced bracket or unterminated multi-line string. It does
+// not interpret values and does not validate the grammar — plenty of text it
+// accepts is not valid TOML (`a b = 1`, `a = = 1`, a Go escape like "\101"),
+// which is why maipipe, when it is on PATH, is the authority and this is only
+// the half that always runs.
+//
+// That is enough for what it exists to catch: the one thing spine's splice
+// can produce is a second copy of a table or key it just rendered. Naming it
+// a parser overstated it (final review, Important 3); the residual shape list
+// is recorded in I104, which asks whether this scanner should exist at all.
+func checkStructure(content string) error {
 	var (
 		tables = map[string]bool{}
 		arrays = map[string]int{}
@@ -206,7 +224,10 @@ func tableHeader(code string, strs []string) (name, shown string, array bool, er
 
 // keySep joins the segments of a canonical dotted key. It has to be a byte
 // no key can contain: `"a.b"` is one segment and `a.b` is two, and joining
-// on "." would make those two different keys look like the same one.
+// on "." would make those two different keys look like the same one. It is
+// the second of two control bytes this file reserves — see strPlaceholder
+// (\x01), which stands in for a consumed string; whoever tightens either
+// one's collision argument should check the other at the same time.
 const keySep = "\x02"
 
 // canonicalKey turns the structural text of a dotted key into the identity
