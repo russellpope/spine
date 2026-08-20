@@ -163,6 +163,14 @@ type DispatchInfo struct {
 	// against a ticket's effort: frontmatter would be a second, separate
 	// contract. Out of scope for I090 by design, not an oversight.
 	Effort string
+	// TeamSpawn marks a claude-team worker spawn (I090). An unmatched one
+	// is the residual blind spot the ticket's footer clause was written
+	// for: the lead's real dispatch flow delivers the brief by file
+	// reference (`"$(cat …dispatch-task-2.md)"`), so neither the spawn
+	// command nor its prompt carries a ticket token and the worker cannot
+	// be attributed. Counted in the report footer so the gap stays
+	// visible rather than silent. Ticket I095 tracks closing it.
+	TeamSpawn bool
 }
 
 // Report is the audit result.
@@ -423,7 +431,8 @@ func Run(opts Options) (Report, error) {
 	}
 	for i, d := range dispatches {
 		if !claimed[i] {
-			rep.Unmatched = appendUnmatched(rep.Unmatched, DispatchInfo{Description: d.description, Model: d.model, Effort: d.effort})
+			rep.Unmatched = appendUnmatched(rep.Unmatched, DispatchInfo{
+				Description: d.description, Model: d.model, Effort: d.effort, TeamSpawn: d.teamSpawn})
 		}
 	}
 
@@ -945,6 +954,10 @@ type dispatch struct {
 	sourceFile  string // source transcript file (D24, codex only); "" for claude
 	cwd         string // D28 (I047): the event line's own cwd, claude only; "" for codex (D22 scopes it separately)
 
+	// teamSpawn marks this record as a claude-team worker spawn (I090) —
+	// see DispatchInfo.TeamSpawn for what an unmatched one means.
+	teamSpawn bool
+
 	// teamTarget is the worker handle a claude-team spawn addressed (I090):
 	// the herdr agent name or the cmux pane. It is how a spawn that named
 	// no ticket is paired with the following prompt command that did.
@@ -1319,11 +1332,22 @@ func parseLine(line []byte) (dispatches []dispatch, prompts []teamPrompt, model 
 		case recognizeTeamSpawns && b.Name == "Bash":
 			if s, isSpawn := parseTeamSpawn(b.Input.Command); isSpawn {
 				dispatches = append(dispatches, dispatch{
-					toolUseID:   b.ID,
-					description: b.Input.Command,
+					toolUseID: b.ID,
+					// The record carries the HEREDOC-STRIPPED command
+					// (final review C1). A lead routinely writes the
+					// worker's brief and starts the worker in one Bash
+					// call; the brief names the ticket under work and
+					// often several more "for context". Attributing on
+					// the raw command text made every one of those a
+					// match — certifying work nobody dispatched as
+					// routed. matches() and namesATicket must see exactly
+					// the text the recognizer accepted as a command, so
+					// the two can never disagree about what was run.
+					description: stripHeredocBodies(b.Input.Command),
 					model:       s.model,
 					effort:      s.effort,
 					cwd:         cwd,
+					teamSpawn:   true,
 					teamTarget:  s.target,
 				})
 				continue

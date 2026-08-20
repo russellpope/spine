@@ -40,18 +40,26 @@ func TestTeamSpawnsAreJudged(t *testing.T) {
 // never judged.
 func TestUnmatchedTeamSpawnCarriesEffort(t *testing.T) {
 	rep := runFixture(t, "team")
-	got := map[string]string{}
+	// Keyed by description, not model: two unmatched spawns sharing a model
+	// must not collapse into one entry and hide a missing assertion.
+	got := map[string]DispatchInfo{}
 	for _, d := range rep.Unmatched {
-		got[d.Model] = d.Effort
+		got[d.Description] = d
 	}
 	if len(got) != 2 {
 		t.Fatalf("want the 2 scratch spawns unmatched, got %+v", rep.Unmatched)
 	}
-	if got["claude-fable-5"] != "high" {
-		t.Errorf("scratch spawn effort = %q, want high", got["claude-fable-5"])
-	}
-	if got["claude-opus-4-8"] != "" {
-		t.Errorf("spawn declaring no effort must report none, got %q", got["claude-opus-4-8"])
+	for desc, d := range got {
+		if !d.TeamSpawn {
+			t.Errorf("%q: TeamSpawn = false, want true", desc)
+		}
+		wantEffort := "high"
+		if d.Model == "claude-opus-4-8" {
+			wantEffort = "" // that spawn declared none
+		}
+		if d.Effort != wantEffort {
+			t.Errorf("%q: effort = %q, want %q", desc, d.Effort, wantEffort)
+		}
 	}
 }
 
@@ -78,6 +86,12 @@ func TestTeamSpawnLookalikesAreNotDispatches(t *testing.T) {
 		{"I501", "a herdr command that is not `agent start`"},
 		{"I502", "a cmux send whose payload is not a claude invocation"},
 		{"I503", "a spawn command quoted inside a heredoc, not run"},
+		// Final review C1, the fail-open case: the lead wrote the worker's
+		// brief by heredoc and started the worker in the SAME Bash call.
+		// The spawn is real; the ticket ids live only in the brief. Reading
+		// them would certify work nobody dispatched as routed.
+		{"I504", "a ticket named only in the heredoc brief beside a live spawn"},
+		{"I505", "a ticket the same brief mentions only for context"},
 	} {
 		if r := rows[tc.id]; r.Verdict != VerdictNoTranscript {
 			t.Errorf("%s verdict = %s (%s), want no-transcript: %s", tc.id, r.Verdict, r.Detail, tc.why)
@@ -106,6 +120,10 @@ func TestTeamSpawnPairsByWorkerHandle(t *testing.T) {
 		// the second spawn, so the most recent unattributed spawn for that
 		// handle wins — scanning forward would credit the dead one.
 		{"I604", "claude-fable-5", VerdictMatch, "impl-c's restart, not its first start"},
+		// cmux addresses workers by --surface, which is the flag the tool
+		// actually ships; pairing keyed on --pane alone never fired on real
+		// input (final review I1).
+		{"I605", "claude-sonnet-5", VerdictMatch, "the surface:19 worker's own spawn"},
 	} {
 		r := rows[tc.id]
 		if r.Verdict != tc.verdict {
@@ -168,6 +186,16 @@ func TestAttributeTeamPrompt(t *testing.T) {
 			wantIdx: -1,
 		},
 		{
+			// ticketTokenRe is shape-based, so a pane id like P12 reads as
+			// ticket-shaped. That is fail-closed — the spawn declines to
+			// borrow the prompt, so its ticket stays visibly unjudged —
+			// and is pinned here rather than left incidental.
+			name:    "ticket-shaped pane id in the command blocks borrowing",
+			spawns:  []dispatch{spawn("impl-d", "start d on pane P12")},
+			prompt:  teamPrompt{target: "impl-d", text: "work I606"},
+			wantIdx: -1,
+		},
+		{
 			name: "already-attributed spawn ignores a second prompt",
 			spawns: []dispatch{
 				{description: "start a", teamTarget: "impl-a", prompt: "work I601"},
@@ -218,6 +246,11 @@ func TestParseTeamSpawn(t *testing.T) {
 			name:    "cmux send quoted claude payload",
 			command: "cmux send --pane %7 'claude --model claude-opus-5 --effort high'",
 			want:    teamSpawn{model: "claude-opus-5", effort: "high", target: "%7"},
+		},
+		{
+			name:    "cmux send addressing a surface",
+			command: "cmux send --surface surface:19 'claude --model claude-opus-5 --effort low'",
+			want:    teamSpawn{model: "claude-opus-5", effort: "low", target: "surface:19"},
 		},
 		{
 			name:    "cmux send after a payload separator",

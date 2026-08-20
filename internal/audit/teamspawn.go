@@ -16,7 +16,17 @@ import (
 // spawn shapes inside a Bash tool_use block's command text:
 //
 //	herdr agent start <name> --kind claude --pane <id> -- … --model <id> [--effort <e>]
-//	cmux send --pane <id> '… claude … --model <id> [--effort <e>]'
+//	cmux send --surface <id> '… claude … --model <id> [--effort <e>]'
+//
+// `--surface` is the flag cmux actually ships (`cmux send --surface
+// surface:19 '…'`); `--pane`/`--target` are accepted alongside it.
+//
+// A second recognizer for the same commands lives in codex.go
+// (codexTeamSpawnStartRe / codexTeamSpawnPromptRe) for codex rollout
+// transcripts. The two pair a worker with its prompt differently — this one
+// takes the FIRST prompt after a spawn, codex accumulates ALL of a worker's
+// prompt text. Both readings are defensible; that they differ by flavor is
+// not. Ticket I096 tracks sharing one worker-keyed pairing.
 //
 // and the follow-up prompt commands (`herdr agent prompt <name> …`,
 // a `cmux send` carrying no claude invocation) that a spawn borrows its
@@ -97,7 +107,7 @@ func parseTeamPrompt(command string) (teamPrompt, bool) {
 			if _, isSpawn := cmuxClaudeSend(seg); isSpawn {
 				continue
 			}
-			return teamPrompt{target: flagValue(f, "--pane", "--target"), text: seg}, true
+			return teamPrompt{target: flagValue(f, "--surface", "--pane", "--target"), text: seg}, true
 		}
 	}
 	return teamPrompt{}, false
@@ -162,7 +172,7 @@ func cmuxClaudeSend(seg string) (teamSpawn, bool) {
 	if model == "" {
 		return teamSpawn{}, false
 	}
-	return teamSpawn{model: model, effort: flagValue(f[i:], "--effort"), target: flagValue(f, "--pane", "--target")}, true
+	return teamSpawn{model: model, effort: flagValue(f[i:], "--effort"), target: flagValue(f, "--surface", "--pane", "--target")}, true
 }
 
 // isTool reports whether the segment's first fields are the named tool

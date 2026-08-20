@@ -817,12 +817,32 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(rep.Unmatched) > 0 {
 		fmt.Fprintln(stdout, "unmatched dispatches (no ticket id or not repo-qualified; not judged):")
+		teamSpawns := 0
 		for _, d := range rep.Unmatched {
 			model := dash(d.Model)
 			if d.Effort != "" {
 				model += " @ " + d.Effort
 			}
-			fmt.Fprintf(stdout, "  %s  [%s]\n", d.Description, model)
+			if d.TeamSpawn {
+				teamSpawns++
+			}
+			// firstLine keeps a multi-line command (a lead writing the
+			// brief and starting the worker in one call) from printing its
+			// continuations at column 0, out of the two-space indent.
+			desc := d.Description
+			if i := strings.IndexByte(desc, '\n'); i >= 0 {
+				desc = desc[:i] + " …"
+			}
+			fmt.Fprintf(stdout, "  %s  [%s]\n", desc, model)
+		}
+		// I090's residual blind spot, stated rather than left silent: a
+		// recognized spawn whose brief was delivered by file reference
+		// carries no ticket token anywhere in the command or its prompt,
+		// so it cannot be attributed. See ticket I095.
+		if teamSpawns > 0 {
+			fmt.Fprintf(stdout,
+				"  note: %d team spawn(s) recognised but unattributable (brief delivered via `$(cat file)` names no ticket in the command); see I095\n",
+				teamSpawns)
 		}
 	}
 	if rep.Blocking() {

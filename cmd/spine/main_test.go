@@ -864,6 +864,23 @@ func TestAuditRoutingEndToEnd(t *testing.T) {
 	if !strings.Contains(out, "[claude-opus-4-8]") {
 		t.Errorf("a spawn declaring no effort must render bare: %q", out)
 	}
+	// I090's residual gap is stated, not silent: unattributable team spawns
+	// are counted in the footer and point at the follow-up ticket.
+	if !strings.Contains(out, "team spawn(s) recognised but unattributable") || !strings.Contains(out, "I095") {
+		t.Errorf("team out should carry the unattributable-spawn footer: %q", out)
+	}
+	// A multi-line spawn command (brief written and worker started in one
+	// call) must not print its continuations at column 0.
+	code, out, _ = runCmd(t, "audit", "routing",
+		"--dir", fixture("teamnoise", "repo"), "--transcripts", fixture("teamnoise", "transcripts"), "--codex-sessions", noCodex)
+	if code != 0 {
+		t.Fatalf("teamnoise: code=%d (want 0) out=%q", code, out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "herdr ") || strings.HasPrefix(line, "cat ") {
+			t.Errorf("unmatched dispatch broke the indent: %q", line)
+		}
+	}
 	// degraded fixture: warnings on stderr, exit 0
 	code, _, errs = runCmd(t, "audit", "routing",
 		"--dir", fixture("degraded", "repo"), "--transcripts", fixture("degraded", "transcripts"), "--codex-sessions", noCodex)
