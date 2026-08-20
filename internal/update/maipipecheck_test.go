@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/russellpope/spine/internal/gate"
 )
@@ -246,6 +247,13 @@ func TestParseTOML(t *testing.T) {
 		"lit = 'C:\\path\\'\nz = 2\n",
 		"esc = \"a \\\" b\"\nq = 3\n",
 		"[a] # trailing comment\nk = 1\n",
+		// The equality rule cuts the other way too: `"a.b"` is one key and
+		// `a.b` is two, so these are genuinely different and both stand.
+		"\"a.b\" = 1\n\na.b = 2\n",
+		"[\"a.b\"]\n\n[a.b]\n",
+		// A literal string keeps its backslashes: 'a\b' is a\b, which a
+		// tab escape is not.
+		"'a\\b' = 1\n\"a\\tb\" = 2\n",
 		"schema = 0\r\n\r\n[pipelines.fast]\r\n",
 		"# only comments\n\n",
 		"a = \"] # [not a comment\"\nb = 1\n",
@@ -263,6 +271,22 @@ func TestParseTOML(t *testing.T) {
 		"[pipelines.gate-go]\n[pipelines.gate-go]\n",
 		"[pipelines.\"a\"]\n[pipelines.\"a\"]\n",
 		"\"my key\" = 1\n\"my key\" = 2\n",
+		// Fix round 2, regression 2: TOML makes a quoted key equal to the
+		// bare key with the same text, so each of these declares one thing
+		// twice. Keying the quoted and bare spellings separately would let
+		// the guard write a file maipipe cannot load — and on the no-binary
+		// path this parse is the only check there is.
+		"[pipelines.\"a\"]\n[pipelines.a]\n",
+		"[pipelines.a]\n[pipelines.'a']\n",
+		"\"a\" = 1\na = 2\n",
+		"a.\"b\" = 1\na.b = 2\n",
+		"'a' = 1\n\"a\" = 2\n",
+		// An escape decodes before the comparison: "ab" is `ab`.
+		"\"a\\u0062\" = 1\nab = 2\n",
+		"[[a]]\n[a.\"b\"]\n[a.b]\n",
+		// 'a\b' (literal, backslash kept) and "a\\b" (escaped backslash)
+		// decode to the same key.
+		"'a\\b' = 1\n\"a\\\\b\" = 2\n",
 		"[[a]]\n[a]\n",
 		"[a]\nk = 1\nk = 2\n",
 		"[pipelines.fast\nname = \"x\"\n",
@@ -359,4 +383,86 @@ func TestRefusalLeavesEveryPendingFileUnwrittenAndSaysSo(t *testing.T) {
 	if got := readFile(t, mpPath); got != mpBefore {
 		t.Error("maipipe.toml was written despite the refusal")
 	}
+}
+
+// fakeMaipipe puts a stand-in `maipipe` on PATH for one test and returns its
+// directory. body is the shell script the fake runs.
+func fakeMaipipe(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" + body + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "maipipe"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	return dir
+}
+
+// Fix round 2, regression 1: CommandContext kills the child when the
+// deadline fires, so Wait reports an *exec.ExitError and an errors.As test
+// alone reads a timeout as maipipe's verdict on the file. A validator that
+// never answered says nothing about the content, and telling the reader
+// their file was rejected sends them hunting for a defect that is not there.
+func TestValidateTimeoutIsNotAVerdict(t *testing.T) {
+	fakeMaipipe(t, "/bin/sleep 30")
+	old := maipipeTimeout
+	maipipeTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { maipipeTimeout = old })
+
+	err := checkMaipipeContent("/repo/"+MaipipeFile, "schema = 0\n\n[pipelines.fast]\n")
+	if err == nil {
+		t.Fatal("a validator that never answered was treated as approval")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "did not finish within") {
+		t.Errorf("refusal does not say the validator timed out:\n%s", msg)
+	}
+	if strings.Contains(msg, "rejected the result") {
+		t.Errorf("a timeout is reported as a verdict on the file:\n%s", msg)
+	}
+}
+
+// The other half of the same distinction: a maipipe that fails immediately
+// must not borrow the timeout wording. (A non-zero exit is indistinguishable
+// from a real rejection without parsing maipipe's output, and reads as a
+// verdict — which is correct for the case this guard exists to catch.)
+func TestValidatePromptFailureIsNotReportedAsTimeout(t *testing.T) {
+	fakeMaipipe(t, "exit 127")
+	err := checkMaipipeContent("/repo/"+MaipipeFile, "schema = 0\n\n[pipelines.fast]\n")
+	if err == nil {
+		t.Fatal("exit 127 accepted as approval")
+	}
+	// exit 127 *is* an ExitError, so it reads as a verdict — which is what
+	// a real maipipe reporting a bad file also looks like. What must not
+	// happen is the timeout wording; the verdict wording is correct here.
+	if strings.Contains(err.Error(), "did not finish within") {
+		t.Errorf("a prompt failure is reported as a timeout:\n%s", err)
+	}
+}
+
+// Fix round 2, regression 2 — the equality rule is maipipe's, not spine's
+// opinion of TOML: the same mixed quoted/bare pair the parse now refuses is
+// a file maipipe refuses too, and refuses for the same reason.
+func TestQuotedAndBareKeyAreOneTable_requiresMaipipeOnPATH(t *testing.T) {
+	if !maipipeOnPATH(t) {
+		t.Log("no maipipe on PATH: the equality rule is checked by the parse table only")
+		return
+	}
+	content := "schema = 0\n\n[pipelines.\"a\"]\nprofile = \"fast\"\n\n[pipelines.a]\nprofile = \"fast\"\n"
+	if err := parseTOML(content); err == nil {
+		t.Error("spine's parse accepts a quoted/bare duplicate")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, MaipipeFile)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("maipipe", "validate", path).CombinedOutput()
+	if err == nil {
+		t.Fatalf("fixture assumption broken: maipipe loads the quoted/bare duplicate:\n%s", out)
+	}
+	if !strings.Contains(string(out), "duplicate key") {
+		t.Errorf("want maipipe to call it a duplicate key, got:\n%s", out)
+	}
+	t.Logf("maipipe agrees: %s", strings.TrimSpace(string(out)))
 }

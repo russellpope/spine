@@ -106,6 +106,17 @@ the exact problem. Two existing user-lane fixtures in `gatepack_test.go`
 were carrying that defect and now carry `schema = 0` the way a real repo
 does.
 
+**Fix round 2.** Two regressions the round-1 diff introduced: the timeout
+branch was unreachable (`CommandContext` kills the child, so `Wait` returns
+an `*exec.ExitError` and a timeout read as maipipe's verdict on the file —
+the deadline is now checked first), and quoted and bare keys were keyed
+distinctly, so `[pipelines."a"]` + `[pipelines.a]` — one table in TOML, and
+a duplicate-key error from maipipe — was accepted. Key segments are now
+unquoted (basic-string escapes decoded, literal strings verbatim) before
+being used as identity and re-quoted only for messages; canonical segments
+join on a byte no key can contain, so `"a.b"` (one segment) stays distinct
+from `a.b` (two).
+
 **Parser (fix round 1, Important 1).** `parseTOML`'s scanner replaces each
 consumed string with a placeholder instead of dropping it: dropping made
 `[pipelines."e2e.smoke"]` and `"my key" = 1` — both legal TOML — look
@@ -136,6 +147,10 @@ entry, so `[[a]] [a.b] [[a]] [a.b]` is not read as a duplicate.
 - No `t.Skip` anywhere: the maipipe-dependent tests carry the condition in
   their name and log which half of the check ran; `SPINE_REQUIRE_MAIPIPE=1`
   turns a missing binary into a failure so CI can assert they really ran.
+- Round-2 negative controls: reverting the deadline ordering makes
+  `TestValidateTimeoutIsNotAVerdict` report `rejected the result: signal:
+  killed`; reverting the unquoting makes `TestParseTOML` accept all seven
+  quoted/bare duplicate pairs.
 - Quoted-key negative control (fix round 1): reverting the scanner to drop
   strings fails `TestParseTOML` (`empty key`, `duplicate table
   [pipelines.]`) and `TestScanKeepsQuotedSegments`.

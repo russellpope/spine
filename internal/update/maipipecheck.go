@@ -14,7 +14,9 @@ import (
 
 // maipipeTimeout bounds the validate run. Validation is a parse of one small
 // file; anything slower than this is a maipipe that is not going to answer.
-const maipipeTimeout = 30 * time.Second
+// A var, not a const, only so the timeout path can be tested in under a
+// second — nothing in spine reassigns it.
+var maipipeTimeout = 30 * time.Second
 
 // noMaipipeNote is what a refusal says when no maipipe binary was resolvable:
 // the TOML parse still ran, the grammar check maipipe would add did not.
@@ -67,15 +69,20 @@ func checkMaipipeContent(path, content string) error {
 		return nil
 	}
 	// Only a non-zero exit is a verdict on the content. A binary that could
-	// not run at all — missing library, killed, exit 127, or the timeout
-	// above — says nothing about the file, and saying "rejected" would send
-	// the reader hunting for a defect that is not there.
+	// not run at all — missing library, exit 127, or the deadline above —
+	// says nothing about the file, and saying "rejected" would send the
+	// reader hunting for a defect that is not there.
+	//
+	// The deadline is checked first and deliberately: CommandContext kills
+	// the child on timeout, so Wait reports an *exec.ExitError ("signal:
+	// killed") and an errors.As test alone would read a timeout as a
+	// verdict. Order is the fix; TestValidateTimeoutIsNotAVerdict pins it.
+	if ctx.Err() != nil {
+		return fmt.Errorf("refusing to write %s: maipipe validate did not finish within %s (%v)",
+			path, maipipeTimeout, err)
+	}
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
-		if ctx.Err() != nil {
-			return fmt.Errorf("refusing to write %s: maipipe validate did not finish within %s: %v",
-				path, maipipeTimeout, err)
-		}
 		return fmt.Errorf("refusing to write %s: could not run maipipe validate (%v): %s",
 			path, err, strings.TrimSpace(string(out)))
 	}
@@ -109,8 +116,8 @@ func parseTOML(content string) error {
 		aotN int
 	)
 	qualify := func(name string) string {
-		if aot != "" && strings.HasPrefix(name, aot+".") {
-			return fmt.Sprintf("%s#%d.%s", aot, aotN, strings.TrimPrefix(name, aot+"."))
+		if aot != "" && strings.HasPrefix(name, aot+keySep) {
+			return fmt.Sprintf("%s#%d%s", aot, aotN, strings.TrimPrefix(name, aot))
 		}
 		return name
 	}
@@ -128,14 +135,14 @@ func parseTOML(content string) error {
 			continue
 		}
 		if strings.HasPrefix(code, "[") {
-			name, array, err := tableHeader(code, strs)
+			name, shown, array, err := tableHeader(code, strs)
 			if err != nil {
 				return fmt.Errorf("line %d: %v", n, err)
 			}
 			q := qualify(name)
 			if array {
 				if tables[q] {
-					return fmt.Errorf("line %d: [[%s]] redefines table [%s]", n, name, name)
+					return fmt.Errorf("line %d: [[%s]] redefines table [%s]", n, shown, shown)
 				}
 				arrays[q]++
 				aot, aotN = name, arrays[q]
@@ -143,26 +150,24 @@ func parseTOML(content string) error {
 				continue
 			}
 			if tables[q] || arrays[q] > 0 {
-				return fmt.Errorf("line %d: duplicate table [%s]", n, name)
+				return fmt.Errorf("line %d: duplicate table [%s]", n, shown)
 			}
 			tables[q] = true
 			cur = q
 			continue
 		}
-		key, _, ok := strings.Cut(code, "=")
+		keyCode, _, ok := strings.Cut(code, "=")
 		if !ok {
-			return fmt.Errorf("line %d: expected a key/value pair or a table header, got %q", n, code)
+			return fmt.Errorf("line %d: expected a key/value pair or a table header, got %q",
+				n, restoreStrings(code, strs))
 		}
-		// Spaces are not part of a bare or dotted key (`a . b` is `a.b`);
-		// a quoted key is a placeholder here, and no placeholder contains a
-		// space, so the strip cannot reach inside one.
-		key = restoreStrings(strings.ReplaceAll(strings.TrimSpace(key), " ", ""), strs)
-		if key == "" {
-			return fmt.Errorf("line %d: empty key", n)
+		key, shown, err := canonicalKey(keyCode, strs)
+		if err != nil {
+			return fmt.Errorf("line %d: %v", n, err)
 		}
 		full := cur + "\x00" + key
 		if keys[full] {
-			return fmt.Errorf("line %d: duplicate key %q", n, key)
+			return fmt.Errorf("line %d: duplicate key %q", n, shown)
 		}
 		keys[full] = true
 	}
@@ -175,11 +180,12 @@ func parseTOML(content string) error {
 	return nil
 }
 
-// tableHeader splits a `[name]` or `[[name]]` header line. code carries
-// placeholders where quoted key segments were, so the brackets it is checked
-// for are real brackets and never characters inside a quoted name; strs puts
-// those segments back, keeping `[a."x"]` and `[a."y"]` distinct names.
-func tableHeader(code string, strs []string) (name string, array bool, err error) {
+// tableHeader splits a `[name]` or `[[name]]` header line, returning the
+// name in canonical form for identity and in the file's own form for
+// messages. code carries placeholders where quoted segments were, so the
+// brackets it is checked for are real brackets, never characters inside a
+// quoted name.
+func tableHeader(code string, strs []string) (name, shown string, array bool, err error) {
 	body, ok := strings.CutPrefix(code, "[[")
 	if ok {
 		array = true
@@ -188,14 +194,99 @@ func tableHeader(code string, strs []string) (name string, array bool, err error
 		body = strings.TrimPrefix(code, "[")
 		body, ok = strings.CutSuffix(body, "]")
 	}
+	if !ok || strings.ContainsAny(body, "[]") {
+		return "", "", array, fmt.Errorf("malformed table header %q", restoreStrings(code, strs))
+	}
+	name, shown, err = canonicalKey(body, strs)
+	if err != nil {
+		return "", "", array, fmt.Errorf("malformed table header %q: %v", restoreStrings(code, strs), err)
+	}
+	return name, shown, array, nil
+}
+
+// keySep joins the segments of a canonical dotted key. It has to be a byte
+// no key can contain: `"a.b"` is one segment and `a.b` is two, and joining
+// on "." would make those two different keys look like the same one.
+const keySep = "\x02"
+
+// canonicalKey turns the structural text of a dotted key into the identity
+// TOML gives it, plus the form the file wrote for messages. A quoted key is
+// equal to the bare key with the same text — `[pipelines."a"]` and
+// `[pipelines.a]` are one table, and `'a'`, `"a"` and `a` are one key — so
+// the quotes come off before the name is used as a map key. Restoring them
+// only for display is what keeps a message readable without making two
+// spellings of one key look distinct.
+func canonicalKey(code string, strs []string) (canon, shown string, err error) {
+	// Spaces around a dot are not part of the key (`a . b` is `a.b`), and
+	// no placeholder contains one, so the strip cannot reach inside a
+	// quoted segment.
+	code = strings.ReplaceAll(strings.TrimSpace(code), " ", "")
+	shown = restoreStrings(code, strs)
+	if code == "" {
+		return "", shown, fmt.Errorf("empty key")
+	}
+	var segs []string
+	for _, seg := range strings.Split(code, ".") {
+		if seg == "" {
+			return "", shown, fmt.Errorf("empty key segment in %q", shown)
+		}
+		text, quoted, qerr := unquoteSegment(seg, strs)
+		if qerr != nil {
+			return "", shown, qerr
+		}
+		if quoted && text == "" {
+			// TOML does allow `"" = 1`; nothing spine or maipipe writes
+			// does, and an empty segment is not worth an identity rule.
+			return "", shown, fmt.Errorf("empty quoted key in %q", shown)
+		}
+		segs = append(segs, text)
+	}
+	return strings.Join(segs, keySep), shown, nil
+}
+
+// unquoteSegment decodes one dotted-key segment. A placeholder segment is a
+// quoted key: basic strings honour escapes, literal strings are taken
+// verbatim. Anything else is a bare key and stands for itself.
+func unquoteSegment(seg string, strs []string) (text string, quoted bool, err error) {
+	idx, ok := placeholderIndex(seg)
 	if !ok {
-		return "", array, fmt.Errorf("malformed table header %q", restoreStrings(code, strs))
+		return seg, false, nil
 	}
-	name = strings.ReplaceAll(strings.TrimSpace(body), " ", "")
-	if name == "" || strings.ContainsAny(name, "[]") {
-		return "", array, fmt.Errorf("malformed table header %q", restoreStrings(code, strs))
+	if idx >= len(strs) {
+		return "", true, fmt.Errorf("malformed key")
 	}
-	return restoreStrings(name, strs), array, nil
+	raw := strs[idx]
+	switch {
+	case strings.HasPrefix(raw, `"""`), strings.HasPrefix(raw, "'''"):
+		// A multi-line string is a value, never a key.
+		return "", true, fmt.Errorf("multi-line string used as a key")
+	case strings.HasPrefix(raw, "'"):
+		return strings.TrimSuffix(strings.TrimPrefix(raw, "'"), "'"), true, nil
+	default:
+		v, uerr := strconv.Unquote(raw)
+		if uerr != nil {
+			return "", true, fmt.Errorf("malformed quoted key %s", raw)
+		}
+		return v, true, nil
+	}
+}
+
+// placeholderIndex reads back the index scan wrote for a consumed string,
+// when seg is exactly one placeholder and nothing else.
+func placeholderIndex(seg string) (int, bool) {
+	body, ok := strings.CutPrefix(seg, strPlaceholder)
+	if !ok {
+		return 0, false
+	}
+	body, ok = strings.CutSuffix(body, strPlaceholder)
+	if !ok || strings.Contains(body, strPlaceholder) {
+		return 0, false
+	}
+	i, err := strconv.Atoi(body)
+	if err != nil {
+		return 0, false
+	}
+	return i, true
 }
 
 // strPlaceholder brackets the index of a string scan consumed, standing in
