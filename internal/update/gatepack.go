@@ -12,9 +12,10 @@ import (
 )
 
 // The gate pack's delivery region lives in maipipe.toml at the repo root
-// (ADR 0016): maipipe reads exactly one file with no include mechanism, so
-// the pack must be present inside a file the repo also owns. spine owns the
-// region between these two marker lines and nothing else in the file.
+// (ADR 0017, superseding 0016): maipipe reads exactly one file with no
+// include mechanism, so the pack must be present inside a file the repo also
+// owns. spine owns the region between these two marker lines and nothing else
+// in the file.
 const (
 	MaipipeFile     = "maipipe.toml"
 	gateRegionBegin = "# spine:begin gate-pack "
