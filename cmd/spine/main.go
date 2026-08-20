@@ -97,6 +97,7 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 	profile := fs.String("profile", "", "profile: "+strings.Join(tmpl.Profiles(), " | "))
 	dir := fs.String("dir", ".", "repo root")
 	name := fs.String("name", "", "project name (default: basename of dir)")
+	owner := fs.String("owner", "", "owner for maikanban.repositorySlug (default: parsed from origin)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -114,11 +115,19 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "init:", err)
 		return 2
 	}
+	// I094: fleet identity for maikanban, stamped once and never overwritten.
+	slug, noted := scaffold.StampSlug(*dir, *owner)
+	if slug != "" {
+		res.Created = append(res.Created, "git config "+scaffold.SlugKey+" "+slug)
+	}
 	for _, f := range res.Created {
 		fmt.Fprintln(stdout, "create:", f)
 	}
 	for _, f := range res.Skipped {
 		fmt.Fprintln(stdout, "skip (exists):", f)
+	}
+	if noted {
+		fmt.Fprintln(stdout, scaffold.SlugNote)
 	}
 	fmt.Fprintf(stdout, "done: %s -> %s (template_version %d)\n", p, *dir, tmpl.Version())
 	return 0

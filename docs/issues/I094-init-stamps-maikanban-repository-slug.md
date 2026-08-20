@@ -2,7 +2,7 @@
 id: I094
 title: "spine init / doctor: stamp and check `maikanban.repositorySlug` when scaffolding docs/issues/ (new repos currently arrive unconfigured and break maikanban fleet discovery)"
 severity: low
-status: open
+status: fixed
 affects: []
 blocked-by: []
 execution-mode: subagent-driven
@@ -44,14 +44,34 @@ first place.
 
 ## Acceptance criteria
 
-- [ ] `spine init` in a temp git repo with `origin=git@github.com:acme/x.git` sets
+- [x] `spine init` in a temp git repo with `origin=git@github.com:acme/x.git` sets
       `maikanban.repositorySlug=acme/x` and lists it under `create:`; re-running does not change it
-- [ ] No origin / no `--owner` / no `maikanban.defaultOwner` → init exits 0 and prints the
+- [x] No origin / no `--owner` / no `maikanban.defaultOwner` → init exits 0 and prints the
       `note:` line; `--owner acme` sets `acme/<basename>`
-- [ ] `spine doctor` warns on a `docs/issues/` repo with missing or malformed slug, with the command
-- [ ] `workflow-init` SKILL.md note committed (deepthought); full lane green; shellcheck/deny
-      stages unchanged
+- [x] `spine doctor` warns on a `docs/issues/` repo with missing or malformed slug, with the command
+- [~] `workflow-init` SKILL.md note committed (deepthought) — **out of scope**, ruled by the
+      controller 2026-08-20: it is a side effect in another repository and stays with the owner.
+      Full lane green; shellcheck/deny stages unchanged.
 
 ## Blocked by
 
 - None. Related: maikanban I030 / ADR 0007 / ADR 0008.
+
+## Evidence
+
+Fixed 2026-08-20 on `i094-maikanban-slug`. Item 3 (the `workflow-init` SKILL.md note in
+deepthought) was ruled **out of scope** by the controller and is left to the owner — nothing
+outside this repository was touched.
+
+- `internal/scaffold/slug.go`: `StampSlug` (owner from `origin`, else `--owner`, else global
+  `maikanban.defaultOwner`; never overwrites; silent on non-git dirs and on failure),
+  `ValidSlug` (ADR 0007 grammar), `SlugNote`, `SlugRemedy`, `SlugKey`.
+- `cmd/spine/main.go`: `spine init --owner`; the stamp reports as
+  `create: git config maikanban.repositorySlug <value>`, otherwise the `note:` line, exit 0.
+- `internal/doctor/doctor.go`: new **D12** (warn) — a repo carrying `docs/issues/` with a
+  missing or malformed slug, message naming `git config maikanban.repositorySlug owner/repo`.
+- `go vet ./...` clean; `make test` green (all 18 packages `ok`, 2026-08-20).
+- Negative controls: unregistering `slugCheck` → `TestD12WarnsOnMissingSlug` and
+  `TestD12WarnsOnMalformedSlug` FAIL; neutering `StampSlug` to a no-op →
+  `TestInitStampsSlugFromOrigin`, `TestInitNoOwnerPrintsNote`,
+  `TestInitOwnerFlagStampsBasename`, `TestInitDefaultOwnerConfigStamps` FAIL.
