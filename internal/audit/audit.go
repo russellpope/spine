@@ -157,6 +157,7 @@ type TicketRow struct {
 type DispatchInfo struct {
 	Description string
 	Model       string
+	Effort      string // declared worker effort, claude-team spawns only (I090); "" otherwise
 }
 
 // Report is the audit result.
@@ -417,7 +418,7 @@ func Run(opts Options) (Report, error) {
 	}
 	for i, d := range dispatches {
 		if !claimed[i] {
-			rep.Unmatched = appendUnmatched(rep.Unmatched, DispatchInfo{Description: d.description, Model: d.model})
+			rep.Unmatched = appendUnmatched(rep.Unmatched, DispatchInfo{Description: d.description, Model: d.model, Effort: d.effort})
 		}
 	}
 
@@ -934,9 +935,15 @@ type dispatch struct {
 	description string
 	prompt      string
 	model       string
+	effort      string // declared worker effort, claude-team spawns only (I090); "" otherwise
 	flavor      string // the transcript source's flavor (I040 per-token seam)
 	sourceFile  string // source transcript file (D24, codex only); "" for claude
 	cwd         string // D28 (I047): the event line's own cwd, claude only; "" for codex (D22 scopes it separately)
+
+	// teamTarget is the worker handle a claude-team spawn addressed (I090):
+	// the herdr agent name or the cmux pane. It is how a spawn that named
+	// no ticket is paired with the following prompt command that did.
+	teamTarget string
 }
 
 type subagent struct {
@@ -1222,11 +1229,14 @@ func scanJSONL(path string, warnings *[]string) ([]dispatch, []string, string) {
 	for {
 		line, err := r.ReadBytes('\n')
 		if len(strings.TrimSpace(string(line))) > 0 {
-			d, m, lineCwd, ok := parseLine(line)
+			d, prompts, m, lineCwd, ok := parseLine(line)
 			if !ok {
 				malformed++
 			} else {
 				dispatches = append(dispatches, d...)
+				for _, p := range prompts {
+					attributeTeamPrompt(dispatches, p)
+				}
 				if m != "" && !seen[m] {
 					seen[m] = true
 					models = append(models, m)
@@ -1254,9 +1264,11 @@ func scanJSONL(path string, warnings *[]string) ([]dispatch, []string, string) {
 // message.model is the actual, and Task/Agent tool_use blocks are dispatch
 // records — each stamped with this line's own top-level "cwd" (D28, ticket
 // I047: verified present on both user and assistant lines in real
-// ~/.claude session and subagent transcripts). Unrecognized JSON shapes
-// report as malformed (ok=false).
-func parseLine(line []byte) (dispatches []dispatch, model string, cwd string, ok bool) {
+// ~/.claude session and subagent transcripts). Bash tool_use blocks running
+// a claude-team worker spawn are dispatch records too (I090, teamspawn.go),
+// and the prompt commands that follow them are returned alongside for the
+// caller to pair. Unrecognized JSON shapes report as malformed (ok=false).
+func parseLine(line []byte) (dispatches []dispatch, prompts []teamPrompt, model string, cwd string, ok bool) {
 	var ev struct {
 		Type    string `json:"type"`
 		Cwd     string `json:"cwd"`
@@ -1266,11 +1278,11 @@ func parseLine(line []byte) (dispatches []dispatch, model string, cwd string, ok
 		} `json:"message"`
 	}
 	if json.Unmarshal(line, &ev) != nil {
-		return nil, "", "", false
+		return nil, nil, "", "", false
 	}
 	cwd = ev.Cwd
 	if ev.Type != "assistant" {
-		return nil, "", cwd, true
+		return nil, nil, "", cwd, true
 	}
 	var blocks []struct {
 		Type  string `json:"type"`
@@ -1280,13 +1292,18 @@ func parseLine(line []byte) (dispatches []dispatch, model string, cwd string, ok
 			Description string `json:"description"`
 			Prompt      string `json:"prompt"`
 			Model       string `json:"model"`
+			Command     string `json:"command"`
 		} `json:"input"`
 	}
 	if len(ev.Message.Content) > 0 && json.Unmarshal(ev.Message.Content, &blocks) != nil {
-		return nil, ev.Message.Model, cwd, false // assistant event of unrecognized shape
+		return nil, nil, ev.Message.Model, cwd, false // assistant event of unrecognized shape
 	}
 	for _, b := range blocks {
-		if b.Type == "tool_use" && (b.Name == "Task" || b.Name == "Agent") {
+		if b.Type != "tool_use" {
+			continue
+		}
+		switch {
+		case b.Name == "Task" || b.Name == "Agent":
 			dispatches = append(dispatches, dispatch{
 				toolUseID:   b.ID,
 				description: b.Input.Description,
@@ -1294,9 +1311,24 @@ func parseLine(line []byte) (dispatches []dispatch, model string, cwd string, ok
 				model:       b.Input.Model,
 				cwd:         cwd,
 			})
+		case recognizeTeamSpawns && b.Name == "Bash":
+			if s, isSpawn := parseTeamSpawn(b.Input.Command); isSpawn {
+				dispatches = append(dispatches, dispatch{
+					toolUseID:   b.ID,
+					description: b.Input.Command,
+					model:       s.model,
+					effort:      s.effort,
+					cwd:         cwd,
+					teamTarget:  s.target,
+				})
+				continue
+			}
+			if p, isPrompt := parseTeamPrompt(b.Input.Command); isPrompt {
+				prompts = append(prompts, p)
+			}
 		}
 	}
-	return dispatches, ev.Message.Model, cwd, true
+	return dispatches, prompts, ev.Message.Model, cwd, true
 }
 
 // --- helpers ---

@@ -818,7 +818,11 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 	if len(rep.Unmatched) > 0 {
 		fmt.Fprintln(stdout, "unmatched dispatches (no ticket id or not repo-qualified; not judged):")
 		for _, d := range rep.Unmatched {
-			fmt.Fprintf(stdout, "  %s  [%s]\n", d.Description, dash(d.Model))
+			model := dash(d.Model)
+			if d.Effort != "" {
+				model += " @ " + d.Effort
+			}
+			fmt.Fprintf(stdout, "  %s  [%s]\n", d.Description, model)
 		}
 	}
 	if rep.Blocking() {

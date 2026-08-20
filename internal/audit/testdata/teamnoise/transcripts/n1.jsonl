@@ -1,0 +1,5 @@
+{"type":"last-prompt","leafUuid":"x","sessionId":"n1"}
+{"type":"user","message":{"role":"user","content":"look around"}}
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_501","name":"Bash","input":{"command":"herdr agent list --kind claude --model claude-fable-5 # who is on I501 in the fixture repo dir","description":"list panes"}}]}}
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_502","name":"Bash","input":{"command":"cmux send --pane %2 'codex exec --model claude-fable-5 Look at I502 in the fixture repo dir'","description":"send a non-claude command to the worker pane"}}]}}
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_503","name":"Bash","input":{"command":"cat > docs/handoffs/team.md <<'EOF'\nThe lead starts each I503 worker in the fixture repo dir like this:\nherdr agent start impl-9 --kind claude --pane %9 -- claude --model claude-fable-5 --effort high\nEOF","description":"write the handoff doc"}}]}}
