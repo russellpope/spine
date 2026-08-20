@@ -215,6 +215,40 @@ func TestGatePackConfigRendersEnv(t *testing.T) {
 	}
 }
 
+// AC (I095, reading A): the region is a pure projection of WORKFLOW.md, so
+// a hand-edited env value inside it is not a preserved choice. The dry-run
+// plan shows the revert as an ordinary diff — not an unrecognized edit —
+// and --write refreshes it with no --force.
+func TestGatePackEditedEnvValueRefreshesWithoutForce(t *testing.T) {
+	dir := gateRepo(t, "[]", map[string]string{"fixture_manifest": "docs/fixtures.md"})
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, MaipipeFile)
+	const rendered = `SPINE_GATE_FIXTURE_MANIFEST = "docs/fixtures.md"`
+	const edited = `SPINE_GATE_FIXTURE_MANIFEST = "docs/elsewhere.md"`
+	if err := os.WriteFile(path, []byte(strings.Replace(readFile(t, path), rendered, edited, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, plan, MaipipeFile)
+	if mp.State != Pending || len(mp.Unrecognized) != 0 {
+		t.Fatalf("want a plain Pending refresh, got state=%v unrec=%v", mp.State, mp.Unrecognized)
+	}
+	if !strings.Contains(mp.Diff, "- env = { "+edited+" }") || !strings.Contains(mp.Diff, "+ env = { "+rendered+" }") {
+		t.Errorf("plan diff is the review surface; it does not show the drop:\n%s", mp.Diff)
+	}
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); strings.Contains(got, edited) || !strings.Contains(got, rendered) {
+		t.Errorf("edited env value survived a refresh without --force:\n%s", got)
+	}
+}
+
 // AC (I085): an existing maipipe.toml keeps the owner's own lanes
 // byte-for-byte; the region is appended, then refreshed in place.
 func TestGatePackPreservesUserLanes(t *testing.T) {

@@ -236,11 +236,14 @@ func gateRegionBounds(content string) (int, int, error) {
 }
 
 // unrecognizedRegionLines returns the lines inside an existing region that
-// no configuration of the pack could have rendered. Recognition is by shape
-// rather than by exact text so that a changed gate_pack_config value or a
-// newly disabled class refreshes silently (it is spine's own render of the
-// repo's own choices, ADR 0002), while a hand-edited stage — a rewritten
-// run line, an invented env var, a stray comment — is reported.
+// no configuration of the pack could have rendered. The region is a pure
+// projection of WORKFLOW.md (ADR 0016 as amended by I095): no value inside
+// it is a user choice, so recognition is by shape rather than by exact
+// text — a changed gate_pack_config value or a newly disabled class
+// refreshes without --force and the plan diff shows what drops. Only a
+// line outside every possible render — a rewritten run line, an invented
+// env var, a stray comment — is reported, which is ADR 0002's generic
+// unrecognized-edit stop before the drop, not preservation.
 func unrecognizedRegionLines(lines []string) []string {
 	checks := map[string]bool{}
 	for _, c := range gate.CheckNames() {
