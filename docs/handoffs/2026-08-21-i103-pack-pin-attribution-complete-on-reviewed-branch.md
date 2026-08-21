@@ -57,8 +57,9 @@ both ended **APPROVED**.
 ## Next steps
 
 Owner: integrate this single reviewed branch from current `main`. No push or
-merge was performed by this worker. Do not re-run the live lane solely for
-handoff delivery; approved run #3 is the final lane evidence.
+merge was performed by this worker. Because this docs-only handoff commit
+moves HEAD, the lead must re-run `maipipe run full --wait` at the final
+handoff SHA; the team report will carry that final evidence.
 
 ## Gotchas
 
