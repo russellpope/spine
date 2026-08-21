@@ -327,7 +327,7 @@ func dottedHeaderSegments(path string) ([]string, bool) {
 			parts = append(parts, value)
 			return true
 		}
-		if strings.ContainsAny(raw, "\"'") {
+		if !bareHeaderKey(raw) {
 			return false
 		}
 		parts = append(parts, raw)
@@ -360,6 +360,19 @@ func dottedHeaderSegments(path string) ([]string, bool) {
 		return nil, false
 	}
 	return parts, true
+}
+
+func bareHeaderKey(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // trimStageComment removes a TOML comment from the small stage-declaration

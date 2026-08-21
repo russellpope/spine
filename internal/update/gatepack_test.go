@@ -273,6 +273,41 @@ pipeline = "gate-go"
 	}
 }
 
+// Final re-verification control: malformed bare key segments are not owners.
+// They must bypass the targeted composition reader and remain maipipe grammar
+// errors rather than an I097 composition refusal.
+func TestGatePackOptOutIgnoresMalformedBareTablePath(t *testing.T) {
+	cases := []struct {
+		name, header string
+	}{
+		{"space", "[[pipelines.bad owner.stage]]"},
+		{"punctuation", "[[pipelines.bad!owner.stage]]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := gateRepo(t, "[]", nil)
+			path := filepath.Join(dir, MaipipeFile)
+			if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+				t.Fatal(err)
+			}
+			lanes := "\n" + tc.header + "\nname = \"gates\"\npipeline = \"gate-go\"\n"
+			if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			clearGatePack(t, dir)
+
+			reports, err := Run(Options{Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			mp := report(t, reports, MaipipeFile)
+			if mp.Refusal == "" || strings.HasPrefix(mp.Refusal, "gate_pack cleared but") {
+				t.Fatalf("malformed %q report = %#v, want maipipe grammar refusal", tc.header, mp)
+			}
+		})
+	}
+}
+
 // I097: without an outside consumer, opt-out is an ordinary marker-inclusive
 // deletion. It stays behind I104's real maipipe validation preflight and a
 // second run is a clean no-op.
