@@ -419,8 +419,32 @@ func stageString(value string) (string, bool) {
 	if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
 		return value[1 : len(value)-1], true
 	}
+	if len(value) < 2 || value[0] != '"' || !basicStageStringEscapes(value) {
+		return "", false
+	}
 	v, err := strconv.Unquote(value)
 	return v, err == nil
+}
+
+// basicStageStringEscapes admits the installed maipipe-compatible single-line
+// TOML escapes before strconv.Unquote runs. strconv additionally checks hex
+// width and code points; this gate excludes Go-only octal and control escapes.
+func basicStageStringEscapes(value string) bool {
+	for i := 1; i < len(value)-1; i++ {
+		if value[i] != '\\' {
+			continue
+		}
+		i++
+		if i >= len(value)-1 {
+			return false
+		}
+		switch value[i] {
+		case 'b', 't', 'n', 'f', 'r', '"', '\\', 'x', 'u', 'U':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func gatePackOptOutRefusal(compositions []gateComposition) string {

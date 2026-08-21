@@ -308,6 +308,71 @@ func TestGatePackOptOutIgnoresMalformedBareTablePath(t *testing.T) {
 	}
 }
 
+// Final re-verification control: check the installed maipipe grammar before
+// asserting spine's boundary. TOML basic-string escapes aggregate normally;
+// Go-only escapes must defer to maipipe instead of manufacturing an I097
+// owner composition.
+func TestGatePackOptOutHeaderBasicStringEscapeBoundary(t *testing.T) {
+	cases := []struct {
+		name, escape string
+		valid        bool
+	}{
+		{"hex", `\x2e`, true},
+		{"unicode-short", `\u002e`, true},
+		{"unicode-long", `\U0000002e`, true},
+		{"quote", `\"`, true},
+		{"backslash", `\\`, true},
+		{"backspace", `\b`, true},
+		{"tab", `\t`, true},
+		{"newline", `\n`, true},
+		{"form-feed", `\f`, true},
+		{"carriage-return", `\r`, true},
+		{"octal", `\101`, false},
+		{"bell", `\a`, false},
+		{"vertical-tab", `\v`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			grammarDir := t.TempDir()
+			grammarPath := filepath.Join(grammarDir, MaipipeFile)
+			grammar := "schema = 0\n\n[[pipelines.\"owner" + tc.escape + "\".stage]]\nname = \"check\"\nrun = \"true\"\n"
+			if err := os.WriteFile(grammarPath, []byte(grammar), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			grammarOut, grammarErr := exec.Command("maipipe", "validate", grammarPath).CombinedOutput()
+			missingEscape := strings.Contains(string(grammarOut), "missing escaped value")
+			if tc.valid && missingEscape {
+				t.Fatalf("maipipe rejected accepted escape %q as syntax: %v\n%s", tc.escape, grammarErr, grammarOut)
+			}
+			if !tc.valid && (grammarErr == nil || !missingEscape) {
+				t.Fatalf("maipipe grammar escape %q err=%v out=%s, want syntax rejection", tc.escape, grammarErr, grammarOut)
+			}
+
+			dir := gateRepo(t, "[]", nil)
+			path := filepath.Join(dir, MaipipeFile)
+			if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+				t.Fatal(err)
+			}
+			lanes := "\n[[pipelines.\"owner" + tc.escape + "\".stage]]\nname = \"gates\"\npipeline = \"gate-go\"\n"
+			if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			clearGatePack(t, dir)
+			reports, err := Run(Options{Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			mp := report(t, reports, MaipipeFile)
+			if tc.valid && !strings.HasPrefix(mp.Refusal, "gate_pack cleared but") {
+				t.Fatalf("valid escape %q report = %#v, want I097 refusal", tc.escape, mp)
+			}
+			if !tc.valid && (mp.Refusal == "" || strings.HasPrefix(mp.Refusal, "gate_pack cleared but")) {
+				t.Fatalf("invalid escape %q report = %#v, want maipipe refusal", tc.escape, mp)
+			}
+		})
+	}
+}
+
 // I097: without an outside consumer, opt-out is an ordinary marker-inclusive
 // deletion. It stays behind I104's real maipipe validation preflight and a
 // second run is a clean no-op.
