@@ -2,14 +2,14 @@
 id: I104
 title: "Should spine's hand-rolled TOML scanner exist at all, or should `maipipe` on PATH be a precondition for touching maipipe.toml? (owner call)"
 severity: med
-status: open
+status: fixed
 affects: [I091, I096, I098]
 blocked-by: []
-execution-mode:
-tier:
-effort:
+execution-mode: subagent-driven
+tier: routine
+effort: medium
 risk-triggers: []
-review-tier:
+review-tier: routine
 ---
 
 ## Problem
@@ -86,13 +86,13 @@ One of:
 
 ## Acceptance criteria
 
-- [ ] Owner picks A, B or C, recorded as an ADR (B and C change a standing
+- [x] Owner picks A, B or C, recorded as an ADR (B and C change a standing
       decision; A can be a note on I096 plus this ticket's Resolution)
-- [ ] If B: the no-maipipe path is a refusal or a documented skip with the
+- [x] If B: the no-maipipe path is a refusal or a documented skip with the
       plan saying so, and the scan and its tests are deleted
 - [ ] If A: each residual above is either fixed with a test or listed as
       knowingly accepted, in one place
-- [ ] `spine update`'s plan keeps saying which half of the pre-flight ran
+- [x] `spine update`'s plan keeps saying which half of the pre-flight ran
       (added in the final-review fix wave), whichever way this goes
 
 ## Notes
@@ -101,3 +101,13 @@ The current code and its comments no longer overstate the scan: it is
 documented as a duplicate-and-balance check, and the no-binary note says the
 check was structural only. That was the fix wave's whole remit here — the
 scanner itself was deliberately not touched a fourth time.
+
+## Resolution (2026-08-20)
+
+Owner-selected option B is recorded in ADR 0018. `spine update` now treats a
+resolvable `maipipe` as a precondition for touching `maipipe.toml` when
+`gate_pack` is configured: without it, the plan names that file as a preflight
+skip and applies other pending files; with it, `maipipe validate` is the sole
+candidate check. The structural scanner and its scanner-specific tests were
+removed. I096 carries the dated follow-up note; I097 was not implemented in the
+I104 fixed range and was implemented later on the descendant stacked I097 branch.

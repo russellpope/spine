@@ -2,6 +2,7 @@ package update
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,6 +29,472 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+func clearGatePack(t *testing.T, dir string) {
+	t.Helper()
+	path := filepath.Join(dir, "WORKFLOW.md")
+	if err := os.WriteFile(path, []byte(setKey(readFile(t, path), "gate_pack", "")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func validateMaipipe(t *testing.T, path string) {
+	t.Helper()
+	output, err := exec.Command("maipipe", "validate", path).CombinedOutput()
+	if err != nil {
+		t.Fatalf("maipipe validate %s: %v\n%s", path, err, output)
+	}
+}
+
+// I097: clearing a pack must stop before planning removal when repo-owned
+// stages outside the managed region compose either of its pipelines. Removing
+// the guard makes the fixture unloadable, so this is a load-bearing control.
+func TestGatePackOptOutRefusesExternalCompositions(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	lanes := `
+[pipelines.full]
+
+[[pipelines.full.stage]]
+name = "gates"
+pipeline = "gate-go"
+
+[pipelines.audit]
+
+[[pipelines.audit.stage]]
+name = "mutation"
+pipeline = "mutation-go"
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clearGatePack(t, dir)
+	before := readFile(t, path)
+
+	plan, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatalf("dry-run opt-out returned an early error instead of a reviewable report: %v", err)
+	}
+	mp := report(t, plan, MaipipeFile)
+	if mp.State != Pending ||
+		!strings.Contains(mp.Refusal, "gate_pack cleared but 2 stage(s) still compose the pack — remove them, then re-run") ||
+		!strings.Contains(mp.Refusal, `pipeline "full" stage "gates"`) ||
+		!strings.Contains(mp.Refusal, `pipeline "audit" stage "mutation"`) {
+		t.Fatalf("opt-out report = %#v, want a refusal naming every repo-owned composition", mp)
+	}
+	if got := readFile(t, path); got != before {
+		t.Fatal("refused opt-out changed maipipe.toml")
+	}
+	if _, err := Run(Options{Dir: dir, Write: true}); err == nil {
+		t.Fatal("--write accepted an opt-out with repo-owned compositions")
+	}
+	if got := readFile(t, path); got != before {
+		t.Fatal("refused --write changed maipipe.toml")
+	}
+
+	begin, end, err := gateRegionBounds(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unguarded := strings.Join(append(append([]string{}, splitLines(before)[:begin]...), splitLines(before)[end+1:]...), "\n")
+	if err := os.WriteFile(path, []byte(unguarded), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.Command("maipipe", "validate", path).CombinedOutput()
+	if err == nil || !strings.Contains(string(output), `composes unknown pipeline "gate-go"`) {
+		t.Fatalf("unguarded removal validate = %v\n%s\nwant unknown gate-go composition", err, output)
+	}
+}
+
+// I097 review control: TOML permits a comment after an array-table header and
+// omits optional whitespace around assignments. Those spellings must still
+// produce the pre-deletion reviewable refusal, not defer discovery to
+// maipipe's generic validation error.
+func TestGatePackOptOutRefusalRecognizesCompactCommentedStage(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	const lanes = `
+[pipelines.full]
+
+[[pipelines.full.stage]] # owner comment
+name="gates"
+pipeline="gate-go"
+
+[pipelines.audit]
+
+[[pipelines.audit.stage]] # another owner comment
+name="mutation # owner note"
+pipeline="mutation-go"
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clearGatePack(t, dir)
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != Pending || !strings.Contains(mp.Refusal, "gate_pack cleared but") ||
+		!strings.Contains(mp.Refusal, `pipeline "full" stage "gates"`) ||
+		!strings.Contains(mp.Refusal, `pipeline "audit" stage "mutation # owner note"`) {
+		t.Fatalf("compact/commented composition report = %#v, want both named refusals", mp)
+	}
+}
+
+// I097 review control: TOML literal strings use single quotes and retain # as
+// data. The targeted reader must name the owner before maipipe reaches its
+// generic unknown-pipeline validation error.
+func TestGatePackOptOutRefusalRecognizesLiteralStringStage(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	const lanes = `
+[pipelines.full]
+
+[[pipelines.full.stage]]
+name='gates # owner'
+pipeline='gate-go'
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clearGatePack(t, dir)
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != Pending || !strings.Contains(mp.Refusal, "gate_pack cleared but") ||
+		!strings.Contains(mp.Refusal, `pipeline "full" stage "gates # owner"`) {
+		t.Fatalf("literal-string composition report = %#v, want full/gates owner refusal", mp)
+	}
+}
+
+// Primary-review control: maipipe accepts whitespace inside an array-table
+// header and quoted assignment keys. spine must still aggregate every owner
+// before a candidate deletion reaches maipipe validation.
+func TestGatePackOptOutRefusalRecognizesSpacedQuotedStage(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	const lanes = `
+[pipelines.full]
+
+[[ pipelines . full . stage ]]
+"name" = "gates"
+'pipeline' = 'gate-go'
+
+[pipelines.audit]
+
+[[ pipelines . audit . stage ]]
+'name' = 'mutation # owner'
+"pipeline" = "mutation-go"
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clearGatePack(t, dir)
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != Pending || !strings.Contains(mp.Refusal, "gate_pack cleared but 2 stage(s)") ||
+		!strings.Contains(mp.Refusal, `pipeline "full" stage "gates"`) ||
+		!strings.Contains(mp.Refusal, `pipeline "audit" stage "mutation # owner"`) {
+		t.Fatalf("spaced/quoted composition report = %#v, want both owner refusals", mp)
+	}
+}
+
+// Final re-verification control: quote-aware table paths retain their decoded
+// owner names, including dots, before the opt-out planner aggregates refs.
+func TestGatePackOptOutRefusalRecognizesQuotedTablePaths(t *testing.T) {
+	cases := []struct {
+		name, lanes, owner, stage string
+	}{
+		{
+			name: "quoted-owner-with-dot",
+			lanes: `
+[[pipelines."full.lane".stage]]
+name = "gates"
+pipeline = "gate-go"
+`,
+			owner: "full.lane",
+			stage: "gates",
+		},
+		{
+			name: "quoted-key-segments",
+			lanes: `
+[[ "pipelines" . full . 'stage' ]]
+name = "gates two"
+pipeline = "gate-go"
+`,
+			owner: "full",
+			stage: "gates two",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := gateRepo(t, "[]", nil)
+			path := filepath.Join(dir, MaipipeFile)
+			if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(readFile(t, path)+tc.lanes), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			clearGatePack(t, dir)
+
+			reports, err := Run(Options{Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			mp := report(t, reports, MaipipeFile)
+			want := `pipeline "` + tc.owner + `" stage "` + tc.stage + `"`
+			if mp.State != Pending || !strings.Contains(mp.Refusal, "gate_pack cleared but") || !strings.Contains(mp.Refusal, want) {
+				t.Fatalf("quoted-path report = %#v, want %s", mp, want)
+			}
+		})
+	}
+}
+
+// Final re-verification control: malformed bare key segments are not owners.
+// They must bypass the targeted composition reader and remain maipipe grammar
+// errors rather than an I097 composition refusal.
+func TestGatePackOptOutIgnoresMalformedBareTablePath(t *testing.T) {
+	cases := []struct {
+		name, header string
+	}{
+		{"space", "[[pipelines.bad owner.stage]]"},
+		{"punctuation", "[[pipelines.bad!owner.stage]]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := gateRepo(t, "[]", nil)
+			path := filepath.Join(dir, MaipipeFile)
+			if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+				t.Fatal(err)
+			}
+			lanes := "\n" + tc.header + "\nname = \"gates\"\npipeline = \"gate-go\"\n"
+			if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			clearGatePack(t, dir)
+
+			reports, err := Run(Options{Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			mp := report(t, reports, MaipipeFile)
+			if mp.Refusal == "" || strings.HasPrefix(mp.Refusal, "gate_pack cleared but") {
+				t.Fatalf("malformed %q report = %#v, want maipipe grammar refusal", tc.header, mp)
+			}
+		})
+	}
+}
+
+// Final re-verification control: check the installed maipipe grammar before
+// asserting spine's boundary. TOML basic-string escapes aggregate normally;
+// Go-only escapes must defer to maipipe instead of manufacturing an I097
+// owner composition.
+func TestGatePackOptOutHeaderBasicStringEscapeBoundary(t *testing.T) {
+	cases := []struct {
+		name, escape string
+		valid        bool
+	}{
+		{"hex", `\x2e`, true},
+		{"unicode-short", `\u002e`, true},
+		{"unicode-long", `\U0000002e`, true},
+		{"quote", `\"`, true},
+		{"backslash", `\\`, true},
+		{"backspace", `\b`, true},
+		{"tab", `\t`, true},
+		{"newline", `\n`, true},
+		{"form-feed", `\f`, true},
+		{"carriage-return", `\r`, true},
+		{"escape", `\e`, true},
+		{"octal", `\101`, false},
+		{"bell", `\a`, false},
+		{"vertical-tab", `\v`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			grammarDir := t.TempDir()
+			grammarPath := filepath.Join(grammarDir, MaipipeFile)
+			grammar := "schema = 0\n\n[[pipelines.\"owner" + tc.escape + "\".stage]]\nname = \"check\"\nrun = \"true\"\n"
+			if err := os.WriteFile(grammarPath, []byte(grammar), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			grammarOut, grammarErr := exec.Command("maipipe", "validate", grammarPath).CombinedOutput()
+			missingEscape := strings.Contains(string(grammarOut), "missing escaped value")
+			if tc.valid && missingEscape {
+				t.Fatalf("maipipe rejected accepted escape %q as syntax: %v\n%s", tc.escape, grammarErr, grammarOut)
+			}
+			if !tc.valid && (grammarErr == nil || !missingEscape) {
+				t.Fatalf("maipipe grammar escape %q err=%v out=%s, want syntax rejection", tc.escape, grammarErr, grammarOut)
+			}
+
+			dir := gateRepo(t, "[]", nil)
+			path := filepath.Join(dir, MaipipeFile)
+			if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+				t.Fatal(err)
+			}
+			lanes := "\n[[pipelines.\"owner" + tc.escape + "\".stage]]\nname = \"gates\"\npipeline = \"gate-go\"\n"
+			if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			clearGatePack(t, dir)
+			reports, err := Run(Options{Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			mp := report(t, reports, MaipipeFile)
+			if tc.valid && !strings.HasPrefix(mp.Refusal, "gate_pack cleared but") {
+				t.Fatalf("valid escape %q report = %#v, want I097 refusal", tc.escape, mp)
+			}
+			if !tc.valid && (mp.Refusal == "" || strings.HasPrefix(mp.Refusal, "gate_pack cleared but")) {
+				t.Fatalf("invalid escape %q report = %#v, want maipipe refusal", tc.escape, mp)
+			}
+		})
+	}
+}
+
+// maipipe's \e escape is distinct from an escaped backslash followed by e.
+// The latter must retain both data characters in the owner name.
+func TestGatePackOptOutHeaderEscapedBackslashE(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	const lanes = `
+[[pipelines."owner\\e".stage]]
+name = "gates"
+pipeline = "gate-go"
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, _ := exec.Command("maipipe", "validate", path).CombinedOutput(); strings.Contains(string(output), "missing escaped value") {
+		t.Fatalf("maipipe rejected escaped-backslash control as syntax:\n%s", output)
+	}
+	clearGatePack(t, dir)
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if !strings.HasPrefix(mp.Refusal, "gate_pack cleared but") ||
+		!strings.Contains(mp.Refusal, `pipeline "owner\\e" stage "gates"`) {
+		t.Fatalf("escaped-backslash-e report = %#v, want literal backslash owner", mp)
+	}
+}
+
+// I097: without an outside consumer, opt-out is an ordinary marker-inclusive
+// deletion. It stays behind I104's real maipipe validation preflight and a
+// second run is a clean no-op.
+func TestGatePackOptOutDeletesUnreferencedManagedRegion(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	lanes := `
+[pipelines.full]
+
+[[pipelines.full.stage]]
+name = "build"
+run = "true"
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clearGatePack(t, dir)
+
+	plan, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, plan, MaipipeFile)
+	if mp.State != Pending || !strings.Contains(mp.Diff, "- # spine:begin gate-pack go@1") ||
+		!strings.Contains(mp.Diff, "- # spine:end") {
+		t.Fatalf("opt-out plan = %#v, want marker-inclusive deletion diff", mp)
+	}
+	if mp.Preflight != maipipeValidatePreflight {
+		t.Fatalf("opt-out preflight = %q, want %q", mp.Preflight, maipipeValidatePreflight)
+	}
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); strings.Contains(got, gateRegionBegin) || strings.Contains(got, gateRegionEnd) {
+		t.Fatalf("opt-out left managed markers behind:\n%s", got)
+	}
+	validateMaipipe(t, path)
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range reports {
+		if r.Path == MaipipeFile {
+			t.Fatalf("second opt-out run reported %s: %#v", MaipipeFile, r)
+		}
+	}
+}
+
+// I104 option B: a repository that enables a gate pack cannot safely refresh
+// maipipe.toml without maipipe itself. That one file is skipped, but a normal
+// update still applies every other pending file.
+func TestNoMaipipeSkipsMaipipeAndWritesOtherPendingFiles(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	mpPath := filepath.Join(dir, MaipipeFile)
+	const sentinel = "schema = 0\n# preserve this exact file when maipipe is unavailable\n"
+	if err := os.WriteFile(mpPath, []byte(sentinel), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wfPath := filepath.Join(dir, "WORKFLOW.md")
+	beforeWorkflow := setKey(readFile(t, wfPath), "template_version", "10")
+	if err := os.WriteFile(wfPath, []byte(beforeWorkflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatalf("missing maipipe should skip only %s, not refuse the update: %v", MaipipeFile, err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != SkippedPreflight {
+		t.Fatalf("%s state = %v, want a preflight skip", MaipipeFile, mp.State)
+	}
+	if mp.Preflight != noMaipipePreflight {
+		t.Errorf("preflight = %q, want %q", mp.Preflight, noMaipipePreflight)
+	}
+	if mp.Diff != "" {
+		t.Errorf("a skipped %s has a writable diff:\n%s", MaipipeFile, mp.Diff)
+	}
+	if got := readFile(t, mpPath); got != sentinel {
+		t.Errorf("%s changed without maipipe:\nwant %q\n got %q", MaipipeFile, sentinel, got)
+	}
+	if got := readFile(t, wfPath); got == beforeWorkflow || !strings.Contains(got, "template_version: 11") {
+		t.Errorf("another pending file was not applied:\n%s", got)
+	}
 }
 
 // AC (I085, amended I091): absent maipipe.toml + gate_pack set → the file
@@ -367,28 +834,23 @@ func TestGatePackBrokenMarkerIsReported(t *testing.T) {
 	}
 }
 
-// Negative control (fleet): a repo that never opts in gets no maipipe.toml,
-// and an existing region is left alone rather than deleted.
-func TestNoGatePackWritesNoMaipipe(t *testing.T) {
+// I097/ADR 0018: a safe-looking deletion is still refused when its resulting
+// maipipe.toml is invalid. The existing region stays byte-for-byte intact.
+func TestGatePackOptOutUsesMaipipePreflight(t *testing.T) {
 	dir := gateRepo(t, "[]", nil)
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
 		t.Fatal(err)
 	}
 	before := readFile(t, filepath.Join(dir, MaipipeFile))
-	optIn(t, dir, "", "[]", nil)
-	reports, err := Run(Options{Dir: dir, Write: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range reports {
-		if r.Path == MaipipeFile {
-			t.Fatalf("maipipe.toml reported with no gate_pack: %+v", r)
-		}
+	clearGatePack(t, dir)
+	if _, err := Run(Options{Dir: dir, Write: true}); err == nil || !strings.Contains(err.Error(), "maipipe validate rejected") {
+		t.Fatalf("opt-out without a remaining user pipeline error = %v, want maipipe preflight refusal", err)
 	}
 	if after := readFile(t, filepath.Join(dir, MaipipeFile)); after != before {
-		t.Error("an existing region was touched after opting out")
+		t.Error("preflight-refused opt-out changed maipipe.toml")
 	}
 
+	// Fleet negative control: a repo that never opted in gets no maipipe.toml.
 	fresh := stageGen10Repo(t, nil)
 	if _, err := Run(Options{Dir: fresh, Write: true}); err != nil {
 		t.Fatal(err)

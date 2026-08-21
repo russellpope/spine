@@ -853,10 +853,58 @@ func TestD10RegionDiffersFromRendering(t *testing.T) {
 	}
 }
 
-// AC (I099) negative control: an unknown gate_pack: value is a WORKFLOW.md
-// defect with a WORKFLOW.md remedy, so it surfaces as a D4 error on
-// WORKFLOW.md and no longer as a D10 error wearing a maipipe.toml path.
-func TestUnknownGatePackIsD4OnWorkflowNotD10(t *testing.T) {
+// Primary-review control: I104's missing-binary skip protects update's write,
+// not doctor from reporting known-pack region integrity drift.
+func TestD10KnownPackFindingsSurviveMissingMaipipe(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(t *testing.T, dir string)
+		want   string
+	}{
+		{
+			name: "missing",
+			mutate: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Remove(filepath.Join(dir, update.MaipipeFile)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "region is missing",
+		},
+		{
+			name: "differs",
+			mutate: func(t *testing.T, dir string) {
+				t.Helper()
+				setWorkflowKey(t, dir, "gate_pack_disabled", "[tskip]")
+			},
+			want: "differs from what the pinned pack renders",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := gatePackRepo(t)
+			tc.mutate(t, dir)
+			t.Setenv("PATH", t.TempDir())
+			fs, err := doctor.Run(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []doctor.Finding
+			for _, f := range fs {
+				if f.ID == "D10" {
+					got = append(got, f)
+				}
+			}
+			if len(got) != 1 || got[0].Severity != "warn" || !strings.Contains(got[0].Message, tc.want) {
+				t.Fatalf("missing-maipipe D10 = %#v, want %q (all: %#v)", got, tc.want, fs)
+			}
+		})
+	}
+}
+
+// I097: an unknown pack is a WORKFLOW.md defect, but an existing managed
+// region is also stale executable state and must not be hidden from doctor.
+func TestUnknownGatePackReportsStaleManagedRegion(t *testing.T) {
 	dir := gatePackRepo(t)
 	setWorkflowKey(t, dir, "gate_pack", "go@99")
 	fs, err := doctor.Run(dir)
@@ -875,12 +923,93 @@ func TestUnknownGatePackIsD4OnWorkflowNotD10(t *testing.T) {
 	if got[0].ID != "D4" || got[0].Severity != "error" || got[0].Path != "WORKFLOW.md" {
 		t.Errorf("unknown-pack finding = %#v, want D4 error on WORKFLOW.md", got[0])
 	}
+	var stale []doctor.Finding
 	for _, f := range fs {
 		if f.ID == "D10" {
-			t.Errorf("D10 still fires for an unknown pack: %#v", f)
+			stale = append(stale, f)
 		}
 	}
-	if len(fs) != 1 {
-		t.Errorf("unknown pack produced collateral findings: %#v", fs)
+	if len(stale) != 1 || stale[0].Severity != "warn" || stale[0].Path != update.MaipipeFile ||
+		!strings.Contains(stale[0].Message, "stale") {
+		t.Errorf("unknown pack stale-region finding = %#v, want one D10 warn", stale)
+	}
+	if len(fs) != 2 {
+		t.Errorf("unknown pack findings = %#v, want D4 plus D10", fs)
+	}
+}
+
+// Primary-review controls: unknown pack identity and marker integrity are
+// separate defects. A valid region is stale; damaged boundaries are D10
+// errors; no region adds no D10 finding.
+func TestUnknownGatePackMarkerInspection(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(string) string
+		wantD10 string
+	}{
+		{
+			name: "missing-end",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "# spine:end\n", "", 1)
+			},
+			wantD10: "unbalanced",
+		},
+		{
+			name: "duplicated",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "# spine:end\n", "# spine:begin gate-pack go@1\n# spine:end\n", 1)
+			},
+			wantD10: "unbalanced",
+		},
+		{
+			name: "out-of-order",
+			mutate: func(raw string) string {
+				return "# spine:end\n" + strings.Replace(raw, "# spine:end\n", "", 1)
+			},
+			wantD10: "out of order",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := gatePackRepo(t)
+			path := filepath.Join(dir, update.MaipipeFile)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(tc.mutate(string(raw))), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			setWorkflowKey(t, dir, "gate_pack", "go@99")
+
+			fs, err := doctor.Run(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []doctor.Finding
+			for _, f := range fs {
+				if f.ID == "D10" {
+					got = append(got, f)
+				}
+			}
+			if len(got) != 1 || got[0].Severity != "error" || !strings.Contains(got[0].Message, tc.wantD10) {
+				t.Fatalf("damaged markers D10 = %#v, want error %q (all: %#v)", got, tc.wantD10, fs)
+			}
+		})
+	}
+}
+
+func TestUnknownGatePackWithoutRegionAddsNoD10(t *testing.T) {
+	dir := gatePackRepo(t)
+	if err := os.Remove(filepath.Join(dir, update.MaipipeFile)); err != nil {
+		t.Fatal(err)
+	}
+	setWorkflowKey(t, dir, "gate_pack", "go@99")
+	fs, err := doctor.Run(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids(fs)["D10"] != 0 {
+		t.Fatalf("unknown pack without region produced D10: %#v", fs)
 	}
 }

@@ -144,16 +144,43 @@ func renderGateRegion(s gatePackSettings) string {
 	return b.String()
 }
 
-// planMaipipe plans the gate-pack region in maipipe.toml. ok is false when
-// there is nothing to report: no gate_pack is set, which is also the fleet
-// negative control — the file is neither created nor touched, and an
-// existing region is left alone rather than deleted.
+// planMaipipe plans the gate-pack region in maipipe.toml. An empty pack is a
+// deliberate opt-out: it removes an existing region only when no repo-owned
+// stage outside it composes one of the pack's pipelines (I097).
 func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 	s := gateSettings(workflow)
-	if s.pack == "" {
-		return FileReport{}, false, nil
-	}
 	report := FileReport{Path: MaipipeFile}
+	path := filepath.Join(dir, MaipipeFile)
+	if s.pack == "" {
+		raw, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			return FileReport{}, false, nil
+		}
+		if err != nil {
+			return report, true, err
+		}
+		old := string(raw)
+		begin, end, mErr := gateRegionBounds(old)
+		if mErr != nil {
+			report.Unrecognized = []string{mErr.Error()}
+			report.State = SkippedUnrecognized
+			return report, true, nil
+		}
+		if begin < 0 {
+			return FileReport{}, false, nil
+		}
+		lines := splitLines(old)
+		if compositions := outsideGateCompositions(lines, begin, end); len(compositions) > 0 {
+			report.State = Pending
+			report.Refusal = gatePackOptOutRefusal(compositions)
+			return report, true, nil
+		}
+		newContent := strings.Join(append(append([]string{}, lines[:begin]...), lines[end+1:]...), "\n")
+		report.State = Pending
+		report.Diff = Diff(report.Path, old, newContent)
+		report.newContent = newContent
+		return report, true, nil
+	}
 	classes, shipped := packClassesFor(s.pack)
 	if !shipped {
 		// An unknown pack is never rendered and never guessed at: the repo
@@ -165,7 +192,6 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		return report, true, nil
 	}
 	region := renderGateRegion(s)
-	path := filepath.Join(dir, MaipipeFile)
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		// A file maipipe will load needs its top-level `schema` key before
@@ -215,6 +241,254 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		report.newContent = newContent
 	}
 	return report, true, nil
+}
+
+type gateComposition struct {
+	pipeline string
+	stage    string
+	target   string
+}
+
+// outsideGateCompositions reads only stage declarations outside the managed
+// region. It intentionally recognises the small maipipe shape I097 needs;
+// maipipe validate remains the grammar authority (ADR 0018).
+func outsideGateCompositions(lines []string, begin, end int) []gateComposition {
+	var found []gateComposition
+	var current gateComposition
+	finish := func() {
+		if current.pipeline != "" && current.stage != "" &&
+			(current.target == gatePipelineName || current.target == mutationPipelineName) {
+			found = append(found, current)
+		}
+		current = gateComposition{}
+	}
+	for i, raw := range lines {
+		if i >= begin && i <= end {
+			continue
+		}
+		line := trimStageComment(raw)
+		if pipeline, ok := stageTablePipeline(line); ok {
+			finish()
+			current.pipeline = pipeline
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			finish()
+			continue
+		}
+		if current.pipeline == "" {
+			continue
+		}
+		if name, ok := stageAssignment(line, "name"); ok {
+			current.stage = name
+		}
+		if target, ok := stageAssignment(line, "pipeline"); ok {
+			current.target = target
+		}
+	}
+	finish()
+	return found
+}
+
+func stageTablePipeline(line string) (string, bool) {
+	const prefix, suffix = "[[", "]]"
+	line = trimStageComment(line)
+	if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, suffix) {
+		return "", false
+	}
+	parts, ok := dottedHeaderSegments(strings.TrimSpace(line[len(prefix) : len(line)-len(suffix)]))
+	if !ok || len(parts) != 3 || parts[0] != "pipelines" || parts[2] != "stage" {
+		return "", false
+	}
+	pipeline := parts[1]
+	return pipeline, pipeline != ""
+}
+
+// dottedHeaderSegments is deliberately only the small TOML dotted-key reader
+// needed for an array-table stage header. It separates dots outside quoted
+// segments, handling basic-string escapes and literal strings, then decodes
+// the individual key segments without accepting multiline forms.
+func dottedHeaderSegments(path string) ([]string, bool) {
+	var parts []string
+	var b strings.Builder
+	var quote byte
+	escaped := false
+	appendPart := func() bool {
+		raw := strings.TrimSpace(b.String())
+		b.Reset()
+		if raw == "" {
+			return false
+		}
+		if raw[0] == '"' || raw[0] == '\'' {
+			value, ok := stageString(raw)
+			if !ok {
+				return false
+			}
+			parts = append(parts, value)
+			return true
+		}
+		if !bareHeaderKey(raw) {
+			return false
+		}
+		parts = append(parts, raw)
+		return true
+	}
+	for i := 0; i < len(path); i++ {
+		ch := path[i]
+		switch {
+		case quote == '"' && escaped:
+			escaped = false
+			b.WriteByte(ch)
+		case quote == '"' && ch == '\\':
+			escaped = true
+			b.WriteByte(ch)
+		case quote != 0 && ch == quote:
+			quote = 0
+			b.WriteByte(ch)
+		case quote == 0 && (ch == '"' || ch == '\''):
+			quote = ch
+			b.WriteByte(ch)
+		case quote == 0 && ch == '.':
+			if !appendPart() {
+				return nil, false
+			}
+		default:
+			b.WriteByte(ch)
+		}
+	}
+	if quote != 0 || escaped || !appendPart() {
+		return nil, false
+	}
+	return parts, true
+}
+
+func bareHeaderKey(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// trimStageComment removes a TOML comment from the small stage-declaration
+// syntax I097 reads. It understands single-line basic and literal strings so
+// a # inside an owner-provided stage name remains data. Escapes apply only to
+// a basic (double-quoted) string.
+func trimStageComment(line string) string {
+	var quote byte
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		switch {
+		case quote == '"' && escaped:
+			escaped = false
+		case quote == '"' && line[i] == '\\':
+			escaped = true
+		case quote != 0 && line[i] == quote:
+			quote = 0
+		case quote == 0 && (line[i] == '"' || line[i] == '\''):
+			quote = line[i]
+		case quote == 0 && line[i] == '#':
+			return strings.TrimSpace(line[:i])
+		}
+	}
+	return strings.TrimSpace(line)
+}
+
+func stageAssignment(line, key string) (string, bool) {
+	left, value, ok := strings.Cut(trimStageComment(line), "=")
+	if !ok {
+		return "", false
+	}
+	assignedKey := strings.TrimSpace(left)
+	if assignedKey != key {
+		var quoted bool
+		assignedKey, quoted = stageString(assignedKey)
+		if !quoted || assignedKey != key {
+			return "", false
+		}
+	}
+	return stageString(strings.TrimSpace(value))
+}
+
+func stageString(value string) (string, bool) {
+	if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
+		return value[1 : len(value)-1], true
+	}
+	if len(value) < 2 || value[0] != '"' || !basicStageStringEscapes(value) {
+		return "", false
+	}
+	v, err := strconv.Unquote(goBasicStageString(value))
+	return v, err == nil
+}
+
+// goBasicStageString translates maipipe's one extra basic-string escape to
+// Go's equivalent. It consumes escape pairs, so a literal \\ followed by e is
+// preserved rather than becoming an escape byte.
+func goBasicStageString(value string) string {
+	var b strings.Builder
+	b.Grow(len(value))
+	for i := 0; i < len(value); i++ {
+		if value[i] != '\\' || i+1 >= len(value) {
+			b.WriteByte(value[i])
+			continue
+		}
+		b.WriteByte('\\')
+		i++
+		if value[i] == 'e' {
+			b.WriteString("x1b")
+			continue
+		}
+		b.WriteByte(value[i])
+	}
+	return b.String()
+}
+
+// basicStageStringEscapes admits the installed maipipe-compatible single-line
+// TOML escapes before strconv.Unquote runs. strconv additionally checks hex
+// width and code points; this gate excludes Go-only octal and control escapes.
+func basicStageStringEscapes(value string) bool {
+	for i := 1; i < len(value)-1; i++ {
+		if value[i] != '\\' {
+			continue
+		}
+		i++
+		if i >= len(value)-1 {
+			return false
+		}
+		switch value[i] {
+		case 'b', 't', 'n', 'f', 'r', 'e', '"', '\\', 'x', 'u', 'U':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func gatePackOptOutRefusal(compositions []gateComposition) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "gate_pack cleared but %d stage(s) still compose the pack — remove them, then re-run", len(compositions))
+	for _, c := range compositions {
+		fmt.Fprintf(&b, "\n- pipeline %q stage %q composes %q", c.pipeline, c.stage, c.target)
+	}
+	return b.String()
+}
+
+// HasValidGateRegion reports whether content carries one well-formed managed
+// gate-pack region. Doctor uses the same marker authority before describing
+// an unknown pack's on-disk region as stale.
+type GateRegionInspection struct {
+	Present bool
+	Err     error
+}
+
+func InspectGateRegion(content string) GateRegionInspection {
+	begin, _, err := gateRegionBounds(content)
+	return GateRegionInspection{Present: begin >= 0, Err: err}
 }
 
 // regionStageNames returns the stage names inside a region's lines, in the

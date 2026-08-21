@@ -195,16 +195,15 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	// The pre-flight's verdict belongs on the plan, not only on the write
 	// (final review, Important 1): the diff is the review surface, so the one
 	// thing that will stop --write is printed with it rather than sprung
-	// afterwards. On a pass, say which half of the check ran — a pass with no
-	// maipipe on PATH is a structural pass, not a grammar one (Minor 6).
+	// afterwards. On a pass, state which authority preflight ran.
 	preflightNotes := func(r update.FileReport) {
 		if r.Refusal != "" {
 			fmt.Fprintln(stdout, r.Refusal)
 			fmt.Fprintf(stdout, "%s: --write would refuse this plan as a whole — no files would be written until this is fixed\n", r.Path)
 			return
 		}
-		if r.StructuralOnly {
-			fmt.Fprintf(stdout, "%s: pre-flight was structural only — no maipipe binary on PATH, so the grammar check maipipe would apply did not run\n", r.Path)
+		if r.Preflight != "" {
+			fmt.Fprintf(stdout, "%s: pre-flight: %s\n", r.Path, r.Preflight)
 		}
 	}
 	for _, r := range reports {
@@ -239,6 +238,8 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			for _, l := range r.Unrecognized {
 				fmt.Fprintf(stderr, "  %s\n", l)
 			}
+		case update.SkippedPreflight:
+			fmt.Fprintf(stdout, "skipped %s — %s\n", r.Path, r.Preflight)
 		}
 	}
 	if outstanding > 0 {

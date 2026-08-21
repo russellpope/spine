@@ -2,7 +2,7 @@
 id: I097
 title: "Clearing `gate_pack` leaves the region in place and still executing — there is no uninstall, and the naive one breaks spine's own repo"
 severity: med
-status: open
+status: fixed
 affects: [I085, I095]
 blocked-by: [I096]
 execution-mode: subagent-driven
@@ -54,17 +54,29 @@ is blocked on it.
 
 ## Acceptance criteria
 
-- [ ] Fixture with a region and no out-of-region reference: `gate_pack: ""` →
+- [x] Fixture with a region and no out-of-region reference: `gate_pack: ""` →
       plan shows the region removed; `--write` removes it; the resulting file
       parses and `maipipe validate` exits 0
-- [ ] Fixture matching spine's own layout (repo-owned `full` lane composing
+- [x] Fixture matching spine's own layout (repo-owned `full` lane composing
       `gate-go`): `gate_pack: ""` → refusal naming `full`/`gates`, file
       unchanged. Removing the refusal reproduces the unloadable file
-- [ ] `gate_pack: go@99` (unshipped) with an existing region → doctor reports
+- [x] `gate_pack: go@99` (unshipped) with an existing region → doctor reports
       the stale region, not silence
-- [ ] Re-running opt-out after removal is a clean no-op
+- [x] Re-running opt-out after removal is a clean no-op
 
 ## Notes
 
 Depends on the I095 owner call only for message wording (whether a divergent
 in-region value is worth reporting as it goes), not for the removal semantics.
+
+## Resolution (2026-08-20)
+
+`spine update` now reads only stage declarations outside the managed region
+before an opt-out deletion. Any `gate-go` or `mutation-go` composition refuses
+the whole plan and names every owning pipeline and stage. Without those
+consumers, the normal plan carries a marker-inclusive deletion; ADR 0018's
+existing maipipe preflight still validates it before `--write`; composition and
+preflight refusals happen before any writes, so every pending file remains
+untouched. Doctor now adds a D10 stale-region warning when an
+unshipped pack pin leaves an existing region in place. Focused tests include a
+real `maipipe validate` load-bearing control and opt-out no-op rerun.
