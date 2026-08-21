@@ -33,8 +33,13 @@ const (
 	PackVersion = 1
 )
 
+// currentPackVersion is the pack version this binary currently identifies as.
+// It defaults to the shipped constant; tests may stand in for a later binary
+// without changing any explicit versioned-pin resolution.
+var currentPackVersion = PackVersion
+
 // PackID is the versioned pack identifier, e.g. "go@1".
-func PackID() string { return fmt.Sprintf("%s@%d", PackName, PackVersion) }
+func PackID() string { return fmt.Sprintf("%s@%d", PackName, currentPackVersion) }
 
 // Code is the results-contract code for a finding from one check class,
 // e.g. "go@1/tskip".
@@ -185,15 +190,13 @@ var reportChecks = map[string]ReportCheck{
 // ships: version -> the exact check classes `gate_pack: go@<version>`
 // renders, sorted.
 //
-// The pin is a frozen list, not an attribution string. A repo that pins
-// go@1 gets the go@1 classes and only those, from any spine binary, however
-// many later packs that binary also ships — which is what ADR 0015 item 2
-// and spec story 23 promise ("a pack release never silently changes my
-// gate"), and the other half of an older binary refusing a newer pack name
-// (internal/update/gatepack.go). A new check class therefore reaches a repo
-// only under a pack version the repo opts into. TestFrozenClassLists holds
-// each version's list here to a golden literal, and the registries to the
-// union of every version's list (I098).
+// A pack pin freezes both the class list and finding attribution string
+// (I103, ADR 0019). A repo that pins go@1 gets go@1's classes and
+// go@1/<check> findings from any spine binary, however many later packs that
+// binary also ships. A new check class therefore reaches a repo only under a
+// pack version the repo opts into. TestFrozenClassLists holds each version's
+// list here to a golden literal, and the registries to the union of every
+// version's list (I098).
 var packClasses = map[int][]string{
 	1: {
 		"binary-hygiene",

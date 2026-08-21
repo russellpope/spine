@@ -39,13 +39,16 @@ func TestResolvedPinsDriveGateAttributionAndClassMembership(t *testing.T) {
 	const laterOnly = "later-only"
 	oldClasses := packClasses
 	oldCheck, hadCheck := checks[laterOnly]
+	oldCurrent := currentPackVersion
 	packClasses = map[int][]string{
 		1: append([]string(nil), oldClasses[1]...),
 		2: append(append([]string(nil), oldClasses[1]...), laterOnly),
 	}
+	currentPackVersion = 2
 	checks[laterOnly] = func(string, Config) ([]Finding, error) { return nil, nil }
 	t.Cleanup(func() {
 		packClasses = oldClasses
+		currentPackVersion = oldCurrent
 		if hadCheck {
 			checks[laterOnly] = oldCheck
 		} else {
@@ -60,9 +63,12 @@ func TestResolvedPinsDriveGateAttributionAndClassMembership(t *testing.T) {
 	if got, want := pinned.Code("tskip"), "go@1/tskip"; got != want {
 		t.Errorf("go@1 code = %q, want %q", got, want)
 	}
+	if got, want := Code("tskip"), "go@2/tskip"; got != want {
+		t.Errorf("binary code = %q, want %q", got, want)
+	}
 	bare, ok := ResolvePack("go")
-	if !ok || bare.ID != PackID() {
-		t.Errorf("bare go resolves to %#v, %v; want binary pack %s", bare, ok, PackID())
+	if !ok || bare.ID != "go@2" {
+		t.Errorf("bare go resolves to %#v, %v; want current binary pack go@2", bare, ok)
 	}
 	if _, ok := ResolvePack("go@9"); ok {
 		t.Error("ResolvePack(go@9) accepted an unshipped pin")
@@ -75,6 +81,18 @@ func TestResolvedPinsDriveGateAttributionAndClassMembership(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "go@1/tskip") {
 		t.Errorf("pinned finding not attributed to go@1: %q", out.String())
+	}
+	if strings.Contains(out.String(), "go@2/tskip") {
+		t.Errorf("pinned finding leaked binary attribution go@2: %q", out.String())
+	}
+
+	out.Reset()
+	errs.Reset()
+	if got := Run("go", laterOnly, dir, &out, &errs, EnvConfig()); got != 0 {
+		t.Fatalf("bare current-pack class exit = %d, want 0; stdout=%q stderr=%q", got, out.String(), errs.String())
+	}
+	if !strings.Contains(out.String(), "go@2/later-only") {
+		t.Errorf("bare current-pack class not attributed to go@2: %q", out.String())
 	}
 
 	out.Reset()
