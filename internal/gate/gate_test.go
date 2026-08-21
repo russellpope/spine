@@ -12,6 +12,15 @@ import (
 	"testing"
 )
 
+// Gate tests exercise result-emitting commands directly. They must not write
+// into the enclosing maipipe test stage when that stage exports its results
+// path; individual tests that cover file emission set their own temporary
+// path explicitly.
+func TestMain(m *testing.M) {
+	os.Unsetenv(ResultsEnvVar)
+	os.Exit(m.Run())
+}
+
 func tskipViolationDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
