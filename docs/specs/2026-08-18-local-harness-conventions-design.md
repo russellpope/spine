@@ -142,12 +142,13 @@ Gate pack
     generated from machine rows.
 23. As a repo owner, I want to pin `gate_pack: go@1` and move to `go@2`
     deliberately, so that a pack release never silently changes my gate.
-    The pin is a **frozen class list**, not an attribution string: `go@1`
-    renders the check classes go@1 ships and only those, identically from
-    any spine binary however many later packs that binary also carries, so
-    a class added to the pack reaches my repo only when I move the pin.
-    (ADR 0015 item 2 already promises this; I098 made the pin enforce it,
-    and an old binary refusing a newer pack name is its other half.)
+    The **pack pin** freezes both the class list and the attribution string:
+    `go@1` renders the check classes go@1 ships and only those, identically
+    from any spine binary however many later packs that binary also carries,
+    and every finding is coded `go@1/<check>`. A class added to the pack
+    reaches my repo only when I move the pin. (ADR 0015 item 2 promises the
+    frozen list; I098 enforced it, and I103/ADR 0019 made the run-line pin
+    authoritative for attribution too.)
 24. As a repo owner, I want per-check inputs (spec path for
     `test-enum-vs-spec`, manifest path for `fixture-manifest`, binary list
     for `gitignore-control`) declared once in `gate_pack_config` and passed

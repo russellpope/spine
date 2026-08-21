@@ -11,24 +11,24 @@ profile = "full"
 
 [[pipelines.gate-go.stage]]
 name = "binary-hygiene"
-run = "spine gate go binary-hygiene"
+run = "spine gate go@1 binary-hygiene"
 
 [[pipelines.gate-go.stage]]
 name = "dead-code-callgraph"
-run = "spine gate go dead-code-callgraph"
+run = "spine gate go@1 dead-code-callgraph"
 
 [[pipelines.gate-go.stage]]
 name = "deferred-cleanup-errcheck"
-run = "spine gate go deferred-cleanup-errcheck"
+run = "spine gate go@1 deferred-cleanup-errcheck"
 
 [[pipelines.gate-go.stage]]
 name = "gitignore-control"
-run = "spine gate go gitignore-control"
+run = "spine gate go@1 gitignore-control"
 env = { SPINE_GATE_BUILD_OUTPUTS = "bin/spine" }
 
 [[pipelines.gate-go.stage]]
 name = "tskip"
-run = "spine gate go tskip"
+run = "spine gate go@1 tskip"
 env = { SPINE_GATE_TSKIP_ALLOW = "cmd/spine/dogfood_test.go,internal/cursor/dogfood_test.go" }
 
 [pipelines.mutation-go]
@@ -36,7 +36,7 @@ profile = "audit"
 
 [[pipelines.mutation-go.stage]]
 name = "mutate"
-run = "spine gate go mutate"
+run = "spine gate go@1 mutate"
 # spine:end
 
 # spine repo lanes (owner-managed; the region above is spine-managed)

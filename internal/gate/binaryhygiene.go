@@ -73,7 +73,7 @@ func checkBinaryHygiene(dir string, cfg Config) ([]Finding, error) {
 				Message:  "stray second module tree: tracked go.mod outside the repo root",
 				File:     rel,
 				Line:     0,
-				Code:     Code("binary-hygiene"),
+				Code:     cfg.Code("binary-hygiene"),
 			})
 			continue
 		}
@@ -87,7 +87,7 @@ func checkBinaryHygiene(dir string, cfg Config) ([]Finding, error) {
 				Message:  "committed binary: tracked file is a " + kind + " by content",
 				File:     rel,
 				Line:     0,
-				Code:     Code("binary-hygiene"),
+				Code:     cfg.Code("binary-hygiene"),
 			})
 		}
 	}

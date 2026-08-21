@@ -40,7 +40,7 @@ commands:
   eval       manage docs/evals (new, add-run, list)
   doctor     read-only workflow health checks
   audit      verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
-  gate       run a gate-pack check class (gate go <check> [--dir D])
+  gate       run a gate-pack check class (gate <pack>[@<v>] <check> [--dir D])
   checkpoint write or replay a session checkpoint (new, latest, list)
   cursor     print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
   model      resolve the model table for a (flavor, tier) pair (read-only)
@@ -188,7 +188,11 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s: this render drops %d stage(s) present today: %s\n",
 				r.Path, len(r.StagesRemoved), strings.Join(r.StagesRemoved, ", "))
 		}
-		if len(r.StagesAdded) > 0 || len(r.StagesRemoved) > 0 {
+		if len(r.StagesChanged) > 0 {
+			fmt.Fprintf(stdout, "%s: this render changes %d stage(s) not added or removed: %s\n",
+				r.Path, len(r.StagesChanged), strings.Join(r.StagesChanged, ", "))
+		}
+		if len(r.StagesAdded) > 0 || len(r.StagesRemoved) > 0 || len(r.StagesChanged) > 0 {
 			fmt.Fprintf(stdout, "%s: the region's bytes change, so maipipe's definition_hash does too — re-run `maipipe gate approve-definition`\n", r.Path)
 		}
 	}
@@ -629,7 +633,7 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// cmdGate is a thin dispatcher over gate.Run: `spine gate <pack> <check>
+// cmdGate is a thin dispatcher over gate.Run: `spine gate <pack>[@<v>] <check>
 // [--dir D]`. The pack owns the exit-code contract (0 pass, 1 findings,
 // 2 misconfiguration), the results-contract emitter and the human table, so
 // nothing but flag parsing lives here.
@@ -651,7 +655,7 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 // gateUsage documents the gate pack in CONTEXT.md vocabulary: a gate pack
 // is a versioned battery of check classes; one invocation runs one check
 // class and every finding is attributable to <pack>@<version>/<check>.
-var gateUsage = `usage: spine gate <pack> <check> [--dir D]
+var gateUsage = `usage: spine gate <pack>[@<v>] <check> [--dir D]
 
 pack:    ` + gate.PackName + ` (version ` + gate.PackID() + `)
 checks:  ` + strings.Join(gate.CheckNames(), ", ") + `

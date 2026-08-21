@@ -2117,7 +2117,7 @@ func TestGatePackRegionAtCLISeam(t *testing.T) {
 	for _, want := range []string{
 		"# spine:begin gate-pack go@1\n",
 		"[pipelines.gate-go]\nprofile = \"full\"\n",
-		"run = \"spine gate go tskip\"\n",
+		"run = \"spine gate go@1 tskip\"\n",
 		"# spine:end\n",
 	} {
 		if !strings.Contains(string(got), want) {
@@ -2460,5 +2460,39 @@ func TestUpdatePlanFlagsAddedGateStages(t *testing.T) {
 	// A plan that adds stages says nothing about dropping any.
 	if strings.Contains(out, "stage(s) present today") {
 		t.Errorf("plan reports dropped stages for an add-only render, out=%q", out)
+	}
+}
+
+// TestUpdatePlanFlagsChangedGateStages makes the one-time bare-to-pinned
+// migration visible at the CLI boundary. The stage set is unchanged, but the
+// stage definitions are not: maipipe must re-approve that byte change.
+func TestUpdatePlanFlagsChangedGateStages(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	setGateKeys(t, dir, "go@1", "[]")
+	if code, _, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 0 {
+		t.Fatalf("initial pinned write: code=%d stderr=%q", code, errs)
+	}
+	path := filepath.Join(dir, "maipipe.toml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := strings.ReplaceAll(string(raw), "spine gate go@1 ", "spine gate go ")
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errs := runCmd(t, "update", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("legacy dry-run: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	if !strings.Contains(out, "this render changes 9 stage(s) not added or removed") {
+		t.Errorf("changed-stage notice missing: %q", out)
+	}
+	if !strings.Contains(out, "maipipe gate approve-definition") {
+		t.Errorf("changed-stage re-approval missing: %q", out)
 	}
 }

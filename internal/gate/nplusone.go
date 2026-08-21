@@ -63,7 +63,7 @@ func checkNPlusOne(dir string, cfg Config) ([]Finding, error) {
 				Message:  fmt.Sprintf("call in loop: %s is a configured client call (%s) inside a loop body — one round trip per iteration", callName(call), EnvVar(nPlusOneClientsKey)),
 				File:     rel,
 				Line:     fset.Position(call.Pos()).Line,
-				Code:     Code("n-plus-one"),
+				Code:     cfg.Code("n-plus-one"),
 			})
 		}
 		return nil

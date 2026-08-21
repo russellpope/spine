@@ -78,6 +78,11 @@ Bind the registry to the version with a test rather than prose:
 
 The pin is now a **frozen class list**, and the render is keyed by it.
 
+**2026-08-21 follow-through (I103):** the pack pin now freezes the other
+half as well: the attribution string. ADR 0019 puts `go@1` on each stage run
+line, so a go@1 region emits `go@1/<check>` regardless of the binary's later
+packs; I103 also makes the byte-only rewrite and re-approval cost explicit.
+
 - `internal/gate/gate.go`: `packClasses` maps a pack version to the exact
   class list that version renders; `PackClassesFor("go@1")` and `PackIDs()`
   expose it. The registry no longer decides what a pinned repo runs.

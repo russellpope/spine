@@ -1,6 +1,7 @@
 package update
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -130,6 +131,9 @@ func TestPlanReportsAddedAndRemovedStages(t *testing.T) {
 	if len(mp.StagesRemoved) != 0 {
 		t.Errorf("StagesRemoved = %v, want none", mp.StagesRemoved)
 	}
+	if len(mp.StagesChanged) != 0 {
+		t.Errorf("StagesChanged = %v, want none for an add-only render", mp.StagesChanged)
+	}
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +150,9 @@ func TestPlanReportsAddedAndRemovedStages(t *testing.T) {
 	}
 	if len(mp.StagesAdded) != 0 {
 		t.Errorf("StagesAdded = %v, want none", mp.StagesAdded)
+	}
+	if len(mp.StagesChanged) != 0 {
+		t.Errorf("StagesChanged = %v, want none for a remove-only render", mp.StagesChanged)
 	}
 }
 
@@ -167,7 +174,65 @@ func TestUnchangedStageListReportsNoChurn(t *testing.T) {
 		t.Fatalf("a changed gate_pack_config did not re-render the region: state=%v", mp.State)
 	}
 	if len(mp.StagesAdded) != 0 || len(mp.StagesRemoved) != 0 {
-		t.Errorf("stage churn reported for a config-only change: added=%v removed=%v",
+		t.Errorf("stage set churn reported for a config-only change: added=%v removed=%v",
 			mp.StagesAdded, mp.StagesRemoved)
+	}
+	if want := []string{"gitignore-control"}; !reflect.DeepEqual(mp.StagesChanged, want) {
+		t.Errorf("config-only definition delta = %v, want %v", mp.StagesChanged, want)
+	}
+}
+
+// TestPinnedRunLinesAreRenderedAndReadAtTheRepoBoundary covers the managed
+// region as an owner sees it: every stage receives the repo's pack pin, an
+// old bare region is a safe stale migration, and another pin is a local edit
+// rather than a projection of this repo's WORKFLOW.md.
+func TestPinnedRunLinesAreRenderedAndReadAtTheRepoBoundary(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, MaipipeFile)
+	pinned := readFile(t, path)
+	for _, check := range regionStageNames(splitLines(pinned)) {
+		want := `run = "spine gate go@1 ` + check + `"`
+		if !strings.Contains(pinned, want) {
+			t.Errorf("stage %q does not carry the repo pin %q:\n%s", check, want, pinned)
+		}
+	}
+	if !strings.Contains(pinned, `run = "spine gate go@1 mutate"`) {
+		t.Errorf("mutation stage does not carry the repo pin:\n%s", pinned)
+	}
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report(t, reports, MaipipeFile).Unrecognized; len(got) != 0 {
+		t.Errorf("canonical pinned region is unrecognized: %v", got)
+	}
+
+	bare := strings.ReplaceAll(pinned, "spine gate go@1 ", "spine gate go ")
+	if err := os.WriteFile(path, []byte(bare), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reports, err = Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := report(t, reports, MaipipeFile)
+	if legacy.State != Pending || len(legacy.Unrecognized) != 0 {
+		t.Errorf("bare legacy region = state %v unrecognized %v, want safe stale migration", legacy.State, legacy.Unrecognized)
+	}
+
+	foreign := strings.ReplaceAll(pinned, "spine gate go@1 ", "spine gate go@2 ")
+	if err := os.WriteFile(path, []byte(foreign), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reports, err = Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report(t, reports, MaipipeFile).Unrecognized; len(got) == 0 || !strings.Contains(strings.Join(got, "\n"), "go@2") {
+		t.Errorf("foreign pin was accepted as region content: %v", got)
 	}
 }

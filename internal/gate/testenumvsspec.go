@@ -78,7 +78,7 @@ func checkTestEnumVsSpec(dir string, cfg Config) ([]Finding, error) {
 				Message:  fmt.Sprintf("enum value %q of %s is declared in code but not enumerated in %s", value, typeName, rel),
 				File:     pos.file,
 				Line:     pos.line,
-				Code:     Code("test-enum-vs-spec"),
+				Code:     cfg.Code("test-enum-vs-spec"),
 			})
 		}
 		for value, line := range spec {
@@ -90,7 +90,7 @@ func checkTestEnumVsSpec(dir string, cfg Config) ([]Finding, error) {
 				Message:  fmt.Sprintf("enum value %q of %s is enumerated in the spec but no const declares it", value, typeName),
 				File:     rel,
 				Line:     line,
-				Code:     Code("test-enum-vs-spec"),
+				Code:     cfg.Code("test-enum-vs-spec"),
 			})
 		}
 	}

@@ -51,7 +51,7 @@ func checkGitignoreControl(dir string, cfg Config) ([]Finding, error) {
 				Message:  fmt.Sprintf("declared build output not ignored: %s is not matched by any ignore rule at that path (%s)", out, EnvVar(buildOutputsKey)),
 				File:     out,
 				Line:     0,
-				Code:     Code("gitignore-control"),
+				Code:     cfg.Code("gitignore-control"),
 			})
 		}
 	}
@@ -73,7 +73,7 @@ func checkGitignoreControl(dir string, cfg Config) ([]Finding, error) {
 				Message:  "ignored entry point: a package main source file is matched by an ignore rule and so is invisible to review",
 				File:     rel,
 				Line:     1,
-				Code:     Code("gitignore-control"),
+				Code:     cfg.Code("gitignore-control"),
 			})
 		}
 	}
