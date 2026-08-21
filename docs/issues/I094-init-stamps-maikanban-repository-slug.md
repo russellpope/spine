@@ -55,8 +55,8 @@ first place.
 - [x] An `origin` on another host with `maikanban.defaultOwner` set → note printed, nothing
       stamped (the basename is not authoritative once a remote exists)
 - [x] `spine doctor` warns on a `docs/issues/` repo with missing or malformed slug, with the command
-- [~] `workflow-init` SKILL.md note committed (deepthought) — **out of scope**, ruled by the
-      controller 2026-08-20: it is a side effect in another repository and stays with the owner.
+- [x] `workflow-init` SKILL.md note committed (deepthought 073adfd, 2026-08-20, by the owner
+      after the controller ruled it out of the branch scope).
       Full lane green; shellcheck/deny stages unchanged.
 
 ## Blocked by
