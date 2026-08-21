@@ -182,6 +182,45 @@ pipeline='gate-go'
 	}
 }
 
+// Primary-review control: maipipe accepts whitespace inside an array-table
+// header and quoted assignment keys. spine must still aggregate every owner
+// before a candidate deletion reaches maipipe validation.
+func TestGatePackOptOutRefusalRecognizesSpacedQuotedStage(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	const lanes = `
+[pipelines.full]
+
+[[ pipelines . full . stage ]]
+"name" = "gates"
+'pipeline' = 'gate-go'
+
+[pipelines.audit]
+
+[[ pipelines . audit . stage ]]
+'name' = 'mutation # owner'
+"pipeline" = "mutation-go"
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clearGatePack(t, dir)
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != Pending || !strings.Contains(mp.Refusal, "gate_pack cleared but 2 stage(s)") ||
+		!strings.Contains(mp.Refusal, `pipeline "full" stage "gates"`) ||
+		!strings.Contains(mp.Refusal, `pipeline "audit" stage "mutation # owner"`) {
+		t.Fatalf("spaced/quoted composition report = %#v, want both owner refusals", mp)
+	}
+}
+
 // I097: without an outside consumer, opt-out is an ordinary marker-inclusive
 // deletion. It stays behind I104's real maipipe validation preflight and a
 // second run is a clean no-op.

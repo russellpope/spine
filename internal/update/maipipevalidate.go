@@ -20,12 +20,9 @@ const (
 	maipipeValidatePreflight = "maipipe validate"
 )
 
-// maipipeOnPath reports whether a maipipe binary is resolvable. I104 makes
-// that a precondition for touching maipipe.toml when gate_pack is configured.
-func maipipeOnPath() bool {
-	_, err := exec.LookPath("maipipe")
-	return err == nil
-}
+// maipipeLookup is a seam for the one I104 preflight resolution decision.
+// Run pins its returned executable path for the candidate validation.
+var maipipeLookup = exec.LookPath
 
 const duplicateStageHint = "hint: the region spine renders declares each stage once, so a duplicate almost always means a copy of that stage now sits outside the " +
 	gateRegionBegin + "… / " + gateRegionEnd + " markers — move or delete it by hand; spine will not rewrite what is outside its region"
@@ -33,11 +30,7 @@ const duplicateStageHint = "hint: the region spine renders declares each stage o
 // checkMaipipeContent asks maipipe, the sole grammar authority under I104,
 // whether candidate content can load. The candidate is written to a temporary
 // file, so a validation refusal never touches the real maipipe.toml.
-func checkMaipipeContent(path, content string) error {
-	bin, err := exec.LookPath("maipipe")
-	if err != nil {
-		return fmt.Errorf("maipipe pre-flight for %s: %w", path, err)
-	}
+func checkMaipipeContent(bin, path, content string) error {
 	dir, err := os.MkdirTemp("", "spine-maipipe")
 	if err != nil {
 		return fmt.Errorf("maipipe pre-flight for %s: %w", path, err)
@@ -63,6 +56,9 @@ func checkMaipipeContent(path, content string) error {
 	msg := strings.TrimSpace(string(out))
 	if msg == "" {
 		msg = err.Error()
+	}
+	if !exitErr.ProcessState.Exited() || exitErr.ExitCode() == 126 || exitErr.ExitCode() == 127 {
+		return fmt.Errorf("refusing to write %s: could not run maipipe validate (%v): %s", path, err, msg)
 	}
 	if strings.Contains(msg, "duplicate stage name") {
 		msg += "\n" + duplicateStageHint

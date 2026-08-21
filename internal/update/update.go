@@ -208,7 +208,8 @@ func Run(opts Options) ([]FileReport, error) {
 		if r.Refusal != "" {
 			continue
 		}
-		if !maipipeOnPath() {
+		bin, err := maipipeLookup("maipipe")
+		if err != nil {
 			r.State = SkippedPreflight
 			r.Diff = ""
 			r.newContent = ""
@@ -216,7 +217,7 @@ func Run(opts Options) ([]FileReport, error) {
 			continue
 		}
 		r.Preflight = maipipeValidatePreflight
-		if err := checkMaipipeContent(filepath.Join(opts.Dir, r.Path), r.newContent); err != nil {
+		if err := checkMaipipeContent(bin, filepath.Join(opts.Dir, r.Path), r.newContent); err != nil {
 			r.Refusal = err.Error()
 		}
 	}

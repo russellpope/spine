@@ -75,7 +75,8 @@ in-region value is worth reporting as it goes), not for the removal semantics.
 before an opt-out deletion. Any `gate-go` or `mutation-go` composition refuses
 the whole plan and names every owning pipeline and stage. Without those
 consumers, the normal plan carries a marker-inclusive deletion; ADR 0018's
-existing maipipe preflight still validates it before `--write`, preserving
-whole-plan atomicity. Doctor now adds a D10 stale-region warning when an
+existing maipipe preflight still validates it before `--write`; composition and
+preflight refusals happen before any writes, so every pending file remains
+untouched. Doctor now adds a D10 stale-region warning when an
 unshipped pack pin leaves an existing region in place. Focused tests include a
 real `maipipe validate` load-bearing control and opt-out no-op rerun.

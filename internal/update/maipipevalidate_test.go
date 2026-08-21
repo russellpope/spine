@@ -1,6 +1,7 @@
 package update
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,7 @@ func TestMaipipeValidationRejectsInvalidCandidate(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 
-	err := checkMaipipeContent("/repo/"+MaipipeFile, "schema = 0\n")
+	err := checkMaipipeContent(filepath.Join(dir, "maipipe"), "/repo/"+MaipipeFile, "schema = 0\n")
 	if err == nil {
 		t.Fatal("maipipe rejection accepted the candidate")
 	}
@@ -26,6 +27,65 @@ func TestMaipipeValidationRejectsInvalidCandidate(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal does not include %q:\n%s", want, err)
 		}
+	}
+}
+
+// Primary-review control: operational exits do not say maipipe judged the
+// candidate. A content verdict is only an ordinary nonzero validate exit.
+func TestMaipipeValidationOperationalFailuresAreNotContentVerdicts(t *testing.T) {
+	cases := []struct {
+		name   string
+		script string
+	}{
+		{"exit-126", "exit 126"},
+		{"exit-127", "exit 127"},
+		{"signal", "kill -TERM $$"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "maipipe")
+			if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+tc.script+"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			err := checkMaipipeContent(bin, "/repo/"+MaipipeFile, "schema = 0\n")
+			if err == nil || !strings.Contains(err.Error(), "could not run maipipe validate") ||
+				strings.Contains(err.Error(), "rejected the result") {
+				t.Fatalf("operational %s error = %v", tc.name, err)
+			}
+		})
+	}
+}
+
+// Primary-review control: a candidate resolves maipipe once, then executes
+// that exact path. This seam is intentionally package-local and non-parallel.
+func TestUpdateResolvesMaipipeOncePerCandidate(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if err := os.WriteFile(path, []byte("schema = 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	bin := filepath.Join(binDir, "maipipe")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := maipipeLookup
+	calls := 0
+	maipipeLookup = func(name string) (string, error) {
+		calls++
+		if name != "maipipe" {
+			return "", fmt.Errorf("lookup %q", name)
+		}
+		return bin, nil
+	}
+	t.Cleanup(func() { maipipeLookup = old })
+
+	if _, err := Run(Options{Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("maipipe lookup calls = %d, want 1", calls)
 	}
 }
 

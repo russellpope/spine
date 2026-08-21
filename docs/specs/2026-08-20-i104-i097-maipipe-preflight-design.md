@@ -1,6 +1,6 @@
 # I104/I097 maipipe preflight and gate-pack opt-out
 
-Status: approved for sequential implementation; this branch implements I104 only
+Status: approved sequential implementation: the first fixed range/branch implements I104 only; I097 is implemented only on its descendant stacked branch, and this candidate combines both ranges
 Date: 2026-08-20
 Tickets: I104, followed by I097
 Decision record: ADR 0018 (to be created by I104); respects ADRs 0001, 0015, and 0017
@@ -11,7 +11,7 @@ Decision record: ADR 0018 (to be created by I104); respects ADRs 0001, 0015, and
 one half of its `maipipe.toml` preflight. It duplicates an authority already
 provided by `maipipe validate`, but is neither a TOML parser nor needed when
 maipipe is available. Separately, clearing a gate pack leaves its managed region
-running; that later I097 change must not be implemented in this effort.
+running; I097 addresses that behavior only in the descendant stacked branch.
 
 ## I104 decision and scope
 
@@ -32,8 +32,8 @@ its structural half has been removed.
 
 ## I097 scope, stacked after I104 review
 
-I097 is approved and will be implemented on a stacked branch after I104 passes
-review. Clearing a gate pack must begin with an out-of-region composition scan
+I097 is approved and implemented on the descendant stacked branch after I104
+passes review. Clearing a gate pack must begin with an out-of-region composition scan
 for `gate-go` and `mutation-go`. If it finds one or more references, update
 refuses to remove the managed region, names every affected pipeline and stage,
 and leaves the file byte-identical. The spine-layout fixture is load-bearing:
@@ -54,8 +54,8 @@ No I097 production code, tests, or ticket resolution belong in this I104 branch.
 - No structural scanner implementation or scanner-only tests remain.
 - The work stays stdlib-only (ADR 0001) and preserves the ADR 0017 rule that the
   plan is the review surface for managed-region changes.
-- I097 remains untouched except for its inclusion as the explicitly deferred
-  stacked follow-on in this PRD and plan.
+- The I104 fixed range contains no I097 production code, tests, or ticket
+  resolution; the descendant I097 range implements the approved stacked scope.
 
 ## Verification
 

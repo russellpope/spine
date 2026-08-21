@@ -201,7 +201,11 @@ func gatePackCheck(dir string) []Finding {
 		}
 		switch {
 		case unknownGatePack(r):
-			if hasGatePackRegion(dir) {
+			inspection := inspectGatePackRegion(dir)
+			switch {
+			case inspection.Err != nil:
+				findings = append(findings, Finding{"D10", "error", update.MaipipeFile, inspection.Err.Error()})
+			case inspection.Present:
 				findings = append(findings, Finding{"D10", "warn", update.MaipipeFile,
 					"gate_pack is not shipped but maipipe.toml still carries a stale gate-pack region — choose a shipped pack or clear its repo-owned composing stages and opt out"})
 			}
@@ -213,10 +217,10 @@ func gatePackCheck(dir string) []Finding {
 				sev, msg = "error", r.Unrecognized[0]
 			}
 			findings = append(findings, Finding{"D10", sev, r.Path, msg})
-		case r.State == update.Pending && r.Created:
+		case (r.State == update.Pending || r.State == update.SkippedPreflight) && r.Created:
 			findings = append(findings, Finding{"D10", "warn", r.Path,
 				"gate_pack is set but the gate-pack region is missing — run spine update"})
-		case r.State == update.Pending:
+		case r.State == update.Pending || r.State == update.SkippedPreflight:
 			// The region differs from what this pack renders from the current
 			// WORKFLOW.md. Two causes reach here — WORKFLOW.md changed and the
 			// region has not been refreshed, or the region was edited into some
@@ -233,9 +237,15 @@ func gatePackCheck(dir string) []Finding {
 	return findings
 }
 
-func hasGatePackRegion(dir string) bool {
+func inspectGatePackRegion(dir string) update.GateRegionInspection {
 	raw, err := os.ReadFile(filepath.Join(dir, update.MaipipeFile))
-	return err == nil && update.HasValidGateRegion(string(raw))
+	if os.IsNotExist(err) {
+		return update.GateRegionInspection{}
+	}
+	if err != nil {
+		return update.GateRegionInspection{Err: err}
+	}
+	return update.InspectGateRegion(string(raw))
 }
 
 func markerCheck(dir, name string) []Finding {

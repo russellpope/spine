@@ -109,5 +109,5 @@ resolvable `maipipe` as a precondition for touching `maipipe.toml` when
 `gate_pack` is configured: without it, the plan names that file as a preflight
 skip and applies other pending files; with it, `maipipe validate` is the sole
 candidate check. The structural scanner and its scanner-specific tests were
-removed. I096 carries the dated follow-up note; I097 remains a later stacked
-effort and was not implemented here.
+removed. I096 carries the dated follow-up note; I097 was not implemented in the
+I104 fixed range and was implemented later on the descendant stacked I097 branch.

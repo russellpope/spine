@@ -291,12 +291,16 @@ func outsideGateCompositions(lines []string, begin, end int) []gateComposition {
 }
 
 func stageTablePipeline(line string) (string, bool) {
-	const prefix, suffix = "[[pipelines.", ".stage]]"
+	const prefix, suffix = "[[", "]]"
 	line = trimStageComment(line)
 	if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, suffix) {
 		return "", false
 	}
-	pipeline := strings.TrimSuffix(strings.TrimPrefix(line, prefix), suffix)
+	parts := strings.Split(strings.TrimSpace(line[len(prefix):len(line)-len(suffix)]), ".")
+	if len(parts) != 3 || strings.TrimSpace(parts[0]) != "pipelines" || strings.TrimSpace(parts[2]) != "stage" {
+		return "", false
+	}
+	pipeline := strings.TrimSpace(parts[1])
 	return pipeline, pipeline != ""
 }
 
@@ -326,10 +330,21 @@ func trimStageComment(line string) string {
 
 func stageAssignment(line, key string) (string, bool) {
 	left, value, ok := strings.Cut(trimStageComment(line), "=")
-	if !ok || strings.TrimSpace(left) != key {
+	if !ok {
 		return "", false
 	}
-	value = strings.TrimSpace(value)
+	assignedKey := strings.TrimSpace(left)
+	if assignedKey != key {
+		var quoted bool
+		assignedKey, quoted = stageString(assignedKey)
+		if !quoted || assignedKey != key {
+			return "", false
+		}
+	}
+	return stageString(strings.TrimSpace(value))
+}
+
+func stageString(value string) (string, bool) {
 	if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
 		return value[1 : len(value)-1], true
 	}
@@ -349,9 +364,14 @@ func gatePackOptOutRefusal(compositions []gateComposition) string {
 // HasValidGateRegion reports whether content carries one well-formed managed
 // gate-pack region. Doctor uses the same marker authority before describing
 // an unknown pack's on-disk region as stale.
-func HasValidGateRegion(content string) bool {
+type GateRegionInspection struct {
+	Present bool
+	Err     error
+}
+
+func InspectGateRegion(content string) GateRegionInspection {
 	begin, _, err := gateRegionBounds(content)
-	return err == nil && begin >= 0
+	return GateRegionInspection{Present: begin >= 0, Err: err}
 }
 
 // regionStageNames returns the stage names inside a region's lines, in the
