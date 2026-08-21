@@ -180,7 +180,8 @@ func unknownGatePack(r update.FileReport) bool {
 // only when the repo sets gate_pack; a repo without a pack has no region and
 // no maipipe.toml to answer for (the fleet negative control). A canonical
 // region is silent.
-// An unknown gate_pack: value is not region integrity and is D4's (I099).
+// An unknown gate_pack: value is D4's (I099), but a region already on disk
+// is stale executable state and remains D10's concern (I097).
 func gatePackCheck(dir string) []Finding {
 	wf, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
 	if err != nil {
@@ -200,7 +201,10 @@ func gatePackCheck(dir string) []Finding {
 		}
 		switch {
 		case unknownGatePack(r):
-			// Reported as D4 on WORKFLOW.md; no region exists to judge.
+			if hasGatePackRegion(dir) {
+				findings = append(findings, Finding{"D10", "warn", update.MaipipeFile,
+					"gate_pack is not shipped but maipipe.toml still carries a stale gate-pack region — choose a shipped pack or clear its repo-owned composing stages and opt out"})
+			}
 		case len(r.Unrecognized) > 0:
 			sev := "warn"
 			msg := fmt.Sprintf("%d line(s) in the spine gate-pack region are not canonical for the pinned pack — reconcile or spine update --force", len(r.Unrecognized))
@@ -227,6 +231,12 @@ func gatePackCheck(dir string) []Finding {
 		}
 	}
 	return findings
+}
+
+func hasGatePackRegion(dir string) bool {
+	raw, err := os.ReadFile(filepath.Join(dir, update.MaipipeFile))
+	return err == nil && strings.Contains(string(raw), "# spine:begin gate-pack ") &&
+		strings.Contains(string(raw), "# spine:end")
 }
 
 func markerCheck(dir, name string) []Finding {

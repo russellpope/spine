@@ -853,10 +853,9 @@ func TestD10RegionDiffersFromRendering(t *testing.T) {
 	}
 }
 
-// AC (I099) negative control: an unknown gate_pack: value is a WORKFLOW.md
-// defect with a WORKFLOW.md remedy, so it surfaces as a D4 error on
-// WORKFLOW.md and no longer as a D10 error wearing a maipipe.toml path.
-func TestUnknownGatePackIsD4OnWorkflowNotD10(t *testing.T) {
+// I097: an unknown pack is a WORKFLOW.md defect, but an existing managed
+// region is also stale executable state and must not be hidden from doctor.
+func TestUnknownGatePackReportsStaleManagedRegion(t *testing.T) {
 	dir := gatePackRepo(t)
 	setWorkflowKey(t, dir, "gate_pack", "go@99")
 	fs, err := doctor.Run(dir)
@@ -875,12 +874,17 @@ func TestUnknownGatePackIsD4OnWorkflowNotD10(t *testing.T) {
 	if got[0].ID != "D4" || got[0].Severity != "error" || got[0].Path != "WORKFLOW.md" {
 		t.Errorf("unknown-pack finding = %#v, want D4 error on WORKFLOW.md", got[0])
 	}
+	var stale []doctor.Finding
 	for _, f := range fs {
 		if f.ID == "D10" {
-			t.Errorf("D10 still fires for an unknown pack: %#v", f)
+			stale = append(stale, f)
 		}
 	}
-	if len(fs) != 1 {
-		t.Errorf("unknown pack produced collateral findings: %#v", fs)
+	if len(stale) != 1 || stale[0].Severity != "warn" || stale[0].Path != update.MaipipeFile ||
+		!strings.Contains(stale[0].Message, "stale") {
+		t.Errorf("unknown pack stale-region finding = %#v, want one D10 warn", stale)
+	}
+	if len(fs) != 2 {
+		t.Errorf("unknown pack findings = %#v, want D4 plus D10", fs)
 	}
 }

@@ -144,16 +144,41 @@ func renderGateRegion(s gatePackSettings) string {
 	return b.String()
 }
 
-// planMaipipe plans the gate-pack region in maipipe.toml. ok is false when
-// there is nothing to report: no gate_pack is set, which is also the fleet
-// negative control — the file is neither created nor touched, and an
-// existing region is left alone rather than deleted.
+// planMaipipe plans the gate-pack region in maipipe.toml. An empty pack is a
+// deliberate opt-out: it removes an existing region only when no repo-owned
+// stage outside it composes one of the pack's pipelines (I097).
 func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 	s := gateSettings(workflow)
-	if s.pack == "" {
-		return FileReport{}, false, nil
-	}
 	report := FileReport{Path: MaipipeFile}
+	path := filepath.Join(dir, MaipipeFile)
+	if s.pack == "" {
+		raw, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			return FileReport{}, false, nil
+		}
+		if err != nil {
+			return report, true, err
+		}
+		old := string(raw)
+		begin, end, mErr := gateRegionBounds(old)
+		if mErr != nil {
+			report.Unrecognized = []string{mErr.Error()}
+			report.State = SkippedUnrecognized
+			return report, true, nil
+		}
+		if begin < 0 {
+			return FileReport{}, false, nil
+		}
+		lines := splitLines(old)
+		if compositions := outsideGateCompositions(lines, begin, end); len(compositions) > 0 {
+			return FileReport{}, false, gatePackOptOutRefusal(compositions)
+		}
+		newContent := strings.Join(append(append([]string{}, lines[:begin]...), lines[end+1:]...), "\n")
+		report.State = Pending
+		report.Diff = Diff(report.Path, old, newContent)
+		report.newContent = newContent
+		return report, true, nil
+	}
 	classes, shipped := packClassesFor(s.pack)
 	if !shipped {
 		// An unknown pack is never rendered and never guessed at: the repo
@@ -165,7 +190,6 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		return report, true, nil
 	}
 	region := renderGateRegion(s)
-	path := filepath.Join(dir, MaipipeFile)
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		// A file maipipe will load needs its top-level `schema` key before
@@ -215,6 +239,71 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		report.newContent = newContent
 	}
 	return report, true, nil
+}
+
+type gateComposition struct {
+	pipeline string
+	stage    string
+	target   string
+}
+
+// outsideGateCompositions reads only stage declarations outside the managed
+// region. It intentionally recognises the small maipipe shape I097 needs;
+// maipipe validate remains the grammar authority (ADR 0018).
+func outsideGateCompositions(lines []string, begin, end int) []gateComposition {
+	var found []gateComposition
+	var current gateComposition
+	finish := func() {
+		if current.pipeline != "" && current.stage != "" &&
+			(current.target == gatePipelineName || current.target == mutationPipelineName) {
+			found = append(found, current)
+		}
+		current = gateComposition{}
+	}
+	for i, raw := range lines {
+		if i >= begin && i <= end {
+			continue
+		}
+		line := strings.TrimSpace(raw)
+		if pipeline, ok := stageTablePipeline(line); ok {
+			finish()
+			current.pipeline = pipeline
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			finish()
+			continue
+		}
+		if current.pipeline == "" {
+			continue
+		}
+		if name, ok := quotedValue(line, "name = "); ok {
+			current.stage = name
+		}
+		if target, ok := quotedValue(line, "pipeline = "); ok {
+			current.target = target
+		}
+	}
+	finish()
+	return found
+}
+
+func stageTablePipeline(line string) (string, bool) {
+	const prefix, suffix = "[[pipelines.", ".stage]]"
+	if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, suffix) {
+		return "", false
+	}
+	pipeline := strings.TrimSuffix(strings.TrimPrefix(line, prefix), suffix)
+	return pipeline, pipeline != ""
+}
+
+func gatePackOptOutRefusal(compositions []gateComposition) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "gate_pack cleared but %d stage(s) still compose the pack — remove them, then re-run", len(compositions))
+	for _, c := range compositions {
+		fmt.Fprintf(&b, "\n- pipeline %q stage %q composes %q", c.pipeline, c.stage, c.target)
+	}
+	return fmt.Errorf("%s", b.String())
 }
 
 // regionStageNames returns the stage names inside a region's lines, in the

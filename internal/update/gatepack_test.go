@@ -2,6 +2,7 @@ package update
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,6 +29,132 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+func clearGatePack(t *testing.T, dir string) {
+	t.Helper()
+	path := filepath.Join(dir, "WORKFLOW.md")
+	if err := os.WriteFile(path, []byte(setKey(readFile(t, path), "gate_pack", "")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func validateMaipipe(t *testing.T, path string) {
+	t.Helper()
+	output, err := exec.Command("maipipe", "validate", path).CombinedOutput()
+	if err != nil {
+		t.Fatalf("maipipe validate %s: %v\n%s", path, err, output)
+	}
+}
+
+// I097: clearing a pack must stop before planning removal when repo-owned
+// stages outside the managed region compose either of its pipelines. Removing
+// the guard makes the fixture unloadable, so this is a load-bearing control.
+func TestGatePackOptOutRefusesExternalCompositions(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	lanes := `
+[pipelines.full]
+
+[[pipelines.full.stage]]
+name = "gates"
+pipeline = "gate-go"
+
+[pipelines.audit]
+
+[[pipelines.audit.stage]]
+name = "mutation"
+pipeline = "mutation-go"
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clearGatePack(t, dir)
+	before := readFile(t, path)
+
+	if _, err := Run(Options{Dir: dir}); err == nil ||
+		!strings.Contains(err.Error(), "gate_pack cleared but 2 stage(s) still compose the pack — remove them, then re-run") ||
+		!strings.Contains(err.Error(), `pipeline "full" stage "gates"`) ||
+		!strings.Contains(err.Error(), `pipeline "audit" stage "mutation"`) {
+		t.Fatalf("opt-out error = %v, want every repo-owned composition named", err)
+	}
+	if got := readFile(t, path); got != before {
+		t.Fatal("refused opt-out changed maipipe.toml")
+	}
+	if _, err := Run(Options{Dir: dir, Write: true}); err == nil {
+		t.Fatal("--write accepted an opt-out with repo-owned compositions")
+	}
+	if got := readFile(t, path); got != before {
+		t.Fatal("refused --write changed maipipe.toml")
+	}
+
+	begin, end, err := gateRegionBounds(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unguarded := strings.Join(append(append([]string{}, splitLines(before)[:begin]...), splitLines(before)[end+1:]...), "\n")
+	if err := os.WriteFile(path, []byte(unguarded), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.Command("maipipe", "validate", path).CombinedOutput()
+	if err == nil || !strings.Contains(string(output), `composes unknown pipeline "gate-go"`) {
+		t.Fatalf("unguarded removal validate = %v\n%s\nwant unknown gate-go composition", err, output)
+	}
+}
+
+// I097: without an outside consumer, opt-out is an ordinary marker-inclusive
+// deletion. It stays behind I104's real maipipe validation preflight and a
+// second run is a clean no-op.
+func TestGatePackOptOutDeletesUnreferencedManagedRegion(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	lanes := `
+[pipelines.full]
+
+[[pipelines.full.stage]]
+name = "build"
+run = "true"
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clearGatePack(t, dir)
+
+	plan, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, plan, MaipipeFile)
+	if mp.State != Pending || !strings.Contains(mp.Diff, "- # spine:begin gate-pack go@1") ||
+		!strings.Contains(mp.Diff, "- # spine:end") {
+		t.Fatalf("opt-out plan = %#v, want marker-inclusive deletion diff", mp)
+	}
+	if mp.Preflight != maipipeValidatePreflight {
+		t.Fatalf("opt-out preflight = %q, want %q", mp.Preflight, maipipeValidatePreflight)
+	}
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); strings.Contains(got, gateRegionBegin) || strings.Contains(got, gateRegionEnd) {
+		t.Fatalf("opt-out left managed markers behind:\n%s", got)
+	}
+	validateMaipipe(t, path)
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range reports {
+		if r.Path == MaipipeFile {
+			t.Fatalf("second opt-out run reported %s: %#v", MaipipeFile, r)
+		}
+	}
 }
 
 // I104 option B: a repository that enables a gate pack cannot safely refresh
@@ -407,28 +534,23 @@ func TestGatePackBrokenMarkerIsReported(t *testing.T) {
 	}
 }
 
-// Negative control (fleet): a repo that never opts in gets no maipipe.toml,
-// and an existing region is left alone rather than deleted.
-func TestNoGatePackWritesNoMaipipe(t *testing.T) {
+// I097/ADR 0018: a safe-looking deletion is still refused when its resulting
+// maipipe.toml is invalid. The existing region stays byte-for-byte intact.
+func TestGatePackOptOutUsesMaipipePreflight(t *testing.T) {
 	dir := gateRepo(t, "[]", nil)
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
 		t.Fatal(err)
 	}
 	before := readFile(t, filepath.Join(dir, MaipipeFile))
-	optIn(t, dir, "", "[]", nil)
-	reports, err := Run(Options{Dir: dir, Write: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range reports {
-		if r.Path == MaipipeFile {
-			t.Fatalf("maipipe.toml reported with no gate_pack: %+v", r)
-		}
+	clearGatePack(t, dir)
+	if _, err := Run(Options{Dir: dir, Write: true}); err == nil || !strings.Contains(err.Error(), "maipipe validate rejected") {
+		t.Fatalf("opt-out without a remaining user pipeline error = %v, want maipipe preflight refusal", err)
 	}
 	if after := readFile(t, filepath.Join(dir, MaipipeFile)); after != before {
-		t.Error("an existing region was touched after opting out")
+		t.Error("preflight-refused opt-out changed maipipe.toml")
 	}
 
+	// Fleet negative control: a repo that never opted in gets no maipipe.toml.
 	fresh := stageGen10Repo(t, nil)
 	if _, err := Run(Options{Dir: fresh, Write: true}); err != nil {
 		t.Fatal(err)
