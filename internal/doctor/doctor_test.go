@@ -716,7 +716,7 @@ func TestD10NonCanonicalRegionContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	drifted := strings.Replace(string(raw), `run = "spine gate go tskip"`, `run = "echo tskip"`, 1)
+	drifted := strings.Replace(string(raw), `run = "spine gate go@1 tskip"`, `run = "echo tskip"`, 1)
 	if drifted == string(raw) {
 		t.Fatal("tskip stage not found in the rendered region")
 	}
