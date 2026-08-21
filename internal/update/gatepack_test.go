@@ -150,6 +150,38 @@ pipeline="mutation-go"
 	}
 }
 
+// I097 review control: TOML literal strings use single quotes and retain # as
+// data. The targeted reader must name the owner before maipipe reaches its
+// generic unknown-pipeline validation error.
+func TestGatePackOptOutRefusalRecognizesLiteralStringStage(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	const lanes = `
+[pipelines.full]
+
+[[pipelines.full.stage]]
+name='gates # owner'
+pipeline='gate-go'
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clearGatePack(t, dir)
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != Pending || !strings.Contains(mp.Refusal, "gate_pack cleared but") ||
+		!strings.Contains(mp.Refusal, `pipeline "full" stage "gates # owner"`) {
+		t.Fatalf("literal-string composition report = %#v, want full/gates owner refusal", mp)
+	}
+}
+
 // I097: without an outside consumer, opt-out is an ordinary marker-inclusive
 // deletion. It stays behind I104's real maipipe validation preflight and a
 // second run is a clean no-op.

@@ -301,19 +301,23 @@ func stageTablePipeline(line string) (string, bool) {
 }
 
 // trimStageComment removes a TOML comment from the small stage-declaration
-// syntax I097 reads. It deliberately understands only double-quoted strings
-// and escapes so a # inside an owner-provided stage name remains data.
+// syntax I097 reads. It understands single-line basic and literal strings so
+// a # inside an owner-provided stage name remains data. Escapes apply only to
+// a basic (double-quoted) string.
 func trimStageComment(line string) string {
-	inQuote, escaped := false, false
+	var quote byte
+	escaped := false
 	for i := 0; i < len(line); i++ {
 		switch {
-		case escaped:
+		case quote == '"' && escaped:
 			escaped = false
-		case inQuote && line[i] == '\\':
+		case quote == '"' && line[i] == '\\':
 			escaped = true
-		case line[i] == '"':
-			inQuote = !inQuote
-		case !inQuote && line[i] == '#':
+		case quote != 0 && line[i] == quote:
+			quote = 0
+		case quote == 0 && (line[i] == '"' || line[i] == '\''):
+			quote = line[i]
+		case quote == 0 && line[i] == '#':
 			return strings.TrimSpace(line[:i])
 		}
 	}
@@ -325,7 +329,11 @@ func stageAssignment(line, key string) (string, bool) {
 	if !ok || strings.TrimSpace(left) != key {
 		return "", false
 	}
-	v, err := strconv.Unquote(strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
+		return value[1 : len(value)-1], true
+	}
+	v, err := strconv.Unquote(value)
 	return v, err == nil
 }
 
