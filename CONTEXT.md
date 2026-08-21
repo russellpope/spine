@@ -166,6 +166,13 @@ declares exactly one.
   is content maipipe's verify gate runs. _Avoid_: "check pack" (rejected
   2026-08-18 — five PRDs already say gate pack), "gate stage" for the pack as
   a whole.
+- **pack pin** (decided 2026-08-21, I103 grill) — the `<pack>@<v>` value a repo
+  owns as `gate_pack` in WORKFLOW.md. It freezes *both* halves of what the
+  identifier names: the check-class list and the attribution string
+  `<pack>@<v>/<check>` on every finding. A pin naming a pack the running spine
+  does not ship is refused, never approximated. `<pack>@<v>` is the one
+  canonical form wherever the pin appears. _Avoid_: "pack version" for the
+  repo-side value (that is the pack's own number, not the repo's choice).
 - **check class** — one attributable, individually droppable check inside a
   gate pack (e.g. t.Skip zero-tolerance, deferred-cleanup errcheck). One
   maipipe stage per check class.

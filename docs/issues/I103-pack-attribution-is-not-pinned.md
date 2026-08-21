@@ -5,11 +5,11 @@ severity: med
 status: open
 affects: [I098, I082]
 blocked-by: []
-execution-mode:
-tier:
+execution-mode: subagent-driven
+tier: routine
 effort:
 risk-triggers: []
-review-tier:
+review-tier: routine
 ---
 
 ## Problem
@@ -60,6 +60,16 @@ stage is a separate process:
 Note the byte cost: adding an env var to every stage rewrites the region, so
 every adopting repo re-runs `maipipe gate approve-definition`. The plan's
 added-stage notice (I098) does not currently cover "same stages, changed env".
+
+### Decision (2026-08-21 grill)
+
+Carrier is the **run line**, not an env var: stages render
+`spine gate go@1 <check>` (ADR 0019). `spine gate` honours a versioned pack
+argument (code = pin, out-of-pin class refused, unshipped pin refused — both
+exit 2); bare `spine gate go <check>` attributes as the binary's pack. The
+region reader accepts both forms (pinned form only for the repo's own pin), and
+the plan gains a "N stage(s) changed" notice for the byte-only rewrite. Spec:
+`docs/specs/2026-08-21-i103-pack-pin-attribution-design.md` + `-plan.md`.
 
 ## Acceptance criteria
 
