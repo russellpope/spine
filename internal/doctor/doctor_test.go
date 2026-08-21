@@ -888,3 +888,56 @@ func TestUnknownGatePackReportsStaleManagedRegion(t *testing.T) {
 		t.Errorf("unknown pack findings = %#v, want D4 plus D10", fs)
 	}
 }
+
+// I097 review controls: an unshipped pack gets a stale-region warning only
+// when its markers describe one valid managed region. Damaged marker text is
+// not executable state doctor can safely call stale.
+func TestUnknownGatePackDamagedMarkersDoNotReportStaleRegion(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(string) string
+	}{
+		{
+			name: "partial",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "# spine:end\n", "", 1)
+			},
+		},
+		{
+			name: "duplicated",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "# spine:end\n", "# spine:begin gate-pack go@1\n# spine:end\n", 1)
+			},
+		},
+		{
+			name: "out-of-order",
+			mutate: func(raw string) string {
+				return "# spine:end\n" + strings.Replace(raw, "# spine:end\n", "", 1)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := gatePackRepo(t)
+			path := filepath.Join(dir, update.MaipipeFile)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(tc.mutate(string(raw))), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			setWorkflowKey(t, dir, "gate_pack", "go@99")
+
+			fs, err := doctor.Run(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, f := range fs {
+				if f.ID == "D10" && strings.Contains(f.Message, "stale") {
+					t.Fatalf("damaged markers reported as a stale region: %#v (all: %#v)", f, fs)
+				}
+			}
+		})
+	}
+}

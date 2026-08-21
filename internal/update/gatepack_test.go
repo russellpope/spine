@@ -75,11 +75,16 @@ pipeline = "mutation-go"
 	clearGatePack(t, dir)
 	before := readFile(t, path)
 
-	if _, err := Run(Options{Dir: dir}); err == nil ||
-		!strings.Contains(err.Error(), "gate_pack cleared but 2 stage(s) still compose the pack — remove them, then re-run") ||
-		!strings.Contains(err.Error(), `pipeline "full" stage "gates"`) ||
-		!strings.Contains(err.Error(), `pipeline "audit" stage "mutation"`) {
-		t.Fatalf("opt-out error = %v, want every repo-owned composition named", err)
+	plan, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatalf("dry-run opt-out returned an early error instead of a reviewable report: %v", err)
+	}
+	mp := report(t, plan, MaipipeFile)
+	if mp.State != Pending ||
+		!strings.Contains(mp.Refusal, "gate_pack cleared but 2 stage(s) still compose the pack — remove them, then re-run") ||
+		!strings.Contains(mp.Refusal, `pipeline "full" stage "gates"`) ||
+		!strings.Contains(mp.Refusal, `pipeline "audit" stage "mutation"`) {
+		t.Fatalf("opt-out report = %#v, want a refusal naming every repo-owned composition", mp)
 	}
 	if got := readFile(t, path); got != before {
 		t.Fatal("refused opt-out changed maipipe.toml")
@@ -102,6 +107,46 @@ pipeline = "mutation-go"
 	output, err := exec.Command("maipipe", "validate", path).CombinedOutput()
 	if err == nil || !strings.Contains(string(output), `composes unknown pipeline "gate-go"`) {
 		t.Fatalf("unguarded removal validate = %v\n%s\nwant unknown gate-go composition", err, output)
+	}
+}
+
+// I097 review control: TOML permits a comment after an array-table header and
+// omits optional whitespace around assignments. Those spellings must still
+// produce the pre-deletion reviewable refusal, not defer discovery to
+// maipipe's generic validation error.
+func TestGatePackOptOutRefusalRecognizesCompactCommentedStage(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	const lanes = `
+[pipelines.full]
+
+[[pipelines.full.stage]] # owner comment
+name="gates"
+pipeline="gate-go"
+
+[pipelines.audit]
+
+[[pipelines.audit.stage]] # another owner comment
+name="mutation # owner note"
+pipeline="mutation-go"
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clearGatePack(t, dir)
+
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != Pending || !strings.Contains(mp.Refusal, "gate_pack cleared but") ||
+		!strings.Contains(mp.Refusal, `pipeline "full" stage "gates"`) ||
+		!strings.Contains(mp.Refusal, `pipeline "audit" stage "mutation # owner note"`) {
+		t.Fatalf("compact/commented composition report = %#v, want both named refusals", mp)
 	}
 }
 

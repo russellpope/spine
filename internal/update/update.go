@@ -202,6 +202,12 @@ func Run(opts Options) ([]FileReport, error) {
 		if r.Path != MaipipeFile || r.State != Pending {
 			continue
 		}
+		// An I097 opt-out composition refusal is already the plan's verdict;
+		// do not replace it by trying to validate an intentionally absent
+		// candidate. --write below preserves whole-plan atomicity.
+		if r.Refusal != "" {
+			continue
+		}
 		if !maipipeOnPath() {
 			r.State = SkippedPreflight
 			r.Diff = ""

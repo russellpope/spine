@@ -235,8 +235,7 @@ func gatePackCheck(dir string) []Finding {
 
 func hasGatePackRegion(dir string) bool {
 	raw, err := os.ReadFile(filepath.Join(dir, update.MaipipeFile))
-	return err == nil && strings.Contains(string(raw), "# spine:begin gate-pack ") &&
-		strings.Contains(string(raw), "# spine:end")
+	return err == nil && update.HasValidGateRegion(string(raw))
 }
 
 func markerCheck(dir, name string) []Finding {

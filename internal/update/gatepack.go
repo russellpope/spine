@@ -171,7 +171,9 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		}
 		lines := splitLines(old)
 		if compositions := outsideGateCompositions(lines, begin, end); len(compositions) > 0 {
-			return FileReport{}, false, gatePackOptOutRefusal(compositions)
+			report.State = Pending
+			report.Refusal = gatePackOptOutRefusal(compositions)
+			return report, true, nil
 		}
 		newContent := strings.Join(append(append([]string{}, lines[:begin]...), lines[end+1:]...), "\n")
 		report.State = Pending
@@ -264,7 +266,7 @@ func outsideGateCompositions(lines []string, begin, end int) []gateComposition {
 		if i >= begin && i <= end {
 			continue
 		}
-		line := strings.TrimSpace(raw)
+		line := trimStageComment(raw)
 		if pipeline, ok := stageTablePipeline(line); ok {
 			finish()
 			current.pipeline = pipeline
@@ -277,10 +279,10 @@ func outsideGateCompositions(lines []string, begin, end int) []gateComposition {
 		if current.pipeline == "" {
 			continue
 		}
-		if name, ok := quotedValue(line, "name = "); ok {
+		if name, ok := stageAssignment(line, "name"); ok {
 			current.stage = name
 		}
-		if target, ok := quotedValue(line, "pipeline = "); ok {
+		if target, ok := stageAssignment(line, "pipeline"); ok {
 			current.target = target
 		}
 	}
@@ -290,6 +292,7 @@ func outsideGateCompositions(lines []string, begin, end int) []gateComposition {
 
 func stageTablePipeline(line string) (string, bool) {
 	const prefix, suffix = "[[pipelines.", ".stage]]"
+	line = trimStageComment(line)
 	if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, suffix) {
 		return "", false
 	}
@@ -297,13 +300,50 @@ func stageTablePipeline(line string) (string, bool) {
 	return pipeline, pipeline != ""
 }
 
-func gatePackOptOutRefusal(compositions []gateComposition) error {
+// trimStageComment removes a TOML comment from the small stage-declaration
+// syntax I097 reads. It deliberately understands only double-quoted strings
+// and escapes so a # inside an owner-provided stage name remains data.
+func trimStageComment(line string) string {
+	inQuote, escaped := false, false
+	for i := 0; i < len(line); i++ {
+		switch {
+		case escaped:
+			escaped = false
+		case inQuote && line[i] == '\\':
+			escaped = true
+		case line[i] == '"':
+			inQuote = !inQuote
+		case !inQuote && line[i] == '#':
+			return strings.TrimSpace(line[:i])
+		}
+	}
+	return strings.TrimSpace(line)
+}
+
+func stageAssignment(line, key string) (string, bool) {
+	left, value, ok := strings.Cut(trimStageComment(line), "=")
+	if !ok || strings.TrimSpace(left) != key {
+		return "", false
+	}
+	v, err := strconv.Unquote(strings.TrimSpace(value))
+	return v, err == nil
+}
+
+func gatePackOptOutRefusal(compositions []gateComposition) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "gate_pack cleared but %d stage(s) still compose the pack — remove them, then re-run", len(compositions))
 	for _, c := range compositions {
 		fmt.Fprintf(&b, "\n- pipeline %q stage %q composes %q", c.pipeline, c.stage, c.target)
 	}
-	return fmt.Errorf("%s", b.String())
+	return b.String()
+}
+
+// HasValidGateRegion reports whether content carries one well-formed managed
+// gate-pack region. Doctor uses the same marker authority before describing
+// an unknown pack's on-disk region as stale.
+func HasValidGateRegion(content string) bool {
+	begin, _, err := gateRegionBounds(content)
+	return err == nil && begin >= 0
 }
 
 // regionStageNames returns the stage names inside a region's lines, in the
