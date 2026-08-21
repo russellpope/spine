@@ -19,6 +19,10 @@ const (
 	UpToDate FileState = iota
 	Pending
 	SkippedUnrecognized
+	// SkippedPreflight is a planned file that cannot be safely touched until a
+	// required external preflight is available. Unlike local-edit skips, it
+	// does not make the rest of an update fail (I104).
+	SkippedPreflight
 )
 
 // FileReport is the per-file outcome. newContent stays unexported: only Run
@@ -59,12 +63,10 @@ type FileReport struct {
 	// blocker the dry-run cannot show is a blocker the reader meets for the
 	// first time when --write fails.
 	Refusal string
-	// StructuralOnly is set when the pre-flight passed but only its
-	// structural half ran — no maipipe binary was resolvable, so the grammar
-	// check maipipe itself would apply never happened. The plan says so
-	// rather than letting a pass read as a full one.
-	StructuralOnly bool
-	newContent     string
+	// Preflight records the pre-write check that ran, or the prerequisite that
+	// caused this file to be skipped. maipipe.toml only (I104).
+	Preflight  string
+	newContent string
 }
 
 // Options configures Run. Zero value = dry-run on ".". AdoptProfile switches
@@ -190,23 +192,26 @@ func Run(opts Options) ([]FileReport, error) {
 			}
 		}
 	}
-	// The gate-pack region is spliced as a string, so the only thing between
-	// a bad splice and a maipipe.toml no lane in the repo can load is this
-	// check (I096). It runs in the plan pass, on every run — not only under
-	// --write — because the plan is what a reader reviews before applying it
-	// (ADR 0017), and a dry-run that showed a clean diff for content --write
-	// then refuses would be a review surface that hides the one thing that
-	// matters (final review, Important 1).
-	structuralOnly := !maipipeOnPath()
+	// maipipe is the grammar authority for a gate-pack candidate (I104). It
+	// runs in the plan pass, on every run — not only under --write — because
+	// the plan is what a reader reviews before applying it (ADR 0017). When
+	// maipipe is unavailable, this one file is a separately reported skip;
+	// unrelated pending files are still safe to apply.
 	for i := range reports {
 		r := &reports[i]
 		if r.Path != MaipipeFile || r.State != Pending {
 			continue
 		}
-		r.StructuralOnly = structuralOnly
+		if !maipipeOnPath() {
+			r.State = SkippedPreflight
+			r.Diff = ""
+			r.newContent = ""
+			r.Preflight = noMaipipePreflight
+			continue
+		}
+		r.Preflight = maipipeValidatePreflight
 		if err := checkMaipipeContent(filepath.Join(opts.Dir, r.Path), r.newContent); err != nil {
 			r.Refusal = err.Error()
-			r.StructuralOnly = false // the refusal itself names which half ran
 		}
 	}
 	if opts.Write {

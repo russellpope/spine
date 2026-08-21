@@ -182,3 +182,11 @@ Sequenced before I097: region removal must pass this gate before it is written.
 `maipipe` reserves the pipeline names `gate-go` and `mutation-go`
 (maipipe I206 documents this); nothing enforces it on either side today, and
 this check is what makes a collision visible to spine.
+
+## Follow-up (2026-08-20, I104)
+
+ADR 0018 removed this ticket's spine-side structural half and its scanner
+tests. For a configured gate pack, `maipipe` on `PATH` is now the precondition
+for touching `maipipe.toml`; a missing binary makes the plan skip that one file
+while allowing unrelated pending files to apply. `maipipe validate` remains
+the sole candidate pre-write authority when present.

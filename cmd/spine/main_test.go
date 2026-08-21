@@ -2340,7 +2340,7 @@ func TestUpdateDryRunPrintsTheRefusalBeforeTheDiff(t *testing.T) {
 	if refusal < 0 {
 		t.Fatalf("dry-run plan does not show the refusal, out=%q", out)
 	}
-	if !strings.Contains(out, "duplicate table") {
+	if !strings.Contains(out, "duplicate key") {
 		t.Errorf("refusal does not name the problem, out=%q", out)
 	}
 	if !strings.Contains(out, "--write would refuse this plan as a whole") {
@@ -2356,6 +2356,40 @@ func TestUpdateDryRunPrintsTheRefusalBeforeTheDiff(t *testing.T) {
 	if code, _, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 2 ||
 		!strings.Contains(errs, "no files were written") {
 		t.Errorf("write code=%d err=%q; want a refusal naming the whole-run abort", code, errs)
+	}
+	if after, err := os.ReadFile(path); err != nil || string(after) != string(before) {
+		t.Errorf("a refused write changed maipipe.toml (err=%v)", err)
+	}
+}
+
+// I104 option B: maipipe.toml is a separately skipped planned file when the
+// configured gate pack cannot be validated. The rest of the update still
+// succeeds, so this is not an unrecognized-edit exit.
+func TestUpdateWithoutMaipipePrintsSkipAndExitsZero(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	setGateKeys(t, dir, "go@1", "[]")
+
+	path := filepath.Join(dir, "maipipe.toml")
+	const sentinel = "schema = 0\n# untouched without maipipe\n"
+	if err := os.WriteFile(path, []byte(sentinel), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+
+	code, out, errs := runCmd(t, "update", "--dir", dir, "--write")
+	if code != 0 {
+		t.Fatalf("missing maipipe is a file skip, not a command failure: code=%d out=%q err=%q", code, out, errs)
+	}
+	for _, want := range []string{"skipped maipipe.toml", "maipipe", "pre-flight"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plan does not name the skip detail %q: %q", want, out)
+		}
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != sentinel {
+		t.Errorf("maipipe.toml changed without maipipe: err=%v got=%q", err, got)
 	}
 }
 

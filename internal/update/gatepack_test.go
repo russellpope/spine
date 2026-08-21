@@ -30,6 +30,46 @@ func readFile(t *testing.T, path string) string {
 	return string(raw)
 }
 
+// I104 option B: a repository that enables a gate pack cannot safely refresh
+// maipipe.toml without maipipe itself. That one file is skipped, but a normal
+// update still applies every other pending file.
+func TestNoMaipipeSkipsMaipipeAndWritesOtherPendingFiles(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	mpPath := filepath.Join(dir, MaipipeFile)
+	const sentinel = "schema = 0\n# preserve this exact file when maipipe is unavailable\n"
+	if err := os.WriteFile(mpPath, []byte(sentinel), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wfPath := filepath.Join(dir, "WORKFLOW.md")
+	beforeWorkflow := setKey(readFile(t, wfPath), "template_version", "10")
+	if err := os.WriteFile(wfPath, []byte(beforeWorkflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+
+	reports, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
+		t.Fatalf("missing maipipe should skip only %s, not refuse the update: %v", MaipipeFile, err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if mp.State != SkippedPreflight {
+		t.Fatalf("%s state = %v, want a preflight skip", MaipipeFile, mp.State)
+	}
+	if mp.Preflight != noMaipipePreflight {
+		t.Errorf("preflight = %q, want %q", mp.Preflight, noMaipipePreflight)
+	}
+	if mp.Diff != "" {
+		t.Errorf("a skipped %s has a writable diff:\n%s", MaipipeFile, mp.Diff)
+	}
+	if got := readFile(t, mpPath); got != sentinel {
+		t.Errorf("%s changed without maipipe:\nwant %q\n got %q", MaipipeFile, sentinel, got)
+	}
+	if got := readFile(t, wfPath); got == beforeWorkflow || !strings.Contains(got, "template_version: 11") {
+		t.Errorf("another pending file was not applied:\n%s", got)
+	}
+}
+
 // AC (I085, amended I091): absent maipipe.toml + gate_pack set → the file
 // is created as maipipe's required top-level `schema = 0` followed by the
 // region and nothing else, with one stage per enabled check class.
