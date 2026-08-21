@@ -221,6 +221,58 @@ func TestGatePackOptOutRefusalRecognizesSpacedQuotedStage(t *testing.T) {
 	}
 }
 
+// Final re-verification control: quote-aware table paths retain their decoded
+// owner names, including dots, before the opt-out planner aggregates refs.
+func TestGatePackOptOutRefusalRecognizesQuotedTablePaths(t *testing.T) {
+	cases := []struct {
+		name, lanes, owner, stage string
+	}{
+		{
+			name: "quoted-owner-with-dot",
+			lanes: `
+[[pipelines."full.lane".stage]]
+name = "gates"
+pipeline = "gate-go"
+`,
+			owner: "full.lane",
+			stage: "gates",
+		},
+		{
+			name: "quoted-key-segments",
+			lanes: `
+[[ "pipelines" . full . 'stage' ]]
+name = "gates two"
+pipeline = "gate-go"
+`,
+			owner: "full",
+			stage: "gates two",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := gateRepo(t, "[]", nil)
+			path := filepath.Join(dir, MaipipeFile)
+			if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(readFile(t, path)+tc.lanes), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			clearGatePack(t, dir)
+
+			reports, err := Run(Options{Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			mp := report(t, reports, MaipipeFile)
+			want := `pipeline "` + tc.owner + `" stage "` + tc.stage + `"`
+			if mp.State != Pending || !strings.Contains(mp.Refusal, "gate_pack cleared but") || !strings.Contains(mp.Refusal, want) {
+				t.Fatalf("quoted-path report = %#v, want %s", mp, want)
+			}
+		})
+	}
+}
+
 // I097: without an outside consumer, opt-out is an ordinary marker-inclusive
 // deletion. It stays behind I104's real maipipe validation preflight and a
 // second run is a clean no-op.

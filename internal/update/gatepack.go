@@ -296,12 +296,70 @@ func stageTablePipeline(line string) (string, bool) {
 	if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, suffix) {
 		return "", false
 	}
-	parts := strings.Split(strings.TrimSpace(line[len(prefix):len(line)-len(suffix)]), ".")
-	if len(parts) != 3 || strings.TrimSpace(parts[0]) != "pipelines" || strings.TrimSpace(parts[2]) != "stage" {
+	parts, ok := dottedHeaderSegments(strings.TrimSpace(line[len(prefix) : len(line)-len(suffix)]))
+	if !ok || len(parts) != 3 || parts[0] != "pipelines" || parts[2] != "stage" {
 		return "", false
 	}
-	pipeline := strings.TrimSpace(parts[1])
+	pipeline := parts[1]
 	return pipeline, pipeline != ""
+}
+
+// dottedHeaderSegments is deliberately only the small TOML dotted-key reader
+// needed for an array-table stage header. It separates dots outside quoted
+// segments, handling basic-string escapes and literal strings, then decodes
+// the individual key segments without accepting multiline forms.
+func dottedHeaderSegments(path string) ([]string, bool) {
+	var parts []string
+	var b strings.Builder
+	var quote byte
+	escaped := false
+	appendPart := func() bool {
+		raw := strings.TrimSpace(b.String())
+		b.Reset()
+		if raw == "" {
+			return false
+		}
+		if raw[0] == '"' || raw[0] == '\'' {
+			value, ok := stageString(raw)
+			if !ok {
+				return false
+			}
+			parts = append(parts, value)
+			return true
+		}
+		if strings.ContainsAny(raw, "\"'") {
+			return false
+		}
+		parts = append(parts, raw)
+		return true
+	}
+	for i := 0; i < len(path); i++ {
+		ch := path[i]
+		switch {
+		case quote == '"' && escaped:
+			escaped = false
+			b.WriteByte(ch)
+		case quote == '"' && ch == '\\':
+			escaped = true
+			b.WriteByte(ch)
+		case quote != 0 && ch == quote:
+			quote = 0
+			b.WriteByte(ch)
+		case quote == 0 && (ch == '"' || ch == '\''):
+			quote = ch
+			b.WriteByte(ch)
+		case quote == 0 && ch == '.':
+			if !appendPart() {
+				return nil, false
+			}
+		default:
+			b.WriteByte(ch)
+		}
+	}
+	if quote != 0 || escaped || !appendPart() {
+		return nil, false
+	}
+	return parts, true
 }
 
 // trimStageComment removes a TOML comment from the small stage-declaration
