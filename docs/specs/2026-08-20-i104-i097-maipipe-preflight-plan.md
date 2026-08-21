@@ -3,8 +3,9 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Remove spine's TOML structural scanner in I104 while safely requiring
-`maipipe validate` before `maipipe.toml` can be planned or written; leave I097
-as a later, unimplemented follow-on.
+`maipipe validate` before `maipipe.toml` can be planned or written, then safely
+remove an opted-out gate pack in I097 on a stacked branch. This worktree executes
+I104 only.
 
 **Architecture:** The existing update planning path decides whether to emit a
 normal maipipe file operation, a validated operation, or a skip. The skip is a
@@ -19,7 +20,8 @@ continues to run against the rendered candidate before its write.
 
 - I104 is routine-tier, subagent-driven; all changes cite I104.
 - Preserve zero third-party dependencies (ADR 0001).
-- Do not implement, resolve, or otherwise change I097.
+- Do not implement, resolve, or otherwise change I097 in this I104 worktree;
+  execute Task 4 only on the stacked branch after I104 review passes.
 - Use `spine cursor` as the sole cursor writer and stage explicit paths only.
 - Tests exercise `update.Run` with real temporary repositories and real file
   bytes; do not test source-text deletion.
@@ -92,3 +94,44 @@ continues to run against the rendered candidate before its write.
 - [ ] **Step 3: Audit and commit.** Run `spine audit routing`, write the
   required report with branch HEAD, stage explicit paths, and commit the I104
   branch without pushing or merging.
+
+### Task 4: I097 — opt out only when the pack has no repo-owned consumers
+
+**Execution boundary:** This is an approved sequential task for the stacked
+I097 branch after I104 review. Do not execute it in the I104 worktree.
+
+**Files:**
+- Modify: `internal/update/gatepack.go`, `internal/update/gatepack_test.go`
+- Modify: `internal/doctor/doctor.go`, `internal/doctor/doctor_test.go`
+- Modify: `docs/issues/I097-gate-pack-opt-out-leaves-the-region-running.md`
+
+**Interfaces:**
+- Consumes: an existing `maipipe.toml` managed region and `gate_pack` setting.
+- Produces: a refusal naming every outside `gate-go`/`mutation-go` composition,
+  a marker-inclusive deletion plan where none exist, and a doctor finding for
+  an unknown pack with a stale region.
+
+- [ ] **Step 1: Write failing composition-refusal tests.** Build a controlled
+  spine-layout fixture with `full/gates` composing `gate-go`, and a fixture for
+  `mutation-go`. Assert that clearing `gate_pack` names each pipeline/stage,
+  leaves file bytes unchanged, and reports no deletion diff.
+- [ ] **Step 2: Verify red.** Run the scoped update tests. Expected failure:
+  current opt-out silently leaves the region in place and reports neither the
+  repo-owned composition nor a refusal.
+- [ ] **Step 3: Write failing safe-deletion and no-op tests.** In a fixture with
+  no external composition, assert that the plan deletes the complete marked
+  region, `--write` deletes it, the rerun is up-to-date, and `maipipe validate`
+  accepts the result. Include the load-bearing mutation: without the refusal,
+  the spine-layout fixture must reproduce `composes unknown pipeline "gate-go"`.
+- [ ] **Step 4: Verify red.** Run the scoped tests. Expected failure: removal
+  is not planned and the stale region persists.
+- [ ] **Step 5: Write the doctor failing test.** Configure an unknown pack
+  against a file carrying an existing managed region and assert doctor reports
+  the stale region rather than returning no gate-pack finding.
+- [ ] **Step 6: Implement the minimum.** Scan only outside the markers for
+  composition stages, refuse with all pipeline/stage names before deletion,
+  otherwise render the marker-inclusive removal, and surface the unknown-pack
+  stale-region doctor finding.
+- [ ] **Step 7: Verify green and document.** Run update and doctor package
+  tests, update I097's resolution only after review, then run full formatting,
+  vet, maipipe-required tests, independent review, and routing audit.

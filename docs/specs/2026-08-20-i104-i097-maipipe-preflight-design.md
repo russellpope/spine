@@ -1,6 +1,6 @@
 # I104/I097 maipipe preflight and gate-pack opt-out
 
-Status: approved for I104 implementation; I097 deliberately deferred
+Status: approved for sequential implementation; this branch implements I104 only
 Date: 2026-08-20
 Tickets: I104, followed by I097
 Decision record: ADR 0018 (to be created by I104); respects ADRs 0001, 0015, and 0017
@@ -30,13 +30,19 @@ The I104 ADR records the decision without changing ADR 0001. I104 becomes fixed
 with its execution/routing metadata completed, and I096 gains a dated note that
 its structural half has been removed.
 
-## Deferred I097 scope
+## I097 scope, stacked after I104 review
 
-After I104 is merged, I097 may add a gate-pack opt-out that first refuses removal
-when repo-owned stages outside the managed markers compose `gate-go` or
-`mutation-go`; only otherwise may it plan deletion of the region. It must report
-an unknown configured pack with a stale region through doctor. No I097 production
-code, tests, or ticket resolution are part of this branch.
+I097 is approved and will be implemented on a stacked branch after I104 passes
+review. Clearing a gate pack must begin with an out-of-region composition scan
+for `gate-go` and `mutation-go`. If it finds one or more references, update
+refuses to remove the managed region, names every affected pipeline and stage,
+and leaves the file byte-identical. The spine-layout fixture is load-bearing:
+removing that refusal must reproduce `composes unknown pipeline "gate-go"`.
+
+With no out-of-region references, update plans and writes a marker-inclusive
+deletion of the region. Re-running after deletion is a clean no-op. An unknown
+configured pack with an existing stale region is a doctor finding, not silence.
+No I097 production code, tests, or ticket resolution belong in this I104 branch.
 
 ## Acceptance criteria
 
@@ -49,7 +55,7 @@ code, tests, or ticket resolution are part of this branch.
 - The work stays stdlib-only (ADR 0001) and preserves the ADR 0017 rule that the
   plan is the review surface for managed-region changes.
 - I097 remains untouched except for its inclusion as the explicitly deferred
-  follow-on in this PRD and plan.
+  stacked follow-on in this PRD and plan.
 
 ## Verification
 
