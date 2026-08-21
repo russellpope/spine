@@ -327,6 +327,7 @@ func TestGatePackOptOutHeaderBasicStringEscapeBoundary(t *testing.T) {
 		{"newline", `\n`, true},
 		{"form-feed", `\f`, true},
 		{"carriage-return", `\r`, true},
+		{"escape", `\e`, true},
 		{"octal", `\101`, false},
 		{"bell", `\a`, false},
 		{"vertical-tab", `\v`, false},
@@ -370,6 +371,37 @@ func TestGatePackOptOutHeaderBasicStringEscapeBoundary(t *testing.T) {
 				t.Fatalf("invalid escape %q report = %#v, want maipipe refusal", tc.escape, mp)
 			}
 		})
+	}
+}
+
+// maipipe's \e escape is distinct from an escaped backslash followed by e.
+// The latter must retain both data characters in the owner name.
+func TestGatePackOptOutHeaderEscapedBackslashE(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	path := filepath.Join(dir, MaipipeFile)
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	const lanes = `
+[[pipelines."owner\\e".stage]]
+name = "gates"
+pipeline = "gate-go"
+`
+	if err := os.WriteFile(path, []byte(readFile(t, path)+lanes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, _ := exec.Command("maipipe", "validate", path).CombinedOutput(); strings.Contains(string(output), "missing escaped value") {
+		t.Fatalf("maipipe rejected escaped-backslash control as syntax:\n%s", output)
+	}
+	clearGatePack(t, dir)
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := report(t, reports, MaipipeFile)
+	if !strings.HasPrefix(mp.Refusal, "gate_pack cleared but") ||
+		!strings.Contains(mp.Refusal, `pipeline "owner\\e" stage "gates"`) {
+		t.Fatalf("escaped-backslash-e report = %#v, want literal backslash owner", mp)
 	}
 }
 

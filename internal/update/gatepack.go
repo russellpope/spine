@@ -422,8 +422,30 @@ func stageString(value string) (string, bool) {
 	if len(value) < 2 || value[0] != '"' || !basicStageStringEscapes(value) {
 		return "", false
 	}
-	v, err := strconv.Unquote(value)
+	v, err := strconv.Unquote(goBasicStageString(value))
 	return v, err == nil
+}
+
+// goBasicStageString translates maipipe's one extra basic-string escape to
+// Go's equivalent. It consumes escape pairs, so a literal \\ followed by e is
+// preserved rather than becoming an escape byte.
+func goBasicStageString(value string) string {
+	var b strings.Builder
+	b.Grow(len(value))
+	for i := 0; i < len(value); i++ {
+		if value[i] != '\\' || i+1 >= len(value) {
+			b.WriteByte(value[i])
+			continue
+		}
+		b.WriteByte('\\')
+		i++
+		if value[i] == 'e' {
+			b.WriteString("x1b")
+			continue
+		}
+		b.WriteByte(value[i])
+	}
+	return b.String()
 }
 
 // basicStageStringEscapes admits the installed maipipe-compatible single-line
@@ -439,7 +461,7 @@ func basicStageStringEscapes(value string) bool {
 			return false
 		}
 		switch value[i] {
-		case 'b', 't', 'n', 'f', 'r', '"', '\\', 'x', 'u', 'U':
+		case 'b', 't', 'n', 'f', 'r', 'e', '"', '\\', 'x', 'u', 'U':
 		default:
 			return false
 		}
