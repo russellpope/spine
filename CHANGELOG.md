@@ -22,6 +22,14 @@ Behaviour changes visible to repos that consume `spine`. Format follows
   `maipipe.toml`.** Without the binary the pre-flight cannot run, so the file is
   skipped with a named preflight skip and exit 0; other managed files still update.
   (I104, ADR 0018)
+- **The pack pin now reaches every stage.** `spine update` renders
+  `run = "spine gate go@1 <check>"` (mutation included), and `spine gate` with a
+  versioned pack argument codes findings with that pin, refuses a check outside the
+  pin's class list, and refuses a pin the binary does not ship — both exit 2, no
+  findings document. Bare `spine gate go <check>` is unchanged. Every adopter's region
+  is rewritten once; the plan now says "N stage(s) changed" for byte-only rewrites and
+  names the `maipipe gate approve-definition` cost. Old bare run lines read as stale,
+  not unrecognized; a foreign pin is unrecognized. (I103, ADR 0019)
 - **Clearing `gate_pack` now has an uninstall path.** If any stage outside the
   managed region still composes `gate-go` or `mutation-go`, `spine update` refuses
   and names the pipeline and stage to fix. With no such consumers, the plan shows a
