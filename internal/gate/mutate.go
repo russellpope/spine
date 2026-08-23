@@ -117,9 +117,9 @@ func checkMutate(dir string, cfg Config) (Report, error) {
 			Findings: []Finding{{
 				Severity: SeverityError,
 				Message:  msg,
-				Code:     Code("mutate"),
+				Code:     cfg.Code("mutate"),
 			}},
-			Summary: Code("mutate") + ": control failed: unmutated tree is not green — no probes run",
+			Summary: cfg.Code("mutate") + ": control failed: unmutated tree is not green — no probes run",
 		}, nil
 	}
 
@@ -177,11 +177,11 @@ func checkMutate(dir string, cfg Config) (Report, error) {
 			Message:  msg,
 			File:     m.File,
 			Line:     line,
-			Code:     Code("mutate"),
+			Code:     cfg.Code("mutate"),
 		})
 	}
 
-	rep.Summary = Code("mutate") + ": " + strings.Join([]string{
+	rep.Summary = cfg.Code("mutate") + ": " + strings.Join([]string{
 		fmt.Sprintf("kill rate (raw): %s   (excluded: %d no-site, %d build-err)",
 			rate(tally[resultKilled], tally[resultKilled]+tally[resultSurvived]),
 			tally[resultNoSite], tally[resultBuildErr]),

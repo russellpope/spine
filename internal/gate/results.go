@@ -40,12 +40,12 @@ type jsonFinding struct {
 // on stdout and no file. Every check class shares this one emitter. A class
 // that owns its own judgement (Report.Advisory, Report.Summary) overrides
 // the pack defaults here; Report.Detail is human-only.
-func emit(check string, rep Report, stdout io.Writer) error {
+func emit(pack ResolvedPack, check string, rep Report, stdout io.Writer) error {
 	findings := rep.Findings
-	status, summary := "pass", fmt.Sprintf("%s: no findings", Code(check))
+	status, summary := "pass", fmt.Sprintf("%s: no findings", pack.Code(check))
 	if len(findings) > 0 && !rep.Advisory {
 		status = "fail"
-		summary = fmt.Sprintf("%s: %d finding(s)", Code(check), len(findings))
+		summary = fmt.Sprintf("%s: %d finding(s)", pack.Code(check), len(findings))
 	}
 	if rep.Summary != "" {
 		summary = rep.Summary

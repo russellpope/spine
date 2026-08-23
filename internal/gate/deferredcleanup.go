@@ -66,7 +66,7 @@ func checkDeferredCleanup(dir string, cfg Config) ([]Finding, error) {
 					Message:  fmt.Sprintf("deferred cleanup call discards its error: defer %s() returns an error no one reads; defer a func literal that inspects it instead", printed),
 					File:     file,
 					Line:     line,
-					Code:     Code("deferred-cleanup-errcheck"),
+					Code:     cfg.Code("deferred-cleanup-errcheck"),
 				})
 				return true
 			})

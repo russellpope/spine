@@ -127,7 +127,7 @@ func renderGateRegion(s gatePackSettings) string {
 		}
 		b.WriteString("\n[[pipelines." + gatePipelineName + ".stage]]\n")
 		fmt.Fprintf(&b, "name = %q\n", check)
-		fmt.Fprintf(&b, "run = %q\n", "spine gate "+gate.PackName+" "+check)
+		fmt.Fprintf(&b, "run = %q\n", "spine gate "+s.pack+" "+check)
 		if key := gateCheckConfig[check]; key != "" {
 			if v, ok := s.config[key]; ok {
 				fmt.Fprintf(&b, "env = { %s = %s }\n", gate.EnvVar(key), strconv.Quote(v))
@@ -138,7 +138,7 @@ func renderGateRegion(s gatePackSettings) string {
 		b.WriteString("\n[pipelines." + mutationPipelineName + "]\nprofile = \"audit\"\n")
 		b.WriteString("\n[[pipelines." + mutationPipelineName + ".stage]]\n")
 		fmt.Fprintf(&b, "name = %q\n", mutateCheck)
-		fmt.Fprintf(&b, "run = %q\n", "spine gate "+gate.PackName+" "+mutateCheck)
+		fmt.Fprintf(&b, "run = %q\n", "spine gate "+s.pack+" "+mutateCheck)
 	}
 	b.WriteString(gateRegionEnd + "\n")
 	return b.String()
@@ -229,9 +229,9 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 		newContent = prefix + region
 	} else {
 		lines := splitLines(old)
-		report.Unrecognized = unrecognizedRegionLines(lines[begin+1:end], classes)
-		report.StagesAdded, report.StagesRemoved = stageDelta(
-			regionStageNames(lines[begin+1:end]), regionStageNames(splitLines(region)))
+		report.Unrecognized = unrecognizedRegionLines(lines[begin+1:end], s.pack, classes)
+		report.StagesAdded, report.StagesRemoved, report.StagesChanged = stageDelta(
+			lines[begin+1:end], splitLines(region))
 		newContent = strings.Join(append(append(append([]string{}, lines[:begin]...),
 			splitLines(strings.TrimSuffix(region, "\n"))...), lines[end+1:]...), "\n")
 	}
@@ -509,24 +509,68 @@ func regionStageNames(lines []string) []string {
 // an added stage is a new step in a gating lane, and either change rewrites
 // the region's bytes, hence the file's blob, hence maipipe's
 // definition_hash — so the repo has to re-approve the definition.
-func stageDelta(old, new []string) (added, removed []string) {
+func stageDelta(old, new []string) (added, removed, changed []string) {
+	oldNames, newNames := regionStageNames(old), regionStageNames(new)
+	oldDefs, newDefs := stageDefinitions(old), stageDefinitions(new)
 	had := map[string]bool{}
-	for _, s := range old {
+	for _, s := range oldNames {
 		had[s] = true
 	}
 	has := map[string]bool{}
-	for _, s := range new {
+	for _, s := range newNames {
 		has[s] = true
 		if !had[s] {
 			added = append(added, s)
+		} else if oldDefs[s] != newDefs[s] {
+			changed = append(changed, s)
 		}
 	}
-	for _, s := range old {
+	for _, s := range oldNames {
 		if !has[s] {
 			removed = append(removed, s)
 		}
 	}
-	return added, removed
+	return added, removed, changed
+}
+
+// stageDefinitions maps each stage name to the exact lines in its table. A
+// stage present in both regions but with any byte changed is a definition
+// change even when the stage set itself is identical.
+func stageDefinitions(lines []string) map[string]string {
+	defs := map[string]string{}
+	var block []string
+	name := ""
+	flush := func() {
+		if name != "" {
+			defs[name] = strings.Join(block, "\n")
+		}
+	}
+	for _, line := range lines {
+		if strings.TrimRight(line, " ") == gateRegionEnd {
+			flush()
+			block = nil
+			name = ""
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			flush()
+			block = nil
+			name = ""
+			if strings.HasPrefix(line, "[[pipelines.") && strings.HasSuffix(line, ".stage]]") {
+				block = []string{line}
+			}
+			continue
+		}
+		if block == nil {
+			continue
+		}
+		block = append(block, line)
+		if v, ok := quotedValue(strings.TrimRight(line, " "), "name = "); ok {
+			name = v
+		}
+	}
+	flush()
+	return defs
 }
 
 // gateRegionBounds locates the region's marker lines by index. It returns
@@ -577,10 +621,14 @@ func gateRegionBounds(content string) (int, int, error) {
 // this binary ships only under a later pack is region content no render of
 // go@1 could have produced, and saying so is the same freeze the renderer
 // enforces.
-func unrecognizedRegionLines(lines []string, classes []string) []string {
-	checks := map[string]bool{}
+func unrecognizedRegionLines(lines []string, pack string, classes []string) []string {
+	pinnedChecks := map[string]bool{}
 	for _, c := range classes {
-		checks[c] = true
+		pinnedChecks[c] = true
+	}
+	shippedChecks := map[string]bool{}
+	for _, c := range gate.CheckNames() {
+		shippedChecks[c] = true
 	}
 	envVars := map[string]bool{}
 	for _, k := range gatePackConfigKeys {
@@ -602,11 +650,14 @@ func unrecognizedRegionLines(lines []string, classes []string) []string {
 			l == "[[pipelines."+mutationPipelineName+".stage]]":
 			continue
 		}
-		if v, ok := quotedValue(l, "name = "); ok && checks[v] {
+		if v, ok := quotedValue(l, "name = "); ok && shippedChecks[v] {
 			continue
 		}
 		if v, ok := quotedValue(l, "run = "); ok {
-			if check, found := strings.CutPrefix(v, "spine gate "+gate.PackName+" "); found && checks[check] {
+			if check, found := strings.CutPrefix(v, "spine gate "+gate.PackName+" "); found && shippedChecks[check] {
+				continue
+			}
+			if check, found := strings.CutPrefix(v, "spine gate "+pack+" "); found && pinnedChecks[check] {
 				continue
 			}
 		}

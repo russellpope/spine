@@ -524,7 +524,7 @@ func TestGatePackCreatesMaipipeWithSchemaAndRegionOnly(t *testing.T) {
 		t.Errorf("missing gate-go pipeline header:\n%s", got)
 	}
 	for _, check := range gate.CheckNames() {
-		want := "run = \"spine gate go " + check + "\""
+		want := "run = \"spine gate go@1 " + check + "\""
 		if !strings.Contains(got, want) {
 			t.Errorf("missing stage for check class %q:\n%s", check, got)
 		}
@@ -548,7 +548,7 @@ func TestGatePackRendersMutationPipeline(t *testing.T) {
 	}
 	got := readFile(t, filepath.Join(dir, MaipipeFile))
 	want := "[pipelines.mutation-go]\nprofile = \"audit\"\n\n" +
-		"[[pipelines.mutation-go.stage]]\nname = \"mutate\"\nrun = \"spine gate go mutate\"\n"
+		"[[pipelines.mutation-go.stage]]\nname = \"mutate\"\nrun = \"spine gate go@1 mutate\"\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("mutation-go pipeline missing or not canonical:\n%s", got)
 	}
@@ -574,10 +574,10 @@ func TestGatePackDisabledMutateOmitsPipeline(t *testing.T) {
 	if strings.Contains(got, "[pipelines.mutation-go]") {
 		t.Errorf("mutation-go pipeline rendered for a disabled class:\n%s", got)
 	}
-	if strings.Contains(got, "run = \"spine gate go mutate\"") {
+	if strings.Contains(got, "run = \"spine gate go@1 mutate\"") {
 		t.Errorf("disabled mutate still rendered:\n%s", got)
 	}
-	if !strings.Contains(got, "run = \"spine gate go tskip\"") {
+	if !strings.Contains(got, "run = \"spine gate go@1 tskip\"") {
 		t.Error("disabling mutate dropped the gate-go stages too")
 	}
 }
@@ -647,13 +647,13 @@ func TestGatePackDisabledOmitsStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := readFile(t, filepath.Join(dir, MaipipeFile))
-	if strings.Contains(got, "spine gate go tskip") {
+	if strings.Contains(got, "spine gate go@1 tskip") {
 		t.Errorf("disabled check class still rendered:\n%s", got)
 	}
 	if n := strings.Count(got, "[[pipelines.gate-go.stage]]"); n != len(gate.CheckNames())-2 {
 		t.Errorf("stage count = %d, want %d", n, len(gate.CheckNames())-2)
 	}
-	if !strings.Contains(got, "spine gate go binary-hygiene") {
+	if !strings.Contains(got, "spine gate go@1 binary-hygiene") {
 		t.Error("dropping one class dropped others too")
 	}
 }
@@ -670,8 +670,8 @@ func TestGatePackConfigRendersEnv(t *testing.T) {
 	}
 	got := readFile(t, filepath.Join(dir, MaipipeFile))
 	for _, want := range []string{
-		"run = \"spine gate go fixture-manifest\"\nenv = { SPINE_GATE_FIXTURE_MANIFEST = \"docs/fixtures.md\" }",
-		"run = \"spine gate go gitignore-control\"\nenv = { SPINE_GATE_BUILD_OUTPUTS = \"bin/spine\" }",
+		"run = \"spine gate go@1 fixture-manifest\"\nenv = { SPINE_GATE_FIXTURE_MANIFEST = \"docs/fixtures.md\" }",
+		"run = \"spine gate go@1 gitignore-control\"\nenv = { SPINE_GATE_BUILD_OUTPUTS = \"bin/spine\" }",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
@@ -781,7 +781,7 @@ func TestGatePackRegionEditIsUnrecognized(t *testing.T) {
 	}
 	path := filepath.Join(dir, MaipipeFile)
 	edited := strings.Replace(readFile(t, path),
-		"run = \"spine gate go tskip\"", "run = \"echo tskip\"", 1)
+		"run = \"spine gate go@1 tskip\"", "run = \"echo tskip\"", 1)
 	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -64,7 +64,7 @@ func checkDeadCode(dir string, cfg Config) ([]Finding, error) {
 			Message:  fmt.Sprintf("unreachable function: %s is not reachable from any main, init, test root or exported library API", d.display),
 			File:     d.file,
 			Line:     d.line,
-			Code:     Code("dead-code-callgraph"),
+			Code:     cfg.Code("dead-code-callgraph"),
 		})
 	}
 	return findings, nil

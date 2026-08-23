@@ -2,7 +2,7 @@
 id: I103
 title: "`gate_pack: go@1` freezes the class list but not the attribution string: a pinned repo's findings will be coded `go@2/<check>` once go@2 ships"
 severity: med
-status: open
+status: fixed
 affects: [I098, I082]
 blocked-by: []
 execution-mode: subagent-driven
@@ -82,6 +82,24 @@ the plan gains a "N stage(s) changed" notice for the byte-only rewrite. Spec:
       still attributes as the binary's own pack
 - [ ] Spec story 23 and I098's Resolution updated to say the pin covers both
       the class list and the attribution string
+
+## Resolution (2026-08-21)
+
+I103 is fixed. `spine update` now renders `spine gate go@1 <check>` for every
+gate stage, including mutation; the gate command resolves that pack pin as
+both its frozen class list and the finding-code prefix. An out-of-pin class or
+an unshipped pin fails as exit 2 without a findings document, while bare
+`spine gate go <check>` remains the binary-pack hand-run form. The region
+reader treats old bare lines as stale and rejects a foreign pin. Update plans
+now name byte-only stage changes and the required `maipipe gate
+approve-definition` re-approval.
+
+Negative controls proved the guards: dropping the class-list check admitted an
+out-of-pin class; dropping pinned recognition made the canonical migration
+unrecognized; dropping pin equality accepted a foreign pin; and dropping the
+changed-stage delta silenced the plan notice. Spine's own region was rewritten
+with `spine update --write`; adopters must review their own changed-stage plan
+and re-approve their definition.
 
 ## Notes
 

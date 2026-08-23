@@ -48,7 +48,7 @@ type FileReport struct {
 	// deliberate per-repo choices (matched no shipped default). WORKFLOW.md
 	// only.
 	ModelOverrides []ModelOverride
-	// StagesAdded and StagesRemoved name the gate-pack stages this render
+	// StagesAdded, StagesRemoved, and StagesChanged name the gate-pack stages this render
 	// adds to, or drops from, the region already in maipipe.toml. maipipe.toml
 	// only, and only when the file already carries a region — a region being
 	// written for the first time is wholly visible in the plan diff. The plan
@@ -57,6 +57,7 @@ type FileReport struct {
 	// bytes and so maipipe's definition_hash.
 	StagesAdded   []string
 	StagesRemoved []string
+	StagesChanged []string
 	// Refusal is why applying this file's pending content would be refused
 	// (maipipe.toml only, I096). It is computed during the plan pass, not at
 	// write time, because the plan diff is the review surface (ADR 0017): a

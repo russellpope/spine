@@ -571,6 +571,41 @@ func TestGateResultsFileOnlyWhenEnvSet(t *testing.T) {
 	}
 }
 
+// TestGateVersionedPinIsAuthoritative exercises the public CLI contract: a
+// versioned pin controls attribution, while an unshipped pin fails before it
+// can emit a maipipe findings document. The bare form remains the stateless
+// hand-run form and attributes as the binary's own pack.
+func TestGateVersionedPinIsAuthoritative(t *testing.T) {
+	_, seeded := tskipFixtures()
+	dir := gateRepo(t, seeded)
+
+	code, out, errs := runCmd(t, "gate", "go@1", "tskip", "--dir", dir)
+	if code != 1 {
+		t.Fatalf("pinned gate exit = %d, want findings exit 1; stdout=%q stderr=%q", code, out, errs)
+	}
+	if !strings.Contains(out, "go@1/tskip") {
+		t.Errorf("pinned finding code missing from output: %q", out)
+	}
+
+	code, out, errs = runCmd(t, "gate", "go", "tskip", "--dir", dir)
+	if code != 1 || !strings.Contains(out, gate.PackID()+"/tskip") {
+		t.Errorf("bare go behavior changed: exit=%d stdout=%q stderr=%q", code, out, errs)
+	}
+
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv("MAIPIPE_RESULTS", results)
+	code, out, errs = runCmd(t, "gate", "go@9", "tskip", "--dir", dir)
+	if code != 2 {
+		t.Errorf("unshipped pin exit = %d, want 2; stdout=%q stderr=%q", code, out, errs)
+	}
+	if !strings.Contains(errs, "go@9") {
+		t.Errorf("unshipped-pin refusal does not name the pin: %q", errs)
+	}
+	if _, err := os.Stat(results); !os.IsNotExist(err) {
+		t.Errorf("unshipped pin wrote a results document: err=%v", err)
+	}
+}
+
 // TestGateResultsDeterministic asserts byte-identical results across two
 // runs, the premise that lets pipelines diff findings.
 func TestGateResultsDeterministic(t *testing.T) {
@@ -628,7 +663,7 @@ func TestGateMisconfiguration(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"unknown pack", []string{"gate", "rust", "tskip", "--dir", dir}, "unknown pack"},
+		{"unknown pack", []string{"gate", "rust", "tskip", "--dir", dir}, "unshipped pack"},
 		{"unknown check", []string{"gate", "go", "bogus", "--dir", dir}, "unknown check"},
 		{"missing args", []string{"gate", "go"}, "usage: spine gate"},
 		{"dir not a directory", []string{"gate", "go", "tskip", "--dir", filepath.Join(dir, "go.mod")}, "not a directory"},
@@ -654,7 +689,7 @@ func TestGateUsageDocumentsPack(t *testing.T) {
 		t.Fatalf("spine help does not mention gate: %q", out)
 	}
 	_, _, errs := runCmd(t, "gate", "go")
-	wants := []string{"go@1", "SPINE_GATE_TSKIP_ALLOW", "SPINE_GATE_BUILD_OUTPUTS", "SPINE_GATE_FIXTURE_MANIFEST", "SPINE_GATE_TEST_ENUM_SPEC", "SPINE_GATE_N_PLUS_ONE_CLIENTS", "SPINE_GATE_CLEANUP_FUNCS", "SPINE_GATE_MUTATE_SPEC", "SPINE_GATE_MUTATE_VERIFY", "SPINE_GATE_MUTATE_TIMEOUT", "MAIPIPE_RESULTS", "0 pass, 1 findings, 2 misconfiguration"}
+	wants := []string{"<pack>[@<v>]", "go@1", "SPINE_GATE_TSKIP_ALLOW", "SPINE_GATE_BUILD_OUTPUTS", "SPINE_GATE_FIXTURE_MANIFEST", "SPINE_GATE_TEST_ENUM_SPEC", "SPINE_GATE_N_PLUS_ONE_CLIENTS", "SPINE_GATE_CLEANUP_FUNCS", "SPINE_GATE_MUTATE_SPEC", "SPINE_GATE_MUTATE_VERIFY", "SPINE_GATE_MUTATE_TIMEOUT", "MAIPIPE_RESULTS", "0 pass, 1 findings, 2 misconfiguration"}
 	// The check list is derived from the registry, so a class that ships
 	// without a usage entry is a test failure, not a documentation drift.
 	wants = append(wants, gate.CheckNames()...)

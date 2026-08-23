@@ -73,7 +73,7 @@ func checkTskip(dir string, cfg Config) ([]Finding, error) {
 				Message:  fmt.Sprintf("skipped test: %s.%s call in a _test.go file", recv, sel.Sel.Name),
 				File:     rel,
 				Line:     line,
-				Code:     Code("tskip"),
+				Code:     cfg.Code("tskip"),
 			})
 			return true
 		})

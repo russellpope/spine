@@ -1,6 +1,9 @@
 package gate
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"sort"
@@ -8,6 +11,112 @@ import (
 	"strings"
 	"testing"
 )
+
+// Gate tests exercise result-emitting commands directly. They must not write
+// into the enclosing maipipe test stage when that stage exports its results
+// path; individual tests that cover file emission set their own temporary
+// path explicitly.
+func TestMain(m *testing.M) {
+	os.Unsetenv(ResultsEnvVar)
+	os.Exit(m.Run())
+}
+
+func tskipViolationDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "seeded_test.go"), []byte("package seeded\n\nimport \"testing\"\n\nfunc TestSeeded(t *testing.T) { t.Skip(\"seeded violation\") }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestResolvedPinsDriveGateAttributionAndClassMembership names the two
+// production breaks I103 prevents: attributing a go@1 run as the binary's
+// own pack, and allowing a class introduced by a later pack through go@1.
+// The later pack and its only-new class exist only for this test; production
+// continues to ship just go@1.
+func TestResolvedPinsDriveGateAttributionAndClassMembership(t *testing.T) {
+	const laterOnly = "later-only"
+	oldClasses := packClasses
+	oldCheck, hadCheck := checks[laterOnly]
+	oldCurrent := currentPackVersion
+	packClasses = map[int][]string{
+		1: append([]string(nil), oldClasses[1]...),
+		2: append(append([]string(nil), oldClasses[1]...), laterOnly),
+	}
+	currentPackVersion = 2
+	checks[laterOnly] = func(string, Config) ([]Finding, error) { return nil, nil }
+	t.Cleanup(func() {
+		packClasses = oldClasses
+		currentPackVersion = oldCurrent
+		if hadCheck {
+			checks[laterOnly] = oldCheck
+		} else {
+			delete(checks, laterOnly)
+		}
+	})
+
+	pinned, ok := ResolvePack("go@1")
+	if !ok {
+		t.Fatal("ResolvePack(go@1) refused a shipped pin")
+	}
+	if got, want := pinned.Code("tskip"), "go@1/tskip"; got != want {
+		t.Errorf("go@1 code = %q, want %q", got, want)
+	}
+	if got, want := Code("tskip"), "go@2/tskip"; got != want {
+		t.Errorf("binary code = %q, want %q", got, want)
+	}
+	bare, ok := ResolvePack("go")
+	if !ok || bare.ID != "go@2" {
+		t.Errorf("bare go resolves to %#v, %v; want current binary pack go@2", bare, ok)
+	}
+	if _, ok := ResolvePack("go@9"); ok {
+		t.Error("ResolvePack(go@9) accepted an unshipped pin")
+	}
+
+	dir := tskipViolationDir(t)
+	var out, errs bytes.Buffer
+	if got := Run("go@1", "tskip", dir, &out, &errs, EnvConfig()); got != 1 {
+		t.Fatalf("pinned tskip exit = %d, want findings exit 1; stderr=%q", got, errs.String())
+	}
+	if !strings.Contains(out.String(), "go@1/tskip") {
+		t.Errorf("pinned finding not attributed to go@1: %q", out.String())
+	}
+	if strings.Contains(out.String(), "go@2/tskip") {
+		t.Errorf("pinned finding leaked binary attribution go@2: %q", out.String())
+	}
+
+	out.Reset()
+	errs.Reset()
+	if got := Run("go", laterOnly, dir, &out, &errs, EnvConfig()); got != 0 {
+		t.Fatalf("bare current-pack class exit = %d, want 0; stdout=%q stderr=%q", got, out.String(), errs.String())
+	}
+	if !strings.Contains(out.String(), "go@2/later-only") {
+		t.Errorf("bare current-pack class not attributed to go@2: %q", out.String())
+	}
+
+	out.Reset()
+	errs.Reset()
+	if got := Run("go@1", laterOnly, dir, &out, &errs, EnvConfig()); got != 2 {
+		t.Errorf("out-of-pin class exit = %d, want 2; stdout=%q stderr=%q", got, out.String(), errs.String())
+	}
+	for _, want := range []string{"go@1", laterOnly} {
+		if !strings.Contains(errs.String(), want) {
+			t.Errorf("out-of-pin refusal does not name %q: %q", want, errs.String())
+		}
+	}
+
+	results := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv(ResultsEnvVar, results)
+	out.Reset()
+	errs.Reset()
+	if got := Run("go@9", "tskip", dir, &out, &errs, EnvConfig()); got != 2 {
+		t.Errorf("unshipped pin exit = %d, want 2; stdout=%q stderr=%q", got, out.String(), errs.String())
+	}
+	if _, err := os.Stat(results); !os.IsNotExist(err) {
+		t.Errorf("unshipped pin wrote findings document: err=%v", err)
+	}
+}
 
 // goldenClasses is the golden list per pack version: the check classes
 // `gate_pack: go@<version>` renders, frozen. Literals on purpose — the point

@@ -36,7 +36,7 @@ func checkFixtureManifest(dir string, cfg Config) ([]Finding, error) {
 				Message:  fmt.Sprintf("fixture manifest missing: %s does not exist (%s)", rel, EnvVar(fixtureManifestKey)),
 				File:     rel,
 				Line:     0,
-				Code:     Code("fixture-manifest"),
+				Code:     cfg.Code("fixture-manifest"),
 			}}, nil
 		}
 		return nil, fmt.Errorf("%s: reading %s: %w", EnvVar(fixtureManifestKey), rel, err)
@@ -47,7 +47,7 @@ func checkFixtureManifest(dir string, cfg Config) ([]Finding, error) {
 			Message:  fmt.Sprintf("fixture manifest empty: %s has no content (%s)", rel, EnvVar(fixtureManifestKey)),
 			File:     rel,
 			Line:     0,
-			Code:     Code("fixture-manifest"),
+			Code:     cfg.Code("fixture-manifest"),
 		}}, nil
 	}
 	return nil, nil

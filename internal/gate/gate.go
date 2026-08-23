@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,12 +33,42 @@ const (
 	PackVersion = 1
 )
 
+// currentPackVersion is the pack version this binary currently identifies as.
+// It defaults to the shipped constant; tests may stand in for a later binary
+// without changing any explicit versioned-pin resolution.
+var currentPackVersion = PackVersion
+
 // PackID is the versioned pack identifier, e.g. "go@1".
-func PackID() string { return fmt.Sprintf("%s@%d", PackName, PackVersion) }
+func PackID() string { return fmt.Sprintf("%s@%d", PackName, currentPackVersion) }
 
 // Code is the results-contract code for a finding from one check class,
 // e.g. "go@1/tskip".
 func Code(check string) string { return PackID() + "/" + check }
+
+// ResolvedPack is the authoritative pack identity for one gate invocation.
+// Its class list is the frozen contract for the versioned pin; its ID is the
+// attribution prefix every finding from the invocation carries.
+type ResolvedPack struct {
+	ID      string
+	Classes []string
+}
+
+// Code returns the results-contract code for check under this resolved pack.
+func (p ResolvedPack) Code(check string) string { return p.ID + "/" + check }
+
+// ResolvePack resolves either a versioned pack pin or the bare hand-run pack
+// name. A bare name always resolves to the pack this binary ships as current;
+// a versioned argument is never approximated to another version.
+func ResolvePack(arg string) (ResolvedPack, bool) {
+	if arg == PackName {
+		arg = PackID()
+	}
+	classes, ok := PackClassesFor(arg)
+	if !ok {
+		return ResolvedPack{}, false
+	}
+	return ResolvedPack{ID: arg, Classes: classes}, true
+}
 
 // Severity strings used in the results contract.
 const SeverityError = "error"
@@ -66,6 +97,7 @@ type Finding struct {
 // config key (gate_pack_config.tskip_allow -> SPINE_GATE_TSKIP_ALLOW).
 type Config struct {
 	lookup func(string) (string, bool)
+	pack   ResolvedPack
 }
 
 // EnvConfig reads configuration from the process environment.
@@ -87,6 +119,15 @@ func (c Config) Get(key string) (string, bool) {
 	}
 	v, ok := c.lookup(EnvVar(key))
 	return v, ok
+}
+
+// Code returns a finding code under the pack resolved for this invocation.
+// Direct unit-level check calls retain the binary pack as their default.
+func (c Config) Code(check string) string {
+	if c.pack.ID == "" {
+		return Code(check)
+	}
+	return c.pack.Code(check)
 }
 
 // env reads an environment variable by its literal name, for the few
@@ -149,15 +190,13 @@ var reportChecks = map[string]ReportCheck{
 // ships: version -> the exact check classes `gate_pack: go@<version>`
 // renders, sorted.
 //
-// The pin is a frozen list, not an attribution string. A repo that pins
-// go@1 gets the go@1 classes and only those, from any spine binary, however
-// many later packs that binary also ships — which is what ADR 0015 item 2
-// and spec story 23 promise ("a pack release never silently changes my
-// gate"), and the other half of an older binary refusing a newer pack name
-// (internal/update/gatepack.go). A new check class therefore reaches a repo
-// only under a pack version the repo opts into. TestFrozenClassLists holds
-// each version's list here to a golden literal, and the registries to the
-// union of every version's list (I098).
+// A pack pin freezes both the class list and finding attribution string
+// (I103, ADR 0019). A repo that pins go@1 gets go@1's classes and
+// go@1/<check> findings from any spine binary, however many later packs that
+// binary also ships. A new check class therefore reaches a repo only under a
+// pack version the repo opts into. TestFrozenClassLists holds each version's
+// list here to a golden literal, and the registries to the union of every
+// version's list (I098).
 var packClasses = map[int][]string{
 	1: {
 		"binary-hygiene",
@@ -230,14 +269,19 @@ func CheckNames() []string {
 // Misconfiguration messages go to stderr and name the problem (and the
 // environment variable, when configuration is the problem).
 func Run(pack, check, dir string, stdout, stderr io.Writer, cfg Config) int {
-	if pack != PackName {
-		fmt.Fprintf(stderr, "gate: unknown pack %q (known: %s)\n", pack, PackName)
+	resolved, ok := ResolvePack(pack)
+	if !ok {
+		fmt.Fprintf(stderr, "gate: unknown or unshipped pack %q (known: %s)\n", pack, strings.Join(PackIDs(), ", "))
 		return 2
 	}
 	fn, plain := checks[check]
 	rfn, rich := reportChecks[check]
 	if !plain && !rich {
 		fmt.Fprintf(stderr, "gate %s: unknown check %q (known: %s)\n", pack, check, strings.Join(CheckNames(), ", "))
+		return 2
+	}
+	if !slices.Contains(resolved.Classes, check) {
+		fmt.Fprintf(stderr, "gate %s: check %q is not in the pin's frozen class list\n", resolved.ID, check)
 		return 2
 	}
 	abs, err := filepath.Abs(dir)
@@ -260,9 +304,11 @@ func Run(pack, check, dir string, stdout, stderr io.Writer, cfg Config) int {
 	)
 	if plain {
 		var findings []Finding
+		cfg.pack = resolved
 		findings, runErr = fn(abs, cfg)
 		rep = Report{Findings: findings}
 	} else {
+		cfg.pack = resolved
 		rep, runErr = rfn(abs, cfg)
 	}
 	if runErr != nil {
@@ -270,7 +316,7 @@ func Run(pack, check, dir string, stdout, stderr io.Writer, cfg Config) int {
 		return 2
 	}
 	sortFindings(rep.Findings)
-	if err := emit(check, rep, stdout); err != nil {
+	if err := emit(resolved, check, rep, stdout); err != nil {
 		fmt.Fprintf(stderr, "gate %s %s: %v\n", pack, check, err)
 		return 2
 	}
