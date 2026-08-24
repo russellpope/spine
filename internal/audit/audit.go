@@ -106,6 +106,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -220,7 +221,11 @@ func tokenValues(tokens []evidenceToken) []string {
 type Options struct {
 	RepoDir              string
 	ClaudeTranscriptsDir string
-	CodexSessionsDir     string // codex sessions dir (readCodexSessions); empty opts out of codex discovery entirely (I041)
+	// ClaudeTranscriptsDirs is the default-discovery union. When non-empty it
+	// supersedes ClaudeTranscriptsDir; the singular field remains the explicit
+	// --transcripts and backwards-compatible public Run seam.
+	ClaudeTranscriptsDirs []string
+	CodexSessionsDir      string // codex sessions dir (readCodexSessions); empty opts out of codex discovery entirely (I041)
 	// Since scopes the transcript set to sessions active at/after a cutoff
 	// (D28, ticket I047): an operator escape hatch, never an automatic
 	// build-start anchor (rejected at grill — see parseSince). Accepts
@@ -252,7 +257,16 @@ type Options struct {
 // Warnings; the only errors are a repo without docs/issues and the D14
 // version-gate refusal (see the package comment).
 func Run(opts Options) (Report, error) {
-	repoDir, transcriptsDir := opts.RepoDir, opts.ClaudeTranscriptsDir
+	repoDir := opts.RepoDir
+	transcriptsDirs := opts.ClaudeTranscriptsDirs
+	discloseTranscriptDirs := len(transcriptsDirs) > 0
+	if !discloseTranscriptDirs {
+		transcriptsDirs = []string{opts.ClaudeTranscriptsDir}
+	}
+	transcriptsDirs = dedupSorted(transcriptsDirs)
+	if len(transcriptsDirs) == 0 {
+		transcriptsDirs = []string{""} // preserve the legacy missing-dir warning
+	}
 	var rep Report
 	tickets, err := readTickets(filepath.Join(repoDir, "docs", "issues"))
 	if err != nil {
@@ -291,7 +305,7 @@ func Run(opts Options) (Report, error) {
 	if !anyAnnotated(tickets) {
 		rep.Warnings = append(rep.Warnings, "nothing audited — no annotated tickets found (zero docs/issues tickets carry a tier: annotation); an exit-0 run judged nothing")
 	}
-	flavor := transcriptFlavor(transcriptsDir)
+	flavor := transcriptFlavor(transcriptsDirs[0])
 	mapping, err := resolveFlavorTiers(repoDir, flavor)
 	if err != nil {
 		return Report{}, err
@@ -307,7 +321,18 @@ func Run(opts Options) (Report, error) {
 	// gated on that.
 	mappings := map[string]map[string]resolvedTier{flavor: mapping, "codex": codexMapping}
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
-	dispatches, agents, sessionMatched := readTranscripts(transcriptsDir, flavor, since, opts.Session, &rep.Warnings)
+	var dispatches []dispatch
+	var agents []subagent
+	sessionMatched := false
+	for _, transcriptsDir := range transcriptsDirs {
+		if discloseTranscriptDirs {
+			rep.Warnings = append(rep.Warnings, "scanning transcript dir: "+transcriptsDir)
+		}
+		moreDispatches, moreAgents, matched := readTranscripts(transcriptsDir, flavor, since, opts.Session, &rep.Warnings)
+		dispatches = append(dispatches, moreDispatches...)
+		agents = append(agents, moreAgents...)
+		sessionMatched = sessionMatched || matched
+	}
 	// Codex discovery only runs when CodexSessionsDir is set (the CLI always
 	// sets it — design D-doc, "discovery is always on"; leaving it empty is
 	// how every pre-I041 caller and every existing test opts out, and must
@@ -1447,10 +1472,10 @@ func appendUnmatched(list []DispatchInfo, d DispatchInfo) []DispatchInfo {
 	return append(list, d)
 }
 
-// DefaultTranscriptsDir derives the harness's per-project transcript dir
+// DefaultTranscriptsDir derives the harness's exact-repo transcript dir
 // for a repo: ~/.claude/projects/<slug>, slug being the absolute repo path
 // with '/' and '.' flattened to '-'. Best-effort — the harness convention
-// is undocumented; `--transcripts` overrides it.
+// is undocumented; DefaultTranscriptsDirs expands it for default discovery.
 func DefaultTranscriptsDir(repoDir string) (string, error) {
 	abs, err := filepath.Abs(repoDir)
 	if err != nil {
@@ -1462,4 +1487,41 @@ func DefaultTranscriptsDir(repoDir string) (string, error) {
 	}
 	slug := strings.NewReplacer("/", "-", ".", "-").Replace(abs)
 	return filepath.Join(home, ".claude", "projects", slug), nil
+}
+
+// DefaultTranscriptsDirs returns D36's stable, de-duplicated default scope:
+// the exact repo slug, every currently listed git worktree slug, and existing
+// project directories sharing the exact repo-slug prefix. Git failure and a
+// non-git repo deliberately degrade to the slug scan; no transcript text is
+// ever executed or used to choose a path.
+func DefaultTranscriptsDirs(repoDir string) ([]string, error) {
+	primary, err := DefaultTranscriptsDir(repoDir)
+	if err != nil {
+		return nil, err
+	}
+	dirs := []string{primary}
+	repoReal, _ := filepath.EvalSymlinks(repoDir)
+	if out, err := exec.Command("git", "-C", repoDir, "worktree", "list", "--porcelain").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			path, ok := strings.CutPrefix(line, "worktree ")
+			if !ok || path == "" {
+				continue
+			}
+			if worktreeReal, err := filepath.EvalSymlinks(path); err == nil && repoReal != "" && worktreeReal == repoReal {
+				continue // git can spell the primary checkout through a different symlink path
+			}
+			if dir, err := DefaultTranscriptsDir(path); err == nil {
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+	projectsDir, prefix := filepath.Dir(primary), filepath.Base(primary)+"-"
+	if entries, err := os.ReadDir(projectsDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), prefix) {
+				dirs = append(dirs, filepath.Join(projectsDir, entry.Name()))
+			}
+		}
+	}
+	return dedupSorted(dirs), nil
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/russellpope/spine/internal/audit"
 	"github.com/russellpope/spine/internal/handoff"
 	"github.com/russellpope/spine/internal/tmpl"
 )
@@ -916,6 +917,42 @@ func TestAuditRoutingCodexSessionsFlag(t *testing.T) {
 	}
 	if !strings.Contains(out, "I101") || !strings.Contains(out, "match") {
 		t.Errorf("claude-side evidence must still judge normally: out=%q", out)
+	}
+}
+
+// D36 reaches the command boundary with no git repository required: default
+// discovery sweeps a matching removed-worktree slug, while an explicit
+// --transcripts directory bypasses that union entirely.
+func TestAuditRoutingTranscriptDiscoveryAndExplicitOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeAuditFixtureRepo(t, repo, map[string]string{"I920": "routine"})
+	primary, err := audit.DefaultTranscriptsDir(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := primary + "-removed-worktree"
+	writeAuditDispatch(t, filepath.Join(primary, "clean.jsonl"), repo, "I920", "claude-sonnet-5")
+	writeAuditDispatch(t, filepath.Join(removed, "old.jsonl"), repo, "I920", "claude-haiku-4-5")
+
+	code, out, errs := runCmd(t, "audit", "routing", "--dir", repo)
+	if code != 1 || !strings.Contains(out, "silent-descent") {
+		t.Fatalf("default discovery: code=%d out=%q errs=%q, want prefix-recovered descent", code, out, errs)
+	}
+	if !strings.Contains(errs, "scanning transcript dir: "+removed) {
+		t.Errorf("default discovery must disclose the removed-worktree directory, errs=%q", errs)
+	}
+
+	explicit := t.TempDir()
+	writeAuditDispatch(t, filepath.Join(explicit, "explicit.jsonl"), repo, "I920", "claude-sonnet-5")
+	code, out, errs = runCmd(t, "audit", "routing", "--dir", repo, "--transcripts", explicit)
+	if code != 0 || !strings.Contains(out, "match") || strings.Contains(out, "silent-descent") {
+		t.Fatalf("explicit override: code=%d out=%q errs=%q, want only the explicit clean transcript", code, out, errs)
+	}
+	if strings.Contains(errs, "scanning transcript dir: "+removed) {
+		t.Errorf("--transcripts must bypass default discovery, errs=%q", errs)
 	}
 }
 
