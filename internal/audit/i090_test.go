@@ -118,6 +118,18 @@ func TestDispatchBriefAttribution(t *testing.T) {
 	if !hasMissing {
 		t.Errorf("unresolvable brief must keep today's unmatched listing, got %+v", rep.Unmatched)
 	}
+	for id, wantPath := range map[string]string{
+		"I701": "/fixture/repo/.superpowers/sdd/target.md",
+		"I706": "/fixture/repo/qualified.md",
+		"I709": "/fixture/repo/.superpowers/sdd/spawn.md",
+	} {
+		if detail := rows[id].Detail; !strings.Contains(detail, "source: "+wantPath) {
+			t.Errorf("%s detail = %q, want recorded brief source %q", id, detail, wantPath)
+		}
+	}
+	if detail := rows["I705"].Detail; strings.Contains(detail, "source: /fixture/repo/.superpowers/sdd/target.md") {
+		t.Errorf("I705 detail = %q, own-command attribution must not claim its ignored brief as evidence", detail)
+	}
 }
 
 // This negative control proves that recorded brief resolution is what makes

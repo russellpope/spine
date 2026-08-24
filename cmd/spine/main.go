@@ -900,7 +900,7 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 		// Guessing a single cause in the footer was wrong for the others.
 		if teamSpawns > 0 {
 			fmt.Fprintf(stdout,
-				"  note: %d team spawn(s) recognised but not attributed (no ticket token in the command or its prompt, or not repo-qualified); see I101\n",
+				"  note: %d team spawn(s) recognised but not attributed (no ticket token in the command or its prompt, or not repo-qualified)\n",
 				teamSpawns)
 		}
 	}

@@ -341,6 +341,7 @@ func Run(opts Options) (Report, error) {
 	}
 
 	evidence := map[string][]evidenceToken{} // ticket id -> flavor-tagged model tokens
+	briefSources := map[string][]string{}    // ticket id -> resolved recorded brief paths (I101 D35)
 	claimed := map[int]bool{}                // dispatch index -> matched a ticket
 	linked := map[string]bool{}              // toolUseID -> a subagent transcript carries models
 	for _, a := range agents {
@@ -395,6 +396,9 @@ func Run(opts Options) (Report, error) {
 				continue
 			}
 			claimed[i] = true
+			if d.briefPath != "" {
+				briefSources[t.id] = append(briefSources[t.id], d.briefPath)
+			}
 			if d.toolUseID != "" {
 				if rootTickets[d.toolUseID] == nil {
 					rootTickets[d.toolUseID] = map[string]bool{}
@@ -458,6 +462,14 @@ func Run(opts Options) (Report, error) {
 		if row.Verdict == VerdictNoTranscript {
 			if detail, ok := nearMissDetail(codexNearMisses, t.id); ok {
 				row.Verdict, row.Detail = VerdictUnattributedTranscript, detail
+			}
+		}
+		if sources := dedupSorted(briefSources[t.id]); len(sources) > 0 {
+			note := "source: " + strings.Join(sources, ", ")
+			if row.Detail == "" {
+				row.Detail = note
+			} else {
+				row.Detail += "; " + note
 			}
 		}
 		if note, ok := coarseNotes[t.id]; ok {
