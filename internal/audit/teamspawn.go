@@ -53,8 +53,10 @@ type teamSpawn struct {
 // it addresses and the command's own text, which is the attribution source
 // for a spawn that named no ticket.
 type teamPrompt struct {
-	target string
-	text   string
+	target    string
+	text      string
+	briefText string
+	briefPath string
 }
 
 // ticketTokenRe matches a ticket-id-shaped token (I090, D3), the test for
@@ -119,6 +121,12 @@ func parseTeamPrompt(command string) (teamPrompt, bool) {
 // positive-control fixture falls back to no-transcript, the very verdict
 // I090 exists to remove. Nothing in production ever writes it.
 var recognizeTeamSpawns = true
+
+// recognizeBriefFiles gates I101's transcript-backed brief recovery. Its
+// negative control proves this new evidence path, rather than incidental raw
+// command text, is what attributes the brief fixture. Production never writes
+// it.
+var recognizeBriefFiles = true
 
 // briefTable is one claude session's record of the brief bodies its lead wrote.
 // It deliberately holds transcript evidence only: callers supply command text,
@@ -242,11 +250,18 @@ func expandBriefVariables(raw string, assignments []briefAssignment, position in
 // referencedBriefPath recognizes the three narrow brief delivery forms. It
 // returns a textual path only; resolving it remains the table's job.
 func referencedBriefPath(command string) (string, bool) {
-	if m := catReferenceRe.FindStringSubmatch(command); m != nil {
-		return strings.Trim(m[1], `"'`), true
+	stripped := stripHeredocBodies(command)
+	for _, line := range strings.Split(stripped, "\n") {
+		loc := catReferenceRe.FindStringSubmatchIndex(line)
+		if loc != nil && isTeamCommandText(line[:loc[0]]) {
+			return strings.Trim(line[loc[2]:loc[3]], `"'`), true
+		}
 	}
-	for _, seg := range commandSegments(command) {
+	for _, seg := range commandSegments(stripped) {
 		fields := segmentFields(seg)
+		if !isTeamCommandFields(fields) {
+			continue
+		}
 		if p := flagValue(fields, "--brief"); p != "" {
 			return p, true
 		}
@@ -261,6 +276,21 @@ func referencedBriefPath(command string) (string, bool) {
 }
 
 var catReferenceRe = regexp.MustCompile(`\$\(cat\s+([^\s)]+)\)`)
+
+func isTeamCommandText(text string) bool {
+	for _, seg := range commandSegments(text) {
+		if isTeamCommandFields(segmentFields(seg)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTeamCommandFields(fields []string) bool {
+	return isTool(fields, "herdr", "agent", "start") ||
+		isTool(fields, "herdr", "agent", "prompt") ||
+		isTool(fields, "cmux", "send")
+}
 
 // attributeTeamPrompt gives a spawn that named no ticket the text of the
 // following prompt command addressed to the same worker, which is where a
@@ -279,8 +309,10 @@ func attributeTeamPrompt(dispatches []dispatch, p teamPrompt) {
 		if d.teamTarget != p.target {
 			continue
 		}
-		if d.prompt == "" && !namesATicket(d.description) {
+		if d.prompt == "" && d.briefText == "" && !namesATicket(d.description) {
 			d.prompt = p.text
+			d.briefText = p.briefText
+			d.briefPath = p.briefPath
 		}
 		return
 	}

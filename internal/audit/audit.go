@@ -355,6 +355,11 @@ func Run(opts Options) (Report, error) {
 	// keeps its natural case.
 	matches := func(d dispatch, id string) bool {
 		desc, prompt := d.description, firstLine(d.prompt)
+		qualifyingText := d.description + "\n" + d.prompt
+		if d.briefText != "" && !namesATicket(d.description) {
+			desc, prompt = firstLine(d.briefText), ""
+			qualifyingText = d.briefText
+		}
 		if d.flavor == "codex" {
 			desc, prompt = strings.ToUpper(desc), strings.ToUpper(prompt)
 		}
@@ -367,7 +372,7 @@ func Run(opts Options) (Report, error) {
 		// hard-scoped to the repo before it reaches Run (D22,
 		// readCodexSessions' cwdInsideRepo/gitCommitProber gate), so gating
 		// it again here would be redundant, not stricter.
-		if d.flavor == "claude" && !repoQualifies(d.description+"\n"+d.prompt, d.cwd, absRepoDir, repoBase) {
+		if d.flavor == "claude" && !repoQualifies(qualifyingText, d.cwd, absRepoDir, repoBase) {
 			return false
 		}
 		return true
@@ -951,6 +956,8 @@ type dispatch struct {
 	toolUseID   string
 	description string
 	prompt      string
+	briefText   string // I101: body recorded in the lead transcript, never read from disk
+	briefPath   string // normalized transcript path; disclosure is added in Task 3
 	model       string
 	effort      string // declared worker effort, claude-team spawns only (I090); reported, never judged — see DispatchInfo.Effort
 	flavor      string // the transcript source's flavor (I040 per-token seam)
@@ -1244,13 +1251,15 @@ func scanJSONL(path string, warnings *[]string) ([]dispatch, []string, string) {
 	var dispatches []dispatch
 	var models []string
 	var cwd string
+	briefs := newBriefTable()
+	position := 0
 	seen := map[string]bool{}
 	malformed := 0
 	r := bufio.NewReader(f)
 	for {
 		line, err := r.ReadBytes('\n')
 		if len(strings.TrimSpace(string(line))) > 0 {
-			d, prompts, m, lineCwd, ok := parseLine(line)
+			d, prompts, m, lineCwd, ok := parseLine(line, briefs, &position)
 			if !ok {
 				malformed++
 			} else {
@@ -1289,7 +1298,7 @@ func scanJSONL(path string, warnings *[]string) ([]dispatch, []string, string) {
 // a claude-team worker spawn are dispatch records too (I090, teamspawn.go),
 // and the prompt commands that follow them are returned alongside for the
 // caller to pair. Unrecognized JSON shapes report as malformed (ok=false).
-func parseLine(line []byte) (dispatches []dispatch, prompts []teamPrompt, model string, cwd string, ok bool) {
+func parseLine(line []byte, briefs *briefTable, position *int) (dispatches []dispatch, prompts []teamPrompt, model string, cwd string, ok bool) {
 	var ev struct {
 		Type    string `json:"type"`
 		Cwd     string `json:"cwd"`
@@ -1332,9 +1341,14 @@ func parseLine(line []byte) (dispatches []dispatch, prompts []teamPrompt, model 
 				model:       b.Input.Model,
 				cwd:         cwd,
 			})
-		case recognizeTeamSpawns && b.Name == "Bash":
+		case b.Name == "Bash":
+			(*position)++
+			briefs.recordCommand(b.Input.Command, cwd, *position)
+			if !recognizeTeamSpawns {
+				continue
+			}
 			if s, isSpawn := parseTeamSpawn(b.Input.Command); isSpawn {
-				dispatches = append(dispatches, dispatch{
+				d := dispatch{
 					toolUseID: b.ID,
 					// The record carries the HEREDOC-STRIPPED command
 					// (final review C1). A lead routinely writes the
@@ -1352,10 +1366,27 @@ func parseLine(line []byte) (dispatches []dispatch, prompts []teamPrompt, model 
 					cwd:         cwd,
 					teamSpawn:   true,
 					teamTarget:  s.target,
-				})
+				}
+				if recognizeBriefFiles && !namesATicket(d.description) {
+					if ref, hasRef := referencedBriefPath(b.Input.Command); hasRef {
+						if resolved, found := briefs.resolve(ref, cwd, *position); found {
+							d.briefText = resolved.body
+							d.briefPath = resolved.path
+						}
+					}
+				}
+				dispatches = append(dispatches, d)
 				continue
 			}
 			if p, isPrompt := parseTeamPrompt(b.Input.Command); isPrompt {
+				if recognizeBriefFiles {
+					if ref, hasRef := referencedBriefPath(b.Input.Command); hasRef {
+						if resolved, found := briefs.resolve(ref, cwd, *position); found {
+							p.briefText = resolved.body
+							p.briefPath = resolved.path
+						}
+					}
+				}
 				prompts = append(prompts, p)
 			}
 		}
