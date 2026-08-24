@@ -552,19 +552,6 @@ func segmentFields(seg string) []string {
 	return strings.Fields(seg)
 }
 
-// commandSegments splits a Bash command into the segments that each start
-// with a command word, after removing heredoc bodies. Both steps exist to
-// keep prose out: text written into a file through a heredoc, and a command
-// name quoted mid-sentence, must not read as a dispatch.
-func commandSegments(command string) []string {
-	withOffsets := commandSegmentsWithOffsets(command)
-	segs := make([]string, len(withOffsets))
-	for i, seg := range withOffsets {
-		segs[i] = seg.text
-	}
-	return segs
-}
-
 type commandSegment struct {
 	text  string
 	start int
