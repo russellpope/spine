@@ -148,8 +148,10 @@ declares exactly one.
   separate so narrative can never masquerade as fact.
 - **checkpoint working home** — the uncommitted, ordinal-numbered location
   where checkpoints accumulate for the current effort; the newest one may be
-  snapshotted into a handoff. _Avoid_: "state file", "brief" (maipipe's relay
-  term for what it hands a leg — a checkpoint is one possible brief payload).
+  snapshotted into a handoff. _Avoid_: "state file", and bare "brief" (maipipe's
+  relay term for what it hands a leg — a checkpoint is one possible brief
+  payload). The two-word **dispatch brief** is a different, well-defined thing;
+  see the Audit evidence section.
 - **reload preamble** — the static, spine-shipped text that precedes the
   checkpoint in the reload prompt. Byte-stable so the prefix is cacheable;
   states the model-region/facts-region trust split explicitly.
@@ -196,6 +198,13 @@ declares exactly one.
   message (the dispatch brief's title; first-line rule ratified at I042
   review to kill context-sentence bleed) and it is not an orchestrator
   session. Its per-turn models are actual evidence.
+- **dispatch brief** (decided 2026-08-24, I101 grill) — the instruction
+  document a team lead writes for one worker before starting it, delivered to
+  the worker by file reference rather than inline. Its first line names the
+  ticket under work (the first-line rule again); its body routinely names other
+  tickets for context and is therefore never attribution text. A brief is
+  evidence only as the lead's transcript recorded it being written — the file
+  on disk is not read. _Avoid_: bare "brief" (see checkpoint working home).
 - **thread tree** — codex sessions form trees: each rollout file's
   session_meta carries its own thread id, its immediate parent, and the
   root's id (shared tree-wide). Membership is decided by root id, not by
