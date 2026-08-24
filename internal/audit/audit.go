@@ -995,6 +995,7 @@ type dispatch struct {
 	prompt      string
 	briefText   string // I101: body recorded in the lead transcript, never read from disk
 	briefPath   string // normalized transcript path; disclosure is added in Task 3
+	briefCutoff int    // I101 D32: evidence available when this spawn occurred
 	model       string
 	effort      string // declared worker effort, claude-team spawns only (I090); reported, never judged — see DispatchInfo.Effort
 	flavor      string // the transcript source's flavor (I040 per-token seam)
@@ -1302,7 +1303,7 @@ func scanJSONL(path string, warnings *[]string) ([]dispatch, []string, string) {
 			} else {
 				dispatches = append(dispatches, d...)
 				for _, p := range prompts {
-					attributeTeamPrompt(dispatches, p)
+					attributeTeamPromptWithBriefs(dispatches, p, briefs)
 				}
 				if m != "" && !seen[m] {
 					seen[m] = true
@@ -1379,12 +1380,17 @@ func parseLine(line []byte, briefs *briefTable, position *int) (dispatches []dis
 				cwd:         cwd,
 			})
 		case b.Name == "Bash":
-			(*position)++
-			briefs.recordCommand(b.Input.Command, cwd, *position)
+			stripped := stripHeredocBodies(b.Input.Command)
+			base := *position
+			// The cursor is absolute, not a fixed-width block number: a dispatch
+			// brief can be larger than any arbitrary stride. Every later Bash
+			// block therefore sorts after every byte-position in this one.
+			*position += len(stripped) + 1
+			briefs.recordCommandOrdered(b.Input.Command, cwd, base)
 			if !recognizeTeamSpawns {
 				continue
 			}
-			if s, isSpawn := parseTeamSpawn(b.Input.Command); isSpawn {
+			if s, segment, isSpawn := parseTeamSpawnSegment(b.Input.Command); isSpawn {
 				d := dispatch{
 					toolUseID: b.ID,
 					// The record carries the HEREDOC-STRIPPED command
@@ -1397,32 +1403,34 @@ func parseLine(line []byte, briefs *briefTable, position *int) (dispatches []dis
 					// routed. matches() and namesATicket must see exactly
 					// the text the recognizer accepted as a command, so
 					// the two can never disagree about what was run.
-					description: stripHeredocBodies(b.Input.Command),
+					description: segment,
 					model:       s.model,
 					effort:      s.effort,
 					cwd:         cwd,
 					teamSpawn:   true,
 					teamTarget:  s.target,
+					briefCutoff: base + strings.Index(stripped, segment),
 				}
 				if recognizeBriefFiles && !namesATicket(d.description) {
-					if ref, hasRef := referencedBriefPath(b.Input.Command); hasRef {
-						if resolved, found := briefs.resolve(ref, cwd, *position); found {
+					if ref, hasRef := referencedBriefPath(segment); hasRef {
+						if resolved, found := briefs.resolve(ref, cwd, d.briefCutoff); found {
 							d.briefText = resolved.body
 							d.briefPath = resolved.path
 						}
 					}
 				}
 				dispatches = append(dispatches, d)
+				if p, isPrompt := parseTeamPromptAfter(b.Input.Command, segment); isPrompt {
+					if recognizeBriefFiles {
+						p.briefRef, _ = referencedBriefPath(p.text)
+					}
+					prompts = append(prompts, p)
+				}
 				continue
 			}
 			if p, isPrompt := parseTeamPrompt(b.Input.Command); isPrompt {
 				if recognizeBriefFiles {
-					if ref, hasRef := referencedBriefPath(b.Input.Command); hasRef {
-						if resolved, found := briefs.resolve(ref, cwd, *position); found {
-							p.briefText = resolved.body
-							p.briefPath = resolved.path
-						}
-					}
+					p.briefRef, _ = referencedBriefPath(p.text)
 				}
 				prompts = append(prompts, p)
 			}

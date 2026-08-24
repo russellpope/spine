@@ -55,6 +55,7 @@ type teamSpawn struct {
 type teamPrompt struct {
 	target    string
 	text      string
+	briefRef  string
 	briefText string
 	briefPath string
 }
@@ -85,34 +86,80 @@ func namesATicket(text string) bool {
 // routing evidence and is not a dispatch record), its effort, and the
 // worker handle later prompt commands address.
 func parseTeamSpawn(command string) (teamSpawn, bool) {
+	s, _, ok := parseTeamSpawnSegment(command)
+	return s, ok
+}
+
+// parseTeamSpawnSegment returns the exact command segment recognized as the
+// spawn. Brief references must be read from this segment alone (D31).
+func parseTeamSpawnSegment(command string) (teamSpawn, string, bool) {
 	for _, seg := range commandSegments(command) {
-		if s, ok := herdrStart(seg); ok {
-			return s, true
-		}
-		if s, ok := cmuxClaudeSend(seg); ok {
-			return s, true
+		for _, candidate := range teamCommandCandidates(seg) {
+			if s, ok := herdrStart(candidate); ok {
+				return s, candidate, true
+			}
+			if s, ok := cmuxClaudeSend(candidate); ok {
+				return s, candidate, true
+			}
 		}
 	}
-	return teamSpawn{}, false
+	return teamSpawn{}, "", false
 }
 
 // parseTeamPrompt recognizes a follow-up prompt command addressed to an
 // already-started worker: `herdr agent prompt <name> …`, or a `cmux send`
 // that is not itself a spawn.
 func parseTeamPrompt(command string) (teamPrompt, bool) {
+	return parseTeamPromptAfter(command, "")
+}
+
+// parseTeamPromptAfter finds the first prompt after a recognized spawn segment.
+// A same-Bash `/exit` before a replacement start is cleanup for the old worker,
+// never the replacement's assignment.
+func parseTeamPromptAfter(command, after string) (teamPrompt, bool) {
+	foundAfter := after == ""
 	for _, seg := range commandSegments(command) {
-		f := segmentFields(seg)
-		switch {
-		case isTool(f, "herdr", "agent", "prompt"):
-			return teamPrompt{target: positional(f, 3), text: seg}, true
-		case isTool(f, "cmux", "send"):
-			if _, isSpawn := cmuxClaudeSend(seg); isSpawn {
-				continue
+		if !foundAfter {
+			if seg == after {
+				foundAfter = true
 			}
-			return teamPrompt{target: flagValue(f, "--surface", "--pane", "--target"), text: seg}, true
+			continue
+		}
+		for _, candidate := range teamCommandCandidates(seg) {
+			f := segmentFields(candidate)
+			switch {
+			case isTool(f, "herdr", "agent", "prompt"):
+				return teamPrompt{target: positional(f, 3), text: candidate}, true
+			case isTool(f, "cmux", "send"):
+				if _, isSpawn := cmuxClaudeSend(candidate); isSpawn {
+					continue
+				}
+				return teamPrompt{target: flagValue(f, "--surface", "--pane", "--target"), text: candidate}, true
+			}
 		}
 	}
 	return teamPrompt{}, false
+}
+
+// teamCommandCandidates recognizes a command at the outer segment position or
+// at the command position inside `$(...)`. The latter is a real shell command
+// (for example `R=$(herdr agent prompt ...)`), unlike prose. Nested `$(cat)`
+// stays inside the candidate and is resolved only by referencedBriefPath.
+func teamCommandCandidates(seg string) []string {
+	candidates := []string{seg}
+	for rest := seg; ; {
+		i := strings.Index(rest, "$(")
+		if i < 0 {
+			break
+		}
+		rest = rest[i+2:]
+		trimmed := strings.TrimLeft(rest, " \t")
+		f := segmentFields(trimmed)
+		if isTool(f, "herdr", "agent", "start") || isTool(f, "herdr", "agent", "prompt") || isTool(f, "cmux", "send") {
+			candidates = append(candidates, trimmed)
+		}
+	}
+	return candidates
 }
 
 // recognizeTeamSpawns gates I090's Bash-dispatch recognition. It is a var
@@ -164,22 +211,50 @@ func (t *briefTable) recordCommand(command, cwd string, position int) {
 	}
 	_, writes := scanHeredocs(command)
 	for _, w := range writes {
-		p, ok := t.normalize(w.target, cwd, position)
-		if !ok {
+		t.recordWrite(w, cwd, position)
+	}
+}
+
+// recordCommandOrdered assigns every assignment and heredoc write an offset
+// within one Bash block. A spawn cutoff can therefore exclude text that
+// appears later in that same block (D32), rather than merely later JSONL
+// events.
+func (t *briefTable) recordCommandOrdered(command, cwd string, base int) {
+	stripped, writes := scanHeredocs(command)
+	for _, m := range assignmentRe.FindAllStringSubmatchIndex(stripped, -1) {
+		t.assignments = append(t.assignments, briefAssignment{
+			name:     stripped[m[2]:m[3]],
+			value:    strings.Trim(stripped[m[4]:m[5]], `"'`),
+			position: base + m[0],
+		})
+	}
+	search := 0
+	for _, w := range writes {
+		offset := strings.Index(stripped[search:], w.header)
+		if offset < 0 {
 			continue
 		}
-		body := w.body
-		if w.append {
-			for i := len(t.writes) - 1; i >= 0; i-- {
-				previous := t.writes[i]
-				if previous.path == p && previous.position <= position {
-					body = previous.body + body
-					break
-				}
+		search += offset + len(w.header)
+		t.recordWrite(w, cwd, base+search-len(w.header))
+	}
+}
+
+func (t *briefTable) recordWrite(w heredocWrite, cwd string, position int) {
+	p, ok := t.normalize(w.target, cwd, position)
+	if !ok {
+		return
+	}
+	body := w.body
+	if w.append {
+		for i := len(t.writes) - 1; i >= 0; i-- {
+			previous := t.writes[i]
+			if previous.path == p && previous.position <= position {
+				body = previous.body + body
+				break
 			}
 		}
-		t.writes = append(t.writes, brief{path: p, body: body, position: position})
 	}
+	t.writes = append(t.writes, brief{path: p, body: body, position: position})
 }
 
 // resolve returns the last recorded write of ref available at position. A path
@@ -251,46 +326,23 @@ func expandBriefVariables(raw string, assignments []briefAssignment, position in
 // returns a textual path only; resolving it remains the table's job.
 func referencedBriefPath(command string) (string, bool) {
 	stripped := stripHeredocBodies(command)
-	for _, line := range strings.Split(stripped, "\n") {
-		loc := catReferenceRe.FindStringSubmatchIndex(line)
-		if loc != nil && isTeamCommandText(line[:loc[0]]) {
-			return strings.Trim(line[loc[2]:loc[3]], `"'`), true
-		}
+	if m := catReferenceRe.FindStringSubmatch(stripped); m != nil {
+		return strings.Trim(m[1], `"'`), true
 	}
-	for _, seg := range commandSegments(stripped) {
-		fields := segmentFields(seg)
-		if !isTeamCommandFields(fields) {
-			continue
-		}
-		if p := flagValue(fields, "--brief"); p != "" {
-			return p, true
-		}
-		for _, field := range fields {
-			field = strings.Trim(field, `"'`)
-			if strings.HasSuffix(field, ".md") {
-				return field, true
-			}
+	fields := segmentFields(stripped)
+	if p := flagValue(fields, "--brief"); p != "" {
+		return p, true
+	}
+	for _, field := range fields {
+		field = strings.Trim(field, `"'`)
+		if strings.HasSuffix(field, ".md") {
+			return field, true
 		}
 	}
 	return "", false
 }
 
 var catReferenceRe = regexp.MustCompile(`\$\(cat\s+([^\s)]+)\)`)
-
-func isTeamCommandText(text string) bool {
-	for _, seg := range commandSegments(text) {
-		if isTeamCommandFields(segmentFields(seg)) {
-			return true
-		}
-	}
-	return false
-}
-
-func isTeamCommandFields(fields []string) bool {
-	return isTool(fields, "herdr", "agent", "start") ||
-		isTool(fields, "herdr", "agent", "prompt") ||
-		isTool(fields, "cmux", "send")
-}
 
 // attributeTeamPrompt gives a spawn that named no ticket the text of the
 // following prompt command addressed to the same worker, which is where a
@@ -301,6 +353,12 @@ func isTeamCommandFields(fields []string) bool {
 // attribution — borrowing would let one worker's second assignment reattach
 // its first ticket's evidence.
 func attributeTeamPrompt(dispatches []dispatch, p teamPrompt) {
+	attributeTeamPromptWithBriefs(dispatches, p, nil)
+}
+
+// attributeTeamPromptWithBriefs resolves a paired prompt's brief against the
+// matched spawn's cutoff, never the later prompt position (D32).
+func attributeTeamPromptWithBriefs(dispatches []dispatch, p teamPrompt, briefs *briefTable) {
 	if p.target == "" {
 		return
 	}
@@ -311,6 +369,12 @@ func attributeTeamPrompt(dispatches []dispatch, p teamPrompt) {
 		}
 		if d.prompt == "" && d.briefText == "" && !namesATicket(d.description) {
 			d.prompt = p.text
+			if briefs != nil && p.briefRef != "" {
+				if resolved, found := briefs.resolve(p.briefRef, d.cwd, d.briefCutoff); found {
+					p.briefText = resolved.body
+					p.briefPath = resolved.path
+				}
+			}
 			d.briefText = p.briefText
 			d.briefPath = p.briefPath
 		}
@@ -442,7 +506,8 @@ func commandSegments(command string) []string {
 		// likewise suppresses only later segments on that line: a false
 		// negative (the ticket degrades to no-transcript), never a false
 		// dispatch.
-		comment := strings.IndexByte(line, '#')
+		comment := -1
+		quote := byte(0)
 		start := 0
 		keep := func(seg string, at int) {
 			if comment < 0 || at <= comment {
@@ -450,10 +515,30 @@ func commandSegments(command string) []string {
 			}
 		}
 		for i := 0; i < len(line); i++ {
+			if line[i] == '\'' || line[i] == '"' {
+				if quote == 0 {
+					quote = line[i]
+				} else if quote == line[i] {
+					quote = 0
+				}
+				continue
+			}
+			if quote != 0 {
+				continue
+			}
+			if line[i] == '#' {
+				comment = i
+				break
+			}
 			switch line[i] {
-			case ';', '|', '&', '(', ')', '{', '}':
+			case ';', '|', '&', '{', '}':
 				keep(line[start:i], start)
 				start = i + 1
+			case '(':
+				if i == 0 || line[i-1] != '$' { // grouping, not $(cat ...)
+					keep(line[start:i], start)
+					start = i + 1
+				}
 			}
 		}
 		keep(line[start:], start)
@@ -468,6 +553,7 @@ type heredocWrite struct {
 	target string
 	body   string
 	append bool
+	header string
 }
 
 var catHeredocRe = regexp.MustCompile(`(?:^|[;&|]\s*)cat\s+(>>|>)\s+([^\s]+)\s+<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?`)
@@ -508,6 +594,7 @@ func scanHeredocs(command string) (string, []heredocWrite) {
 					target: write[2],
 					body:   body,
 					append: write[1] == ">>",
+					header: lines[bodyStart-1],
 				})
 			}
 			i++ // consume the terminator itself
