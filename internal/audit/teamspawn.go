@@ -86,56 +86,59 @@ func namesATicket(text string) bool {
 // routing evidence and is not a dispatch record), its effort, and the
 // worker handle later prompt commands address.
 func parseTeamSpawn(command string) (teamSpawn, bool) {
-	s, _, ok := parseTeamSpawnSegment(command)
-	return s, ok
+	m, ok := parseTeamSpawnSegment(command)
+	return m.spawn, ok
 }
 
 // parseTeamSpawnSegment returns the exact command segment recognized as the
 // spawn. Brief references must be read from this segment alone (D31).
-func parseTeamSpawnSegment(command string) (teamSpawn, string, bool) {
-	for _, seg := range commandSegments(command) {
-		for _, candidate := range teamCommandCandidates(seg) {
-			if s, ok := herdrStart(candidate); ok {
-				return s, candidate, true
-			}
-			if s, ok := cmuxClaudeSend(candidate); ok {
-				return s, candidate, true
-			}
+type teamCandidate struct {
+	text  string
+	start int
+	end   int
+}
+
+type teamSpawnMatch struct {
+	spawn     teamSpawn
+	candidate teamCandidate
+}
+
+func parseTeamSpawnSegment(command string) (teamSpawnMatch, bool) {
+	for _, candidate := range allTeamCandidates(command) {
+		if s, ok := herdrStart(candidate.text); ok {
+			return teamSpawnMatch{spawn: s, candidate: candidate}, true
+		}
+		if s, ok := cmuxClaudeSend(candidate.text); ok {
+			return teamSpawnMatch{spawn: s, candidate: candidate}, true
 		}
 	}
-	return teamSpawn{}, "", false
+	return teamSpawnMatch{}, false
 }
 
 // parseTeamPrompt recognizes a follow-up prompt command addressed to an
 // already-started worker: `herdr agent prompt <name> …`, or a `cmux send`
 // that is not itself a spawn.
 func parseTeamPrompt(command string) (teamPrompt, bool) {
-	return parseTeamPromptAfter(command, "")
+	return parseTeamPromptAfter(command, -1)
 }
 
 // parseTeamPromptAfter finds the first prompt after a recognized spawn segment.
 // A same-Bash `/exit` before a replacement start is cleanup for the old worker,
 // never the replacement's assignment.
-func parseTeamPromptAfter(command, after string) (teamPrompt, bool) {
-	foundAfter := after == ""
-	for _, seg := range commandSegments(command) {
-		if !foundAfter {
-			if seg == after {
-				foundAfter = true
-			}
+func parseTeamPromptAfter(command string, after int) (teamPrompt, bool) {
+	for _, candidate := range allTeamCandidates(command) {
+		if candidate.start <= after {
 			continue
 		}
-		for _, candidate := range teamCommandCandidates(seg) {
-			f := segmentFields(candidate)
-			switch {
-			case isTool(f, "herdr", "agent", "prompt"):
-				return teamPrompt{target: positional(f, 3), text: candidate}, true
-			case isTool(f, "cmux", "send"):
-				if _, isSpawn := cmuxClaudeSend(candidate); isSpawn {
-					continue
-				}
-				return teamPrompt{target: flagValue(f, "--surface", "--pane", "--target"), text: candidate}, true
+		f := segmentFields(candidate.text)
+		switch {
+		case isTool(f, "herdr", "agent", "prompt"):
+			return teamPrompt{target: positional(f, 3), text: candidate.text}, true
+		case isTool(f, "cmux", "send"):
+			if _, isSpawn := cmuxClaudeSend(candidate.text); isSpawn {
+				continue
 			}
+			return teamPrompt{target: flagValue(f, "--surface", "--pane", "--target"), text: candidate.text}, true
 		}
 	}
 	return teamPrompt{}, false
@@ -145,21 +148,81 @@ func parseTeamPromptAfter(command, after string) (teamPrompt, bool) {
 // at the command position inside `$(...)`. The latter is a real shell command
 // (for example `R=$(herdr agent prompt ...)`), unlike prose. Nested `$(cat)`
 // stays inside the candidate and is resolved only by referencedBriefPath.
-func teamCommandCandidates(seg string) []string {
-	candidates := []string{seg}
-	for rest := seg; ; {
-		i := strings.Index(rest, "$(")
-		if i < 0 {
-			break
+func teamCommandCandidates(seg string) []teamCandidate {
+	candidates := []teamCandidate{{text: seg, end: len(seg)}}
+	inSingleQuote := false
+	for i := 0; i+1 < len(seg); i++ {
+		if seg[i] == '\'' {
+			inSingleQuote = !inSingleQuote
+			continue
 		}
-		rest = rest[i+2:]
-		trimmed := strings.TrimLeft(rest, " \t")
+		if inSingleQuote {
+			continue
+		}
+		if seg[i] != '$' || seg[i+1] != '(' {
+			continue
+		}
+		inner, end, ok := balancedSubstitution(seg, i)
+		if !ok {
+			continue // malformed substitutions under-attribute
+		}
+		trimmed := strings.TrimLeft(inner, " \t")
+		start := i + 2 + len(inner) - len(trimmed)
 		f := segmentFields(trimmed)
 		if isTool(f, "herdr", "agent", "start") || isTool(f, "herdr", "agent", "prompt") || isTool(f, "cmux", "send") {
-			candidates = append(candidates, trimmed)
+			candidates = append(candidates, teamCandidate{text: trimmed, start: start, end: i + 2 + end})
 		}
+		i = end
 	}
 	return candidates
+}
+
+func allTeamCandidates(command string) []teamCandidate {
+	var out []teamCandidate
+	for _, seg := range commandSegmentsWithOffsets(command) {
+		for _, c := range teamCommandCandidates(seg.text) {
+			c.start += seg.start
+			c.end += seg.start
+			if c.text == seg.text {
+				out = append(out, c)
+			} else {
+				for _, inner := range commandSegmentsWithOffsets(c.text) {
+					out = append(out, teamCandidate{text: inner.text, start: c.start + inner.start, end: c.start + inner.start + len(inner.text)})
+				}
+			}
+		}
+	}
+	return out
+}
+
+func balancedSubstitution(s string, start int) (string, int, bool) {
+	depth := 1
+	quote := byte(0)
+	for i := start + 2; i < len(s); i++ {
+		if s[i] == '\'' || s[i] == '"' {
+			if quote == 0 {
+				quote = s[i]
+			} else if quote == s[i] {
+				quote = 0
+			}
+			continue
+		}
+		if quote != 0 {
+			continue
+		}
+		if i+1 < len(s) && s[i] == '$' && s[i+1] == '(' {
+			depth++
+			i++
+			continue
+		}
+		if s[i] == ')' {
+			depth--
+			if depth == 0 {
+				return s[start+2 : i], i, true
+			}
+		}
+	}
+	return "", 0, false
 }
 
 // recognizeTeamSpawns gates I090's Bash-dispatch recognition. It is a var
@@ -494,8 +557,24 @@ func segmentFields(seg string) []string {
 // keep prose out: text written into a file through a heredoc, and a command
 // name quoted mid-sentence, must not read as a dispatch.
 func commandSegments(command string) []string {
-	var segs []string
-	for _, line := range strings.Split(stripHeredocBodies(command), "\n") {
+	withOffsets := commandSegmentsWithOffsets(command)
+	segs := make([]string, len(withOffsets))
+	for i, seg := range withOffsets {
+		segs[i] = seg.text
+	}
+	return segs
+}
+
+type commandSegment struct {
+	text  string
+	start int
+}
+
+func commandSegmentsWithOffsets(command string) []commandSegment {
+	stripped := stripHeredocBodies(command)
+	var segs []commandSegment
+	lineOffset := 0
+	for _, line := range strings.Split(stripped, "\n") {
 		// A segment that only exists because a shell metacharacter appeared
 		// AFTER a '#' is prose inside a trailing comment, not a command:
 		// `cat notes # (herdr agent start … --model …)` would otherwise
@@ -507,23 +586,46 @@ func commandSegments(command string) []string {
 		// negative (the ticket degrades to no-transcript), never a false
 		// dispatch.
 		comment := -1
-		quote := byte(0)
+		inSingleQuote := false
+		inDoubleQuote := false
+		substitutionDepth := 0
+		escaped := false
 		start := 0
 		keep := func(seg string, at int) {
 			if comment < 0 || at <= comment {
-				segs = append(segs, seg)
+				segs = append(segs, commandSegment{text: seg, start: lineOffset + at})
 			}
 		}
 		for i := 0; i < len(line); i++ {
-			if line[i] == '\'' || line[i] == '"' {
-				if quote == 0 {
-					quote = line[i]
-				} else if quote == line[i] {
-					quote = 0
-				}
+			if escaped {
+				escaped = false
 				continue
 			}
-			if quote != 0 {
+			if line[i] == '\\' && !inSingleQuote {
+				escaped = true
+				continue
+			}
+			if line[i] == '\'' && !inDoubleQuote {
+				inSingleQuote = !inSingleQuote
+				continue
+			}
+			if line[i] == '"' && !inSingleQuote {
+				inDoubleQuote = !inDoubleQuote
+				continue
+			}
+			if inSingleQuote {
+				continue
+			}
+			if i+1 < len(line) && line[i] == '$' && line[i+1] == '(' {
+				substitutionDepth++
+				i++
+				continue
+			}
+			if line[i] == ')' && substitutionDepth > 0 {
+				substitutionDepth--
+				continue
+			}
+			if substitutionDepth > 0 || inDoubleQuote {
 				continue
 			}
 			if line[i] == '#' {
@@ -534,14 +636,13 @@ func commandSegments(command string) []string {
 			case ';', '|', '&', '{', '}':
 				keep(line[start:i], start)
 				start = i + 1
-			case '(':
-				if i == 0 || line[i-1] != '$' { // grouping, not $(cat ...)
-					keep(line[start:i], start)
-					start = i + 1
-				}
+			case '(', ')':
+				keep(line[start:i], start)
+				start = i + 1
 			}
 		}
 		keep(line[start:], start)
+		lineOffset += len(line) + 1
 	}
 	return segs
 }

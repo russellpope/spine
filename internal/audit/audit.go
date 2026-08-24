@@ -1390,7 +1390,9 @@ func parseLine(line []byte, briefs *briefTable, position *int) (dispatches []dis
 			if !recognizeTeamSpawns {
 				continue
 			}
-			if s, segment, isSpawn := parseTeamSpawnSegment(b.Input.Command); isSpawn {
+			if match, isSpawn := parseTeamSpawnSegment(b.Input.Command); isSpawn {
+				s := match.spawn
+				segment := match.candidate.text
 				d := dispatch{
 					toolUseID: b.ID,
 					// The record carries the HEREDOC-STRIPPED command
@@ -1409,7 +1411,7 @@ func parseLine(line []byte, briefs *briefTable, position *int) (dispatches []dis
 					cwd:         cwd,
 					teamSpawn:   true,
 					teamTarget:  s.target,
-					briefCutoff: base + strings.Index(stripped, segment),
+					briefCutoff: base + match.candidate.start,
 				}
 				if recognizeBriefFiles && !namesATicket(d.description) {
 					if ref, hasRef := referencedBriefPath(segment); hasRef {
@@ -1420,7 +1422,7 @@ func parseLine(line []byte, briefs *briefTable, position *int) (dispatches []dis
 					}
 				}
 				dispatches = append(dispatches, d)
-				if p, isPrompt := parseTeamPromptAfter(b.Input.Command, segment); isPrompt {
+				if p, isPrompt := parseTeamPromptAfter(b.Input.Command, match.candidate.start); isPrompt {
 					if recognizeBriefFiles {
 						p.briefRef, _ = referencedBriefPath(p.text)
 					}
