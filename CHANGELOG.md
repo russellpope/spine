@@ -35,3 +35,18 @@ Behaviour changes visible to repos that consume `spine`. Format follows
   and names the pipeline and stage to fix. With no such consumers, the plan shows a
   marker-inclusive deletion of the region and `--write` removes it. `spine doctor`
   D10 warns on a stale region left behind and errors on damaged markers. (I097)
+- **`spine audit routing` attributes team spawns whose brief was delivered by file
+  reference.** A claude-team lead that starts a worker with `$(cat <brief>)`,
+  `--brief <path>` or a bare `.md` argument previously left every spawn in the
+  unmatched list. Attribution now resolves the referenced path against the heredoc
+  writes recorded in the lead's own transcript — the brief's first line supplies the
+  ticket, its body may satisfy repo qualification, and the verdict discloses the
+  brief path it came from. The file on disk is never opened and no shell is ever
+  invoked, so verdicts stay reproducible after a worktree is removed. Anything
+  unresolvable stays unattributed, as before. (I101, ADR 0020)
+- **Transcript discovery now covers worktrees.** `spine audit routing` scans the
+  union of the repo's own slug directory, the slugs of every path in `git worktree
+  list`, and slug directories matching `<repo-slug>-*`, so an effort built in a
+  worktree — including one since removed — is found without `--transcripts`. Scanned
+  directories are named in the report's warnings; `--transcripts` still overrides
+  entirely. (I101)
