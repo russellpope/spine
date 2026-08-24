@@ -106,6 +106,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -220,7 +221,11 @@ func tokenValues(tokens []evidenceToken) []string {
 type Options struct {
 	RepoDir              string
 	ClaudeTranscriptsDir string
-	CodexSessionsDir     string // codex sessions dir (readCodexSessions); empty opts out of codex discovery entirely (I041)
+	// ClaudeTranscriptsDirs is the default-discovery union. When non-empty it
+	// supersedes ClaudeTranscriptsDir; the singular field remains the explicit
+	// --transcripts and backwards-compatible public Run seam.
+	ClaudeTranscriptsDirs []string
+	CodexSessionsDir      string // codex sessions dir (readCodexSessions); empty opts out of codex discovery entirely (I041)
 	// Since scopes the transcript set to sessions active at/after a cutoff
 	// (D28, ticket I047): an operator escape hatch, never an automatic
 	// build-start anchor (rejected at grill — see parseSince). Accepts
@@ -252,7 +257,16 @@ type Options struct {
 // Warnings; the only errors are a repo without docs/issues and the D14
 // version-gate refusal (see the package comment).
 func Run(opts Options) (Report, error) {
-	repoDir, transcriptsDir := opts.RepoDir, opts.ClaudeTranscriptsDir
+	repoDir := opts.RepoDir
+	transcriptsDirs := opts.ClaudeTranscriptsDirs
+	discloseTranscriptDirs := len(transcriptsDirs) > 0
+	if !discloseTranscriptDirs {
+		transcriptsDirs = []string{opts.ClaudeTranscriptsDir}
+	}
+	transcriptsDirs = dedupSorted(transcriptsDirs)
+	if len(transcriptsDirs) == 0 {
+		transcriptsDirs = []string{""} // preserve the legacy missing-dir warning
+	}
 	var rep Report
 	tickets, err := readTickets(filepath.Join(repoDir, "docs", "issues"))
 	if err != nil {
@@ -291,7 +305,7 @@ func Run(opts Options) (Report, error) {
 	if !anyAnnotated(tickets) {
 		rep.Warnings = append(rep.Warnings, "nothing audited — no annotated tickets found (zero docs/issues tickets carry a tier: annotation); an exit-0 run judged nothing")
 	}
-	flavor := transcriptFlavor(transcriptsDir)
+	flavor := transcriptFlavor(transcriptsDirs[0])
 	mapping, err := resolveFlavorTiers(repoDir, flavor)
 	if err != nil {
 		return Report{}, err
@@ -307,7 +321,18 @@ func Run(opts Options) (Report, error) {
 	// gated on that.
 	mappings := map[string]map[string]resolvedTier{flavor: mapping, "codex": codexMapping}
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
-	dispatches, agents, sessionMatched := readTranscripts(transcriptsDir, flavor, since, opts.Session, &rep.Warnings)
+	var dispatches []dispatch
+	var agents []subagent
+	sessionMatched := false
+	for _, transcriptsDir := range transcriptsDirs {
+		if discloseTranscriptDirs {
+			rep.Warnings = append(rep.Warnings, "scanning transcript dir: "+transcriptsDir)
+		}
+		moreDispatches, moreAgents, matched := readTranscripts(transcriptsDir, flavor, since, opts.Session, &rep.Warnings)
+		dispatches = append(dispatches, moreDispatches...)
+		agents = append(agents, moreAgents...)
+		sessionMatched = sessionMatched || matched
+	}
 	// Codex discovery only runs when CodexSessionsDir is set (the CLI always
 	// sets it — design D-doc, "discovery is always on"; leaving it empty is
 	// how every pre-I041 caller and every existing test opts out, and must
@@ -341,6 +366,7 @@ func Run(opts Options) (Report, error) {
 	}
 
 	evidence := map[string][]evidenceToken{} // ticket id -> flavor-tagged model tokens
+	briefSources := map[string][]string{}    // ticket id -> resolved recorded brief paths (I101 D35)
 	claimed := map[int]bool{}                // dispatch index -> matched a ticket
 	linked := map[string]bool{}              // toolUseID -> a subagent transcript carries models
 	for _, a := range agents {
@@ -355,6 +381,11 @@ func Run(opts Options) (Report, error) {
 	// keeps its natural case.
 	matches := func(d dispatch, id string) bool {
 		desc, prompt := d.description, firstLine(d.prompt)
+		qualifyingText := d.description + "\n" + d.prompt
+		if d.briefText != "" && !namesATicket(d.description) {
+			desc, prompt = firstLine(d.briefText), ""
+			qualifyingText = d.briefText
+		}
 		if d.flavor == "codex" {
 			desc, prompt = strings.ToUpper(desc), strings.ToUpper(prompt)
 		}
@@ -367,7 +398,7 @@ func Run(opts Options) (Report, error) {
 		// hard-scoped to the repo before it reaches Run (D22,
 		// readCodexSessions' cwdInsideRepo/gitCommitProber gate), so gating
 		// it again here would be redundant, not stricter.
-		if d.flavor == "claude" && !repoQualifies(d.description+"\n"+d.prompt, d.cwd, absRepoDir, repoBase) {
+		if d.flavor == "claude" && !repoQualifies(qualifyingText, d.cwd, absRepoDir, repoBase) {
 			return false
 		}
 		return true
@@ -390,6 +421,9 @@ func Run(opts Options) (Report, error) {
 				continue
 			}
 			claimed[i] = true
+			if d.briefPath != "" {
+				briefSources[t.id] = append(briefSources[t.id], d.briefPath)
+			}
 			if d.toolUseID != "" {
 				if rootTickets[d.toolUseID] == nil {
 					rootTickets[d.toolUseID] = map[string]bool{}
@@ -453,6 +487,14 @@ func Run(opts Options) (Report, error) {
 		if row.Verdict == VerdictNoTranscript {
 			if detail, ok := nearMissDetail(codexNearMisses, t.id); ok {
 				row.Verdict, row.Detail = VerdictUnattributedTranscript, detail
+			}
+		}
+		if sources := dedupSorted(briefSources[t.id]); len(sources) > 0 {
+			note := "source: " + strings.Join(sources, ", ")
+			if row.Detail == "" {
+				row.Detail = note
+			} else {
+				row.Detail += "; " + note
 			}
 		}
 		if note, ok := coarseNotes[t.id]; ok {
@@ -951,6 +993,9 @@ type dispatch struct {
 	toolUseID   string
 	description string
 	prompt      string
+	briefText   string // I101: body recorded in the lead transcript, never read from disk
+	briefPath   string // normalized transcript path; disclosure is added in Task 3
+	briefCutoff int    // I101 D32: evidence available when this spawn occurred
 	model       string
 	effort      string // declared worker effort, claude-team spawns only (I090); reported, never judged — see DispatchInfo.Effort
 	flavor      string // the transcript source's flavor (I040 per-token seam)
@@ -1244,19 +1289,21 @@ func scanJSONL(path string, warnings *[]string) ([]dispatch, []string, string) {
 	var dispatches []dispatch
 	var models []string
 	var cwd string
+	briefs := newBriefTable()
+	position := 0
 	seen := map[string]bool{}
 	malformed := 0
 	r := bufio.NewReader(f)
 	for {
 		line, err := r.ReadBytes('\n')
 		if len(strings.TrimSpace(string(line))) > 0 {
-			d, prompts, m, lineCwd, ok := parseLine(line)
+			d, prompts, m, lineCwd, ok := parseLine(line, briefs, &position)
 			if !ok {
 				malformed++
 			} else {
 				dispatches = append(dispatches, d...)
 				for _, p := range prompts {
-					attributeTeamPrompt(dispatches, p)
+					attributeTeamPromptWithBriefs(dispatches, p, briefs)
 				}
 				if m != "" && !seen[m] {
 					seen[m] = true
@@ -1289,7 +1336,7 @@ func scanJSONL(path string, warnings *[]string) ([]dispatch, []string, string) {
 // a claude-team worker spawn are dispatch records too (I090, teamspawn.go),
 // and the prompt commands that follow them are returned alongside for the
 // caller to pair. Unrecognized JSON shapes report as malformed (ok=false).
-func parseLine(line []byte) (dispatches []dispatch, prompts []teamPrompt, model string, cwd string, ok bool) {
+func parseLine(line []byte, briefs *briefTable, position *int) (dispatches []dispatch, prompts []teamPrompt, model string, cwd string, ok bool) {
 	var ev struct {
 		Type    string `json:"type"`
 		Cwd     string `json:"cwd"`
@@ -1332,9 +1379,21 @@ func parseLine(line []byte) (dispatches []dispatch, prompts []teamPrompt, model 
 				model:       b.Input.Model,
 				cwd:         cwd,
 			})
-		case recognizeTeamSpawns && b.Name == "Bash":
-			if s, isSpawn := parseTeamSpawn(b.Input.Command); isSpawn {
-				dispatches = append(dispatches, dispatch{
+		case b.Name == "Bash":
+			stripped := stripHeredocBodies(b.Input.Command)
+			base := *position
+			// The cursor is absolute, not a fixed-width block number: a dispatch
+			// brief can be larger than any arbitrary stride. Every later Bash
+			// block therefore sorts after every byte-position in this one.
+			*position += len(stripped) + 1
+			briefs.recordCommandOrdered(b.Input.Command, cwd, base)
+			if !recognizeTeamSpawns {
+				continue
+			}
+			if match, isSpawn := parseTeamSpawnSegment(b.Input.Command); isSpawn {
+				s := match.spawn
+				segment := match.candidate.text
+				d := dispatch{
 					toolUseID: b.ID,
 					// The record carries the HEREDOC-STRIPPED command
 					// (final review C1). A lead routinely writes the
@@ -1346,16 +1405,35 @@ func parseLine(line []byte) (dispatches []dispatch, prompts []teamPrompt, model 
 					// routed. matches() and namesATicket must see exactly
 					// the text the recognizer accepted as a command, so
 					// the two can never disagree about what was run.
-					description: stripHeredocBodies(b.Input.Command),
+					description: segment,
 					model:       s.model,
 					effort:      s.effort,
 					cwd:         cwd,
 					teamSpawn:   true,
 					teamTarget:  s.target,
-				})
+					briefCutoff: base + match.candidate.start,
+				}
+				if recognizeBriefFiles && !namesATicket(d.description) {
+					if ref, hasRef := referencedBriefPath(segment); hasRef {
+						if resolved, found := briefs.resolve(ref, cwd, d.briefCutoff); found {
+							d.briefText = resolved.body
+							d.briefPath = resolved.path
+						}
+					}
+				}
+				dispatches = append(dispatches, d)
+				if p, isPrompt := parseTeamPromptAfter(b.Input.Command, match.candidate.start); isPrompt {
+					if recognizeBriefFiles {
+						p.briefRef, _ = referencedBriefPath(p.text)
+					}
+					prompts = append(prompts, p)
+				}
 				continue
 			}
 			if p, isPrompt := parseTeamPrompt(b.Input.Command); isPrompt {
+				if recognizeBriefFiles {
+					p.briefRef, _ = referencedBriefPath(p.text)
+				}
 				prompts = append(prompts, p)
 			}
 		}
@@ -1404,10 +1482,10 @@ func appendUnmatched(list []DispatchInfo, d DispatchInfo) []DispatchInfo {
 	return append(list, d)
 }
 
-// DefaultTranscriptsDir derives the harness's per-project transcript dir
+// DefaultTranscriptsDir derives the harness's exact-repo transcript dir
 // for a repo: ~/.claude/projects/<slug>, slug being the absolute repo path
 // with '/' and '.' flattened to '-'. Best-effort — the harness convention
-// is undocumented; `--transcripts` overrides it.
+// is undocumented; DefaultTranscriptsDirs expands it for default discovery.
 func DefaultTranscriptsDir(repoDir string) (string, error) {
 	abs, err := filepath.Abs(repoDir)
 	if err != nil {
@@ -1419,4 +1497,41 @@ func DefaultTranscriptsDir(repoDir string) (string, error) {
 	}
 	slug := strings.NewReplacer("/", "-", ".", "-").Replace(abs)
 	return filepath.Join(home, ".claude", "projects", slug), nil
+}
+
+// DefaultTranscriptsDirs returns D36's stable, de-duplicated default scope:
+// the exact repo slug, every currently listed git worktree slug, and existing
+// project directories sharing the exact repo-slug prefix. Git failure and a
+// non-git repo deliberately degrade to the slug scan; no transcript text is
+// ever executed or used to choose a path.
+func DefaultTranscriptsDirs(repoDir string) ([]string, error) {
+	primary, err := DefaultTranscriptsDir(repoDir)
+	if err != nil {
+		return nil, err
+	}
+	dirs := []string{primary}
+	repoReal, _ := filepath.EvalSymlinks(repoDir)
+	if out, err := exec.Command("git", "-C", repoDir, "worktree", "list", "--porcelain").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			path, ok := strings.CutPrefix(line, "worktree ")
+			if !ok || path == "" {
+				continue
+			}
+			if worktreeReal, err := filepath.EvalSymlinks(path); err == nil && repoReal != "" && worktreeReal == repoReal {
+				continue // git can spell the primary checkout through a different symlink path
+			}
+			if dir, err := DefaultTranscriptsDir(path); err == nil {
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+	projectsDir, prefix := filepath.Dir(primary), filepath.Base(primary)+"-"
+	if entries, err := os.ReadDir(projectsDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), prefix) {
+				dirs = append(dirs, filepath.Join(projectsDir, entry.Name()))
+			}
+		}
+	}
+	return dedupSorted(dirs), nil
 }

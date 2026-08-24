@@ -1,0 +1,2 @@
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"spawn-isolation","name":"Bash","input":{"command":"herdr agent start impl-isolation --kind claude -- claude --model claude-sonnet-5"}}]}}
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"prompt-isolation","name":"Bash","input":{"command":"herdr agent prompt impl-isolation --brief shared.md"}}]}}

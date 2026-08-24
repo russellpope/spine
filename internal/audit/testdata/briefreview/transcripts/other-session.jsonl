@@ -1,0 +1,1 @@
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"write-other","name":"Bash","input":{"command":"cat > shared.md <<'EOF'\nI714 another session\nprimary repo: /fixture/repo\nEOF"}}]}}

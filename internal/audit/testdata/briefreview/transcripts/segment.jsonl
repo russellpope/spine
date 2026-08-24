@@ -1,0 +1,4 @@
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"ws","name":"Bash","input":{"command":"WS=/fixture/repo/.superpowers/sdd"}}]}}
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"write","name":"Bash","input":{"command":"cat > $WS/unrelated.md <<'EOF'\nI706 unrelated brief\nprimary repo: /fixture/repo\nEOF"}}]}}
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"spawn","name":"Bash","input":{"command":"herdr agent start impl-segment --kind claude -- claude --model claude-sonnet-5"}}]}}
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"prompt","name":"Bash","input":{"command":"herdr agent prompt impl-segment Implement I711 in repo; echo \"$(cat $WS/unrelated.md)\""}}]}}

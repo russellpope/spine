@@ -809,21 +809,23 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("audit routing", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
-	transcripts := fs.String("transcripts", "", "harness transcript dir (default: derived from repo path under ~/.claude/projects)")
+	transcripts := fs.String("transcripts", "", "harness transcript dir (default: repo, git-worktree, and matching project dirs under ~/.claude/projects)")
 	codexSessions := fs.String("codex-sessions", "", "codex session dir (default: $CODEX_HOME/sessions, else ~/.codex/sessions)")
 	since := fs.String("since", "", "scope to sessions at/after this cutoff (RFC3339, or YYYY-MM-DD for local midnight); operator escape hatch, default: unscoped")
 	session := fs.String("session", "", "scope to one session id (claude: the session's file/dir base name; codex: session_meta's root session_id); default: unscoped")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	tdir := *transcripts
-	if tdir == "" {
-		derived, err := audit.DefaultTranscriptsDir(*dir)
+	auditOpts := audit.Options{RepoDir: *dir, Since: *since, Session: *session}
+	if *transcripts == "" {
+		derived, err := audit.DefaultTranscriptsDirs(*dir)
 		if err != nil {
 			fmt.Fprintln(stderr, "audit routing:", err)
 			return 2
 		}
-		tdir = derived
+		auditOpts.ClaudeTranscriptsDirs = derived
+	} else {
+		auditOpts.ClaudeTranscriptsDir = *transcripts
 	}
 	// Warning rule (ratified at I041 review, design D-doc "Flavor
 	// threading"): a missing EXPLICITLY-requested sessions dir warns; a
@@ -844,7 +846,8 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 			cdir = derived
 		}
 	}
-	rep, err := audit.Run(audit.Options{RepoDir: *dir, ClaudeTranscriptsDir: tdir, CodexSessionsDir: cdir, Since: *since, Session: *session})
+	auditOpts.CodexSessionsDir = cdir
+	rep, err := audit.Run(auditOpts)
 	if err != nil {
 		fmt.Fprintln(stderr, "audit routing:", err)
 		return 2
@@ -900,7 +903,7 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 		// Guessing a single cause in the footer was wrong for the others.
 		if teamSpawns > 0 {
 			fmt.Fprintf(stdout,
-				"  note: %d team spawn(s) recognised but not attributed (no ticket token in the command or its prompt, or not repo-qualified); see I101\n",
+				"  note: %d team spawn(s) recognised but not attributed (no ticket token in the command or its prompt, or not repo-qualified)\n",
 				teamSpawns)
 		}
 	}

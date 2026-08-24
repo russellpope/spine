@@ -1,0 +1,5 @@
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"ws","name":"Bash","input":{"command":"WS=/fixture/repo/.superpowers/sdd"}}]}}
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"old","name":"Bash","input":{"command":"cat > $WS/a.md <<'EOF'\nI701 original assignment\nprimary repo: /fixture/repo\nEOF"}}]}}
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"spawn","name":"Bash","input":{"command":"herdr agent start impl-temporal --kind claude -- claude --model claude-sonnet-5"}}]}}
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"new","name":"Bash","input":{"command":"cat > $WS/a.md <<'EOF'\nI706 later rewrite\nprimary repo: /fixture/repo\nEOF"}}]}}
+{"type":"assistant","cwd":"/fixture/repo","message":{"model":"claude-fable-5","content":[{"type":"tool_use","id":"prompt","name":"Bash","input":{"command":"herdr agent prompt impl-temporal \"$(cat $WS/a.md)\""}}]}}

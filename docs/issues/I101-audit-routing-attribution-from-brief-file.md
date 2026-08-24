@@ -2,7 +2,7 @@
 id: I101
 title: "spine audit routing cannot attribute a team spawn whose brief is delivered by file reference"
 severity: med
-status: open
+status: fixed
 affects: [I090, I047]
 blocked-by: []
 execution-mode: subagent-driven
@@ -73,6 +73,48 @@ is the failure mode I090's C1 review round exists to prevent.
 
 Spec: `docs/specs/2026-08-24-i101-dispatch-brief-attribution-design.md` (+ plan).
 Decision: ADR 0020.
+
+## Verification
+
+Verified 2026-08-24 on the integrated branch, initially at `a716e0a` and
+finally at `a354839` after primary-review corrections:
+
+- `gofmt -l .` and `go vet ./...` were clean; `SPINE_REQUIRE_MAIPIPE=1 make test` passed.
+- After `make install`, ran from the primary repo root with default transcript
+  discovery and no `--transcripts` override:
+
+  ```text
+  spine audit routing --session a39329db-3a0d-4dd3-bc4d-6217f0c3509b
+  ```
+
+  The worktree-union scan included the removed local-harness slug directory.
+  The I079–I087 rows disclose **25 unique** `dispatch-*.md` brief sources.
+  The raw row list has 27 source occurrences because
+  `dispatch-final-fixer.md` and `dispatch-final-reviewer.md` each appear for
+  both I079 and I087; deduplicating those two repeated paths gives 25
+  attributed starts.
+- The scoped unmatched footer reports two remaining team spawns, both lacking
+  a ticket-bearing paired prompt:
+
+  ```text
+  herdr agent start spine-wt-local-harness-implementer --kind claude --pane w19:p2 -- --permission-mode auto --model claude-opus-5 --effort low
+  herdr agent start lhc-reviewer --kind claude --pane w19:p3 -- --permission-mode auto --model claude-opus-5 --effort low
+  ```
+
+  Thus the cited corpus measures **25 attributed + 2 promptless unmatched =
+  27 starts**.
+- I079–I087 changed from unjudged to five `match` rows (I081–I084, I086) and
+  four `escalated-no-reason` rows (I079, I080, I085, I087). The latter are the
+  expected `claude-fable-5 @ high` / primary-model evidence against routine
+  tickets with no `ESCALATION` record; the routing records were left intact.
+- Primary blind review found two false-attribution paths in D31/D32. Correction
+  commits `8d72939` and `0198b76`, followed by dead-code cleanup `a354839`, add
+  byte-ordered spawn cutoffs, exact and nested command-position parsing, and
+  public regression fixtures for temporal, segment, restart, isolation, and
+  shell-quoting cases. Primary re-review ended at Critical 0 / Important 0;
+  fresh primary verification returned `VERIFY: PASS`. Maipipe full run #8,
+  durable id `81f13ae0-488b-4262-96e0-45cfa08c6345`, passed at `a354839` with
+  no findings.
 
 ## Related
 

@@ -77,6 +77,86 @@ func TestTeamSpawnRecognitionIsLoadBearing(t *testing.T) {
 	}
 }
 
+// I101's lead writes a dispatch brief in its own transcript, then gives a
+// worker only a reference to it. The first line is the assignment; context in
+// the body must not certify the other tickets it mentions. The same fixture
+// covers D34 (a spawn's own token wins), D33 (the body can qualify the repo),
+// and the honest unmatched fallback for an unresolvable reference. It also
+// pins the competing-source order: explicit spawn text, then a brief the
+// spawn itself references, then a paired-prompt brief, then raw prompt text.
+func TestDispatchBriefAttribution(t *testing.T) {
+	rep := runFixture(t, "brief")
+	rows := rowsByID(t, rep)
+	for _, tc := range []struct {
+		id      string
+		verdict Verdict
+		actual  string
+	}{
+		{"I701", VerdictMatch, "claude-sonnet-5"},
+		{"I702", VerdictNoTranscript, ""},
+		{"I703", VerdictNoTranscript, ""},
+		{"I704", VerdictNoTranscript, ""},
+		{"I705", VerdictMatch, "claude-sonnet-5"},
+		{"I706", VerdictMatch, "claude-sonnet-5"},
+		{"I707", VerdictNoTranscript, ""},
+		{"I709", VerdictMatch, "claude-sonnet-5"},
+		{"I710", VerdictNoTranscript, ""},
+		{"I711", VerdictMatch, "claude-sonnet-5"},
+	} {
+		r := rows[tc.id]
+		if r.Verdict != tc.verdict {
+			t.Errorf("%s verdict = %s (%s), want %s", tc.id, r.Verdict, r.Detail, tc.verdict)
+		}
+		if got := strings.Join(r.Actuals, ","); got != tc.actual {
+			t.Errorf("%s actuals = %q, want %q", tc.id, got, tc.actual)
+		}
+	}
+	hasMissing := false
+	for _, d := range rep.Unmatched {
+		hasMissing = hasMissing || strings.Contains(d.Description, "impl-missing")
+	}
+	if !hasMissing {
+		t.Errorf("unresolvable brief must keep today's unmatched listing, got %+v", rep.Unmatched)
+	}
+	for id, wantPath := range map[string]string{
+		"I701": "/fixture/repo/.superpowers/sdd/target.md",
+		"I706": "/fixture/repo/qualified.md",
+		"I709": "/fixture/repo/.superpowers/sdd/spawn.md",
+	} {
+		if detail := rows[id].Detail; !strings.Contains(detail, "source: "+wantPath) {
+			t.Errorf("%s detail = %q, want recorded brief source %q", id, detail, wantPath)
+		}
+	}
+	if detail := rows["I705"].Detail; strings.Contains(detail, "source: /fixture/repo/.superpowers/sdd/target.md") {
+		t.Errorf("I705 detail = %q, own-command attribution must not claim its ignored brief as evidence", detail)
+	}
+}
+
+// This negative control proves that recorded brief resolution is what makes
+// the fixture attributable; turning it off leaves the I701 reference honestly
+// unjudged while a spawn naming I705 in its own command remains unaffected.
+func TestDispatchBriefResolutionIsLoadBearing(t *testing.T) {
+	recognizeBriefFiles = false
+	t.Cleanup(func() { recognizeBriefFiles = true })
+	rows := rowsByID(t, runFixture(t, "brief"))
+	for _, id := range []string{"I701", "I706"} {
+		if r := rows[id]; r.Verdict != VerdictNoTranscript {
+			t.Errorf("%s verdict = %s (%s), want no-transcript without brief resolution", id, r.Verdict, r.Detail)
+		}
+	}
+	if r := rows["I705"]; r.Verdict != VerdictMatch {
+		t.Errorf("I705 verdict = %s (%s), own-command attribution must survive", r.Verdict, r.Detail)
+	}
+}
+
+// I090 C1 remains in force: a heredoc body is never attribution text until a
+// recognized spawn or prompt references its path.
+func TestUnreferencedHeredocBriefDoesNotAttribute(t *testing.T) {
+	if r := rowsByID(t, runFixture(t, "brief"))["I708"]; r.Verdict != VerdictNoTranscript {
+		t.Errorf("I708 verdict = %s (%s), want no-transcript for an unreferenced brief", r.Verdict, r.Detail)
+	}
+}
+
 // Negative controls (ticket I090): each ticket in the teamnoise fixture is
 // named by exactly one Bash command that looks spawn-ish but is not a
 // dispatch. Recognizing any of them would judge a ticket nobody dispatched.

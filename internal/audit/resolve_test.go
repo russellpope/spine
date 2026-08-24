@@ -3,7 +3,10 @@ package audit
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -23,6 +26,88 @@ func writeAuditRepo(t *testing.T, dir, workflow string, tickets map[string]strin
 	}
 	for id, tier := range tickets {
 		gen6ProofTicket(t, dir, id, tier)
+	}
+}
+
+// This catches the D36 union losing any of its three routes (primary path,
+// live git worktree, or prefix-only removed worktree), double-reading a live
+// worktree found by two routes, or weakening D28 while sweeping a prefix
+// sibling. Each transcript is real JSONL consumed by Run.
+func TestDefaultTranscriptsDirsUnionScansWorktreesWithoutOverAttribution(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := t.TempDir()
+	makeTestGitRepo(t, repo)
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{
+		"I901": "routine",
+		"I902": "routine",
+		"I903": "routine",
+	})
+
+	worktree := filepath.Join(t.TempDir(), "live-worktree")
+	if out, err := exec.Command("git", "-C", repo, "worktree", "add", "-q", worktree).CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v\n%s", err, out)
+	}
+
+	primaryDir, err := DefaultTranscriptsDir(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktreeReal, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktreeDir, err := DefaultTranscriptsDir(worktreeReal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removedDir := filepath.Join(filepath.Dir(primaryDir), filepath.Base(primaryDir)+"-removed-worktree")
+	decoyDir := filepath.Join(filepath.Dir(primaryDir), filepath.Base(primaryDir)+"-sibling")
+
+	writeSingleDispatch(t, filepath.Join(primaryDir, "primary.jsonl"), repo,
+		"I901", "I901 primary transcript", "claude-sonnet-5")
+	writePathReferencingDispatch(t, filepath.Join(worktreeDir, "live.jsonl"), repo,
+		"I902", "I902 live worktree transcript", "claude-sonnet-5")
+	writePathReferencingDispatch(t, filepath.Join(removedDir, "removed.jsonl"), repo,
+		"I903", "I903 removed worktree transcript", "claude-sonnet-5")
+	writeSingleDispatch(t, filepath.Join(decoyDir, "sibling.jsonl"), t.TempDir(),
+		"I901", "I901 sibling transcript", "claude-haiku-4-5")
+
+	dirs, err := DefaultTranscriptsDirs(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDirs := []string{primaryDir, worktreeDir, removedDir, decoyDir}
+	sort.Strings(wantDirs)
+	if !reflect.DeepEqual(dirs, wantDirs) {
+		t.Fatalf("DefaultTranscriptsDirs() = %q, want %q", dirs, wantDirs)
+	}
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDirs: dirs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	for _, id := range []string{"I901", "I902", "I903"} {
+		if r := rows[id]; r.Verdict != VerdictMatch {
+			t.Errorf("%s verdict = %s (%s), want match", id, r.Verdict, r.Detail)
+		}
+	}
+	if got := strings.Join(rows["I901"].Actuals, ","); got != "claude-sonnet-5" {
+		t.Errorf("I901 actuals = %q, want only primary claude-sonnet-5; D28 must reject the decoy", got)
+	}
+	if len(rep.Unmatched) != 1 || !strings.Contains(rep.Unmatched[0].Description, "sibling transcript") {
+		t.Errorf("decoy must stay visibly unmatched, got %+v", rep.Unmatched)
+	}
+
+	var scanned []string
+	for _, warning := range rep.Warnings {
+		if dir, ok := strings.CutPrefix(warning, "scanning transcript dir: "); ok {
+			scanned = append(scanned, dir)
+		}
+	}
+	if !reflect.DeepEqual(scanned, wantDirs) {
+		t.Errorf("scanned-directory warnings = %q, want one stable entry per union directory %q", scanned, wantDirs)
 	}
 }
 
