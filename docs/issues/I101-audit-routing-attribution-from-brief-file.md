@@ -76,7 +76,8 @@ Decision: ADR 0020.
 
 ## Verification
 
-Verified 2026-08-24 on the integrated branch at `a716e0a`:
+Verified 2026-08-24 on the integrated branch, initially at `a716e0a` and
+finally at `a354839` after primary-review corrections:
 
 - `gofmt -l .` and `go vet ./...` were clean; `SPINE_REQUIRE_MAIPIPE=1 make test` passed.
 - After `make install`, ran from the primary repo root with default transcript
@@ -97,7 +98,7 @@ Verified 2026-08-24 on the integrated branch at `a716e0a`:
 
   ```text
   herdr agent start spine-wt-local-harness-implementer --kind claude --pane w19:p2 -- --permission-mode auto --model claude-opus-5 --effort low
-  WS=.superpowers/sdd/2026-08-18-local-harness-conventions-plan; SK=/Users/ldh/.claude/plugins/cache/claude-plugins-official/superpowers/6.3.0/skills/subagent-driven-development; git log --oneline edc4588..HEAD; H=$(git rev-parse --short HEAD); git status --short | head -3; $SK/scripts/review-package docs/specs/2026-08-18-local-harness-conventions-plan.md edc4588 HEAD …
+  herdr agent start lhc-reviewer --kind claude --pane w19:p3 -- --permission-mode auto --model claude-opus-5 --effort low
   ```
 
   Thus the cited corpus measures **25 attributed + 2 promptless unmatched =
@@ -106,6 +107,14 @@ Verified 2026-08-24 on the integrated branch at `a716e0a`:
   four `escalated-no-reason` rows (I079, I080, I085, I087). The latter are the
   expected `claude-fable-5 @ high` / primary-model evidence against routine
   tickets with no `ESCALATION` record; the routing records were left intact.
+- Primary blind review found two false-attribution paths in D31/D32. Correction
+  commits `8d72939` and `0198b76`, followed by dead-code cleanup `a354839`, add
+  byte-ordered spawn cutoffs, exact and nested command-position parsing, and
+  public regression fixtures for temporal, segment, restart, isolation, and
+  shell-quoting cases. Primary re-review ended at Critical 0 / Important 0;
+  fresh primary verification returned `VERIFY: PASS`. Maipipe full run #8,
+  durable id `81f13ae0-488b-4262-96e0-45cfa08c6345`, passed at `a354839` with
+  no findings.
 
 ## Related
 
