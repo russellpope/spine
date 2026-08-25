@@ -71,7 +71,7 @@ module. A module that legitimately fails to type-check keeps today's behavior.
 **"Exit 2 is right" is half wrong.** Today's 2 is the Go runtime's exit status
 for an unrecovered panic, not `gate.Run`'s misconfiguration code — `Run` never
 finishes. The absence of a results document is the same accident: the process
-dies before `emit` writes `$SPINE_GATE_RESULTS`. Both guarantees are
+dies before `emit` writes `$MAIPIPE_RESULTS`. Both guarantees are
 coincidences of where the process happens to die. The fix does not preserve
 them; it makes them real.
 

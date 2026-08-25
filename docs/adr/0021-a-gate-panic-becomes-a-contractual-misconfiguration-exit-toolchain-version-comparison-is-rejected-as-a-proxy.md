@@ -44,7 +44,7 @@ The exit code was never the problem, but not for the reason it appears: the 2 an
 operator sees today is the Go runtime's exit status for an unrecovered panic,
 not `Run`'s misconfiguration code. `Run` never finishes. The correct exit is
 reached by accident, and so is the absence of a results document — the process
-dies before `emit` can write `$SPINE_GATE_RESULTS`. Both guarantees are
+dies before `emit` can write `$MAIPIPE_RESULTS`. Both guarantees are
 coincidences of where the process happens to die.
 
 I107 proposed, as "cheaper and stronger", comparing `runtime.Version()` against
@@ -73,7 +73,7 @@ allowed to terminate the process.** Two seams:
    rather than for the two this ticket happened to touch.
 
 Both paths return an `error`, so they inherit the existing contract: stderr, exit
-2, `emit` unreached, no `$SPINE_GATE_RESULTS` file written. The guarantees stop
+2, `emit` unreached, no `$MAIPIPE_RESULTS` file written. The guarantees stop
 being coincidences.
 
 **Version comparison is rejected as a detection mechanism.** The gate keys on the
@@ -97,7 +97,7 @@ binary": the two message classes stay distinguishable to the operator.
   instead of a crash. Nothing is silenced — the internal-error class prints the
   panic value and stack verbatim.
 - Exit 2 writes nothing, which means a **stale** results file from a previous
-  run at `$SPINE_GATE_RESULTS` is left in place. The promise is "writes
+  run at `$MAIPIPE_RESULTS` is left in place. The promise is "writes
   nothing", not "the path is clean".
 - The operator gets no warning of toolchain skew until a gate stage fires.
   Earlier notice is possible as a non-blocking `spine doctor` advisory, where

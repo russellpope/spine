@@ -43,7 +43,7 @@ The exit code is not itself the defect, but not for the reason the ticket gave.
 — and honours it by printing a returned error to stderr and returning 2 without
 reaching `emit` (`internal/gate/gate.go:315`). On the panic path `Run` never
 finishes: the 2 an operator sees is the Go runtime's exit status for an
-unrecovered panic. The absence of a `$SPINE_GATE_RESULTS` file is the same kind
+unrecovered panic. The absence of a `$MAIPIPE_RESULTS` file is the same kind
 of accident — the process dies before `emit` can write it
 (`internal/gate/results.go:53-65`). Both guarantees are coincidences of where
 the process happens to die, and this work makes them real.
@@ -110,13 +110,18 @@ name or numbers. Everything else is an *internal error*.
 **D40 — mismatch message.** Names four things: the verbatim recovered value (it
 already carries both version numbers), the toolchain the binary was built with
 from `runtime.Version()`, the toolchain on PATH from `go env GOVERSION`, and the
-remedy `make install`. The PATH probe is a subprocess on an already-fatal path
-and `go` is provably present — `goList` ran and succeeded before any
-type-checking could begin. If the probe fails, that clause is omitted and the
-rest of the message stands; one failure never becomes two.
+remedy `make install`. The PATH probe is a subprocess on an already-fatal path.
+`go` is present for every panic that can actually reach this branch, because an
+`export data version` panic comes from the importer, which runs only after
+`goList` has succeeded. That ordering is a convenience, not the guarantee —
+D38 deliberately puts `goList` itself inside the recover, so the probe must
+stand on its own: if it fails, that clause is omitted and the rest of the
+message stands; one failure never becomes two.
 
-**D41 — internal-error message.** Names the package under check, the recovered
-value, and the stack captured at recover time (`debug.Stack()`), verbatim. This
+**D41 — internal-error message.** Names the package under check — or the `--dir`
+value, when the panic precedes the per-package loop and no package has been
+entered yet — the recovered value, and the stack captured at recover time
+(`debug.Stack()`), verbatim. This
 class is deliberately more alarming than the mismatch class and must never be
 phrased as a configuration problem.
 
@@ -153,7 +158,7 @@ panics, so no recover sits on that path at all.
   the importer, as an end-to-end confirmation the D39 substring actually matches
   what `gcimporter` raises. If the blob proves fiddly, drop it — the injected
   seam is the shipped test.
-- Results-file guarantee: set `$SPINE_GATE_RESULTS` to a path in a temp dir,
+- Results-file guarantee: set `$MAIPIPE_RESULTS` to a path in a temp dir,
   trigger the injected panic, assert exit 2 **and** that no file was created.
 - D43: a temporary check class registered in a test that panics, driven through
   `Run`, asserting exit 2 and a message rather than a crash.
@@ -173,7 +178,7 @@ panics, so no recover sits on that path at all.
 - A `spine doctor` toolchain-skew advisory. Filed as **I108**; the version-string
   proxy is tolerable there only because an advisory cannot fail a lane, and that
   is its own design question.
-- Clearing a stale `$SPINE_GATE_RESULTS` file left by a previous run. The
+- Clearing a stale `$MAIPIPE_RESULTS` file left by a previous run. The
   promise is "writes nothing", not "the path is clean".
 - Making the importer itself version-tolerant, or taking a
   `golang.org/x/tools` dependency to get one. ADR 0001 stands.

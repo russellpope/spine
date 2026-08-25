@@ -80,8 +80,14 @@ never reaches `emit`.
 - [ ] **Step 2: Verify red.**
 - [ ] **Step 3: Implement the minimum.**
 - [ ] **Step 4: Verify green**, then `gofmt`.
-- [ ] **Step 5: Negative control.** Force the probe to error unconditionally;
-  the degrade test must pass and the both-toolchains test must fail. Restore.
+- [ ] **Step 5: Negative control.** Force `goVersionOnPATH` to error; the degrade
+  test must pass and the both-toolchains test must fail. Restore.
+  *(Corrected 2026-08-25 by the verify gate. As originally written this step said
+  "force the probe to error unconditionally", which reads as mutating
+  `runGoVersionCommand` — the exact seam both tests stub. Observed: both tests
+  stay green, exit 0, so the control cannot discriminate. Mutating
+  `goVersionOnPATH` one level down is red: `NamesPathToolchain` fails with
+  "mismatch error does not name PATH toolchain" while the degrade test passes.)*
 
 ### Task 3: blanket recover at the Run boundary
 
@@ -94,10 +100,17 @@ never reaches `emit`.
   takes the existing stderr-and-return-2 branch (D43).
 - Consumes: D41's internal-error message shape. `Run` does not classify.
 
-- [ ] **Step 1: Failing tests.** A check class registered for the test that
-  panics, driven through `Run` for both the `plain` and the rich `reportChecks`
-  paths: exit 2, a message on stderr carrying the panic value and a stack, no
-  crash.
+- [ ] **Step 1: Failing tests.** A panicking check function driven through `Run`
+  for both the `plain` and the rich `reportChecks` paths: exit 2, a message on
+  stderr carrying the panic value and a stack, no crash.
+  *(Corrected 2026-08-25 by the verify gate. As originally written this said "a
+  check class registered for the test", which cannot work: `Run` refuses any
+  check outside the pin's frozen class list (`gate.go`), and I098's
+  `TestFrozenClassLists` pins the registries to that union — a new test-only
+  class exits 2 before its panic can run. Substituting the function behind an
+  existing name (`checks["tskip"]`, `reportChecks["mutate"]`) with `t.Cleanup`
+  restore is the minimal consistent implementation. Safe while `internal/gate`
+  has no `t.Parallel`; see the note in `run_panic_test.go`.)*
 - [ ] **Step 2: Verify red.**
 - [ ] **Step 3: Implement the minimum.** Wrap both `fn(abs, cfg)` and
   `rfn(abs, cfg)`.
@@ -111,12 +124,12 @@ never reaches `emit`.
 - Modify: `internal/gate/run_panic_test.go`
 
 **Interfaces:**
-- Consumes: `ResultsEnvVar` / `$SPINE_GATE_RESULTS` and the `emit` path at
+- Consumes: `ResultsEnvVar` / `$MAIPIPE_RESULTS` and the `emit` path at
   `internal/gate/results.go:53`.
 - Produces: an explicit assertion of a guarantee that currently holds only as a
   consequence of statement order in `Run`.
 
-- [ ] **Step 1: Failing test.** Set `$SPINE_GATE_RESULTS` to a path inside a
+- [ ] **Step 1: Failing test.** Set `$MAIPIPE_RESULTS` to a path inside a
   temp dir, trigger a panic through `Run`, assert exit 2 **and** that no file
   exists at that path.
 - [ ] **Step 2: Verify red** against a build where Task 3 is reverted (the crash
@@ -145,9 +158,18 @@ never reaches `emit`.
   does not, the recover has captured a path it must not.
 - [ ] **Step 3:** No implementation expected.
 - [ ] **Step 4: Verify green**, then `gofmt`.
-- [ ] **Step 5: Negative control.** Widen D39's classifier to match everything;
-  this test must fail, proving the classifier is what keeps the two apart.
-  Restore.
+- [ ] **Step 5: Negative control.** Introduce a temporary panic at the `p.Error`
+  return in `loadModule`; this test must fail, proving the recover does not
+  intercept the genuine-failure path. Restore.
+  *(Corrected 2026-08-25 by the review gate. As originally written this step said
+  "widen D39's classifier to match everything", which cannot discriminate: a
+  genuine type-check failure returns via `p.Error` from `go list -e` before any
+  importer runs, so no panic fires and the classifier is never consulted —
+  exactly what D44 already states ("a module that does not type-check returns an
+  error today and never panics, so no recover sits on that path at all").
+  Observed: widening leaves this test PASS/exit 0, and instead reddens Task 1's
+  `TestLoadModuleReturnsInternalErrorForUnrelatedPanic` — so the widen-classifier
+  mutation is Task 1's control, not this one's. The substitute is observed red.)*
 
 ### Task 6: optional end-to-end confirmation of the classifier substring
 
