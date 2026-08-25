@@ -6,6 +6,12 @@
     "fallback": "high"
   },
   "tierDefaultEffortByFlavor": {
+    "openweights": {
+      "primary": "high",
+      "routine": "high",
+      "mechanical": "high",
+      "fallback": "high"
+    },
     "pi": {
       "primary": "xhigh",
       "routine": "medium",
@@ -61,6 +67,28 @@
         "id": "gpt-5.6-terra",
         "effort": "xhigh",
         "aliases": ["gpt-5.6-terra", "terra"],
+        "history": []
+      }
+    },
+    "openweights": {
+      "primary": {
+        "id": "FW-Kimi-K3",
+        "aliases": ["FW-Kimi-K3", "kimi-k3"],
+        "history": []
+      },
+      "routine": {
+        "id": "DeepSeek-V4-Pro",
+        "aliases": ["DeepSeek-V4-Pro", "deepseek-v4-pro"],
+        "history": []
+      },
+      "mechanical": {
+        "id": "FW-GLM-5.2",
+        "aliases": ["FW-GLM-5.2", "glm-5.2"],
+        "history": []
+      },
+      "fallback": {
+        "id": "FW-Kimi-K3",
+        "aliases": ["FW-Kimi-K3", "kimi-k3"],
         "history": []
       }
     },

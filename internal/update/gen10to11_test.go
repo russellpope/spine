@@ -78,6 +78,7 @@ func TestGen10To11PristineUpdatesCleanly(t *testing.T) {
 				t.Errorf("%s: want Pending, got %v", r.Path, r.State)
 				continue
 			}
+			isRenderOnly := mirrorRenderDiff(r.Diff)
 			for _, line := range strings.Split(r.Diff, "\n") {
 				if !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "-") {
 					continue
@@ -92,6 +93,9 @@ func TestGen10To11PristineUpdatesCleanly(t *testing.T) {
 					continue
 				}
 				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh; see modelrouting_test.go
+					continue
+				}
+				if isRenderOnly(line) { // mirror reflow or a newly shipped (flavor, tier); see mirrorRenderDiff
 					continue
 				}
 				t.Errorf("%s: unexpected changed line %q — 10→11 must be stamp plus declared gen-11 content only", r.Path, line)

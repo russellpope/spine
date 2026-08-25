@@ -107,10 +107,10 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 	if len(wf.ModelOverrides) != 0 {
 		t.Errorf("pristine fixture reported overrides: %+v", wf.ModelOverrides)
 	}
-	if !strings.Contains(wf.Diff, "claude.fallback:   claude-opus-5") {
+	if !hasRow(wf.Diff, "claude.fallback", "claude-opus-5") {
 		t.Errorf("diff does not carry the refreshed value:\n%s", wf.Diff)
 	}
-	if !strings.Contains(wf.Diff, "claude.routine:    claude-opus-5 @ low") {
+	if !hasRow(wf.Diff, "claude.routine", "claude-opus-5 @ low") {
 		t.Errorf("diff does not carry the refreshed routine value:\n%s", wf.Diff)
 	}
 
@@ -121,7 +121,7 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "claude.fallback:   claude-opus-5") {
+	if !hasRow(string(got), "claude.fallback", "claude-opus-5") {
 		t.Error("written file does not carry the current fallback default")
 	}
 	if strings.Contains(string(got), "claude-opus-4-8") {
@@ -165,17 +165,17 @@ func TestOverrideBareFallbackPreservedAndReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "claude.fallback: claude-opus-3-pinned") {
+	if !hasRow(string(got), "claude.fallback", "claude-opus-3-pinned") {
 		t.Error("deliberate override did not survive the update")
 	}
-	if strings.Contains(string(got), "claude.fallback:   claude-opus-5") {
+	if hasRow(string(got), "claude.fallback", "claude-opus-5") {
 		t.Error("fallback override was clobbered by the current default")
 	}
 }
 
 func TestCurrentMirrorStaleRoutineRefreshesAndIsItemized(t *testing.T) {
 	dir := stageCurrentRepo(t, func(content string) string {
-		return mustReplace(t, content, "claude.routine:    claude-opus-5 @ low", "claude.routine:    claude-sonnet-5")
+		return replaceRow(t, content, "claude.routine", "claude-sonnet-5")
 	})
 	reports, err := Run(Options{Dir: dir})
 	if err != nil {
@@ -198,14 +198,14 @@ func TestCurrentMirrorStaleRoutineRefreshesAndIsItemized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "claude.routine:    claude-opus-5 @ low") {
+	if !hasRow(string(got), "claude.routine", "claude-opus-5 @ low") {
 		t.Error("written current mirror did not refresh Claude routine to Opus low")
 	}
 }
 
 func TestCurrentMirrorRoutineOverrideIsPreserved(t *testing.T) {
 	dir := stageCurrentRepo(t, func(content string) string {
-		return mustReplace(t, content, "claude.routine:    claude-opus-5 @ low", "claude.routine:    local-llama-70b")
+		return replaceRow(t, content, "claude.routine", "local-llama-70b")
 	})
 	reports, err := Run(Options{Dir: dir, Write: true})
 	if err != nil {
@@ -222,7 +222,7 @@ func TestCurrentMirrorRoutineOverrideIsPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(after), "claude.routine: local-llama-70b") {
+	if !hasRow(string(after), "claude.routine", "local-llama-70b") {
 		t.Error("write update did not preserve the current-mirror routine override")
 	}
 	reports, err = Run(Options{Dir: dir})
@@ -396,9 +396,25 @@ func TestGen10WithoutPiRowsIsUnaffected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// I110: compare mirror rows with their column padding collapsed. Adding a
+	// flavor whose name is longer than any existing one repads the whole block,
+	// so an existing row survives with its content intact but not byte-for-byte.
+	// What this guard is really asserting — that nothing about the repo's own
+	// rows is refreshed, overridden or reported — is checked above and stays
+	// strict; every non-mirror line is still compared verbatim.
+	afterRows := map[string]bool{}
+	for _, line := range strings.Split(string(after), "\n") {
+		afterRows[normalizeRow(line)] = true
+	}
 	for _, line := range strings.Split(before, "\n") {
 		if strings.HasPrefix(line, "template_version:") {
 			continue // the stamp moves on every generation bump, by design
+		}
+		if _, isMirror := mirrorRowKey(line); isMirror {
+			if !afterRows[normalizeRow(line)] {
+				t.Errorf("pre-existing mirror row lost or its value rewritten: %q", line)
+			}
+			continue
 		}
 		if !strings.Contains(string(after), line) {
 			t.Errorf("pre-existing line lost or rewritten: %q", line)

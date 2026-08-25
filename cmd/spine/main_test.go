@@ -217,6 +217,25 @@ func TestUpdateDryRunThenWrite(t *testing.T) {
 // I035: an inherited stale model default is itemized in the update plan —
 // named with old value, new value, and inherited provenance, distinct from
 // the content diff — and a preserved override is reported as such.
+// pinRow rewrites the value of a model_routing mirror row, matching the row by
+// its flavor.tier key rather than by a padded literal. The mirror pads its key
+// column to the longest key in the table, so a literal search breaks silently
+// whenever a flavor with a longer name is added (I110).
+func pinRow(t *testing.T, content, key, value string) string {
+	t.Helper()
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == key+":" {
+			indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+			lines[i] = indent + key + ": " + value
+			return strings.Join(lines, "\n")
+		}
+	}
+	t.Fatalf("no model_routing row for %q in scaffolded WORKFLOW.md:\n%s", key, content)
+	return ""
+}
+
 func TestUpdateItemizesModelRefreshAndOverride(t *testing.T) {
 	dir := t.TempDir()
 	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
@@ -229,13 +248,12 @@ func TestUpdateItemizesModelRefreshAndOverride(t *testing.T) {
 	}
 	// Regress the claude fallback to the previous shipped default (inherited)
 	// and pin the claude routine to a value no default ever shipped
-	// (override) — value-only replacements, so the dotted mirror rows'
-	// alignment padding (I036) is irrelevant.
-	content := strings.Replace(string(raw), "claude.fallback:   claude-opus-5", "claude.fallback:   claude-opus-4-8", 1)
-	content = strings.Replace(content, "claude.routine:    claude-opus-5 @ low", "claude.routine:    local-llama-70b", 1)
-	if content == string(raw) {
-		t.Fatal("could not stage fallback/routine values in scaffolded WORKFLOW.md")
-	}
+	// (override). These are value-only replacements — pinRow matches the row
+	// by key so the mirror's alignment padding (I036) really is irrelevant,
+	// which the old literal search claimed but did not deliver: I110's longer
+	// flavor name repadded the column and the search silently found nothing.
+	content := pinRow(t, string(raw), "claude.fallback", "claude-opus-4-8")
+	content = pinRow(t, content, "claude.routine", "local-llama-70b")
 	if err := os.WriteFile(wfPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -32,6 +32,19 @@ func TestResolve_NoRepoContext_ReturnsDefaultsForEveryFlavorTier(t *testing.T) {
 			"mechanical": {"gpt-5.6-luna", "low"},
 			"fallback":   {"gpt-5.6-terra", "xhigh"},
 		},
+		// I110. Every tier resolves at effort "high", including routine and
+		// mechanical — the two the global tierDefaultEffort would otherwise
+		// give "medium" and "low". That is what tierDefaultEffortByFlavor is
+		// for, and asserting those two specifically is the point of this
+		// block. fallback deliberately shares primary's id: the flavor exists
+		// to measure open-weights models, so a refusal re-run must not
+		// silently leave open weights.
+		"openweights": {
+			"primary":    {"FW-Kimi-K3", "high"},
+			"routine":    {"DeepSeek-V4-Pro", "high"},
+			"mechanical": {"FW-GLM-5.2", "high"},
+			"fallback":   {"FW-Kimi-K3", "high"},
+		},
 	}
 	for _, repoDir := range []string{"", "/nonexistent/not-a-repo"} {
 		for flavor, tiers := range want {
@@ -201,12 +214,34 @@ func TestResolve_UnknownTier_Rejected(t *testing.T) {
 	}
 }
 
+// I110. A repo may pin different open models without waiting on a spine
+// release, exactly as it may for any other flavor. Guards that the new flavor
+// went in as data and did not acquire a special resolution path.
+func TestResolve_OpenweightsRowOverriddenByRepo(t *testing.T) {
+	dir := writeWorkflow(t, "model_routing:\n  openweights.routine:    some-other-open-model\n")
+	entry, err := Resolve(dir, "openweights", "routine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.ID != "some-other-open-model" || entry.Provenance != Override {
+		t.Errorf("got %+v, want id=some-other-open-model provenance=override", entry)
+	}
+	// The override is scoped: its sibling tiers still resolve to the table.
+	sibling, err := Resolve(dir, "openweights", "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sibling.ID != "FW-Kimi-K3" || sibling.Provenance != Default {
+		t.Errorf("sibling tier = %+v, want id=FW-Kimi-K3 provenance=default", sibling)
+	}
+}
+
 // AC: flavors are data-driven — Flavors() reflects the embedded table's
 // keys rather than a hardcoded enum, so a third flavor added to
 // models/defaults.json needs no change here.
 func TestFlavors_DataDriven(t *testing.T) {
 	flavors := Flavors()
-	want := []string{"claude", "codex", "pi"}
+	want := []string{"claude", "codex", "openweights", "pi"}
 	if len(flavors) != len(want) {
 		t.Fatalf("Flavors() = %v, want %v", flavors, want)
 	}
@@ -564,7 +599,19 @@ func TestMirrorRows_CoverEveryFlavorTierAndRoundTrip(t *testing.T) {
 	if want := len(Flavors()) * len(Tiers); len(rows) != want {
 		t.Fatalf("MirrorRows() = %d rows, want %d (every flavor x tier)", len(rows), want)
 	}
-	if !strings.Contains(strings.Join(rows, "\n"), "claude.routine:    claude-opus-5 @ low") {
+	// Assert the row's content, not its column alignment: the key column is
+	// padded to the longest flavor.tier key, so adding a flavor with a longer
+	// name reflows every row (I110's "openweights" did exactly that). The
+	// alignment itself is covered by the round-trip below, which is what
+	// actually has to hold.
+	var foundClaudeRoutine bool
+	for _, row := range rows {
+		if strings.Join(strings.Fields(row), " ") == "claude.routine: claude-opus-5 @ low" {
+			foundClaudeRoutine = true
+			break
+		}
+	}
+	if !foundClaudeRoutine {
 		t.Errorf("MirrorRows() = %q, want explicit low-effort Claude routine row", rows)
 	}
 	content := "model_routing:\n"

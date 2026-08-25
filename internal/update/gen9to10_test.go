@@ -3,6 +3,7 @@ package update
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -91,6 +92,109 @@ func mustReplace(t *testing.T, content, old, new string) string {
 		t.Fatalf("fixture line %q not found to replace", old)
 	}
 	return out
+}
+
+// The model_routing mirror pads its key column to the longest flavor.tier key
+// in the table, so adding a flavor with a longer name reflows every row —
+// I110's "openweights" did exactly that and broke six tests that had the old
+// column widths baked into string literals. The two helpers below match and
+// rewrite rows by content instead, so the next flavor cannot repeat it.
+
+// replaceRow rewrites the value of the model_routing row for key, whatever
+// padding the fixture happens to carry. The single space it writes is a legal
+// override form the reader already accepts.
+func replaceRow(t *testing.T, content, key, value string) string {
+	t.Helper()
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == key+":" {
+			indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+			lines[i] = indent + key + ": " + value
+			return strings.Join(lines, "\n")
+		}
+	}
+	t.Fatalf("no model_routing row for %q to replace in:\n%s", key, content)
+	return ""
+}
+
+// hasRow reports whether content carries a model_routing row for key with
+// exactly value, ignoring column padding. content may be a file body or a
+// unified diff, so a leading +/- marker is stripped before matching.
+func hasRow(content, key, value string) bool {
+	want := key + ": " + value
+	for _, line := range strings.Split(content, "\n") {
+		if normalizeRow(line) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeRow collapses a line's column padding and drops any unified-diff
+// marker, so two renderings of the same row compare equal.
+func normalizeRow(line string) string {
+	body := strings.TrimLeft(strings.TrimSpace(line), "+-")
+	return strings.Join(strings.Fields(body), " ")
+}
+
+// mirrorRowKey returns the flavor.tier key of a model_routing mirror row
+// carried in a diff line. It insists on a known flavor and a known tier so an
+// unrelated dotted key cannot be waved through as mirror rendering.
+func mirrorRowKey(line string) (string, bool) {
+	fields := strings.Fields(strings.TrimLeft(line, "+-"))
+	if len(fields) < 2 || !strings.HasSuffix(fields[0], ":") {
+		return "", false
+	}
+	key := strings.TrimSuffix(fields[0], ":")
+	flavor, tier, ok := strings.Cut(key, ".")
+	if !ok {
+		return "", false
+	}
+	if !slices.Contains(model.Flavors(), flavor) || !slices.Contains(model.Tiers, tier) {
+		return "", false
+	}
+	return key, true
+}
+
+// mirrorRenderDiff classifies the mirror rows in a diff into the two changes
+// that are pure rendering rather than content (I110): rows whose body is
+// unchanged once padding is collapsed — the reflow every existing row
+// undergoes when a longer flavor name widens the key column — and rows for a
+// key that the diff only adds, which is a new (flavor, tier) the table now
+// ships (design D8). A row whose value genuinely changed appears on both sides
+// with different bodies and is deliberately left unsanctioned, so it still has
+// to be an itemized model refresh.
+func mirrorRenderDiff(diff string) func(string) bool {
+	removedBody, addedBody := map[string]bool{}, map[string]bool{}
+	removedKey, addedKey := map[string]bool{}, map[string]bool{}
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") {
+			continue
+		}
+		key, ok := mirrorRowKey(line)
+		if !ok {
+			continue
+		}
+		body := strings.Join(strings.Fields(strings.TrimLeft(line, "+-")), " ")
+		switch {
+		case strings.HasPrefix(line, "-"):
+			removedBody[body], removedKey[key] = true, true
+		case strings.HasPrefix(line, "+"):
+			addedBody[body], addedKey[key] = true, true
+		}
+	}
+	return func(line string) bool {
+		key, ok := mirrorRowKey(line)
+		if !ok {
+			return false
+		}
+		body := strings.Join(strings.Fields(strings.TrimLeft(line, "+-")), " ")
+		if removedBody[body] && addedBody[body] {
+			return true // reflow: same content, new column width
+		}
+		return strings.HasPrefix(line, "+") && !removedKey[key]
+	}
 }
 
 // AC (I036): a captured real generation-9 repo upgrades with only sanctioned

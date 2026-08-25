@@ -6,8 +6,25 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ## Unreleased
 
+### Added
+
+- **An `openweights` model flavor.** `spine model openweights <primary|routine|mechanical|fallback>`
+  resolves to `FW-Kimi-K3`, `DeepSeek-V4-Pro`, `FW-GLM-5.2` and `FW-Kimi-K3`, every
+  tier at effort `high` — `routine` and `mechanical` included, which the global tier
+  defaults would otherwise give `medium` and `low`. `fallback` deliberately shares
+  `primary`'s model: the flavor exists to measure open-weights models, so a refusal
+  re-run must not silently leave open weights. Repos override these rows in
+  `WORKFLOW.md` like any other flavor's. Resolution for `claude`, `codex` and `pi` is
+  unchanged. (I110)
+
 ### Changed
 
+- **Every repo's `model_routing` block reflows on the next `spine update`.** The mirror
+  pads its key column to the longest `flavor.tier` key, and `openweights.mechanical:`
+  is longer than anything that came before, so all pre-existing rows gain padding.
+  This is whitespace only — no id, effort or provenance changes, and no row is
+  refreshed, overridden or reported — but it does mean one unavoidable diff in a file
+  most repos keep checked in. (I110)
 - **A panic inside a gate check is now a misconfiguration exit, not a crash.**
   `spine gate` recovers panics at two seams and returns them through `gate.Run`'s
   documented contract — message on stderr, exit 2, no results document — instead of
