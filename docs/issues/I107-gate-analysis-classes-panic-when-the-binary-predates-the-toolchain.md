@@ -2,7 +2,7 @@
 id: I107
 title: "gate analysis classes panic with a raw stack trace when the spine binary predates the Go toolchain"
 severity: med
-status: in-progress
+status: fixed
 affects: [I084]
 blocked-by: []
 execution-mode: subagent-driven
@@ -87,6 +87,40 @@ Design: `docs/specs/2026-08-24-i107-gate-panic-misconfiguration-design.md`
 (D38–D44). Scope grew by one item: a blanket recover at `gate.Run` so the exit
 contract holds for every check class, not only the two named here. The `spine
 doctor` toolchain-skew advisory is split out as **I108**.
+
+## Resolution
+
+Fixed 2026-08-25, merged to `main` at `612980b` (`--no-ff`). See ADR 0021 and
+`docs/specs/2026-08-24-i107-gate-panic-misconfiguration-design.md` (D38–D44).
+
+`loadModule` recovers and classifies; `gate.Run` wraps every check invocation in
+a blanket recover of the same error-returning shape. Both feed the existing
+`runErr != nil` branch, so the 0/1/2 contract and the "no results document"
+guarantee are now real rather than consequences of where the process happened to
+die. The `runtime.Version()` preflight the ticket proposed as "optionally cheaper
+and stronger" was **rejected on evidence**, not deferred — the panic keys on the
+export-data format version, which does not move every Go release, so the
+comparison would refuse working setups.
+
+Verified against the live artifact after `make install` rebuilt `~/bin/spine` at
+the merge commit, exit codes read unpiped:
+
+- `spine gate go@1 dead-code-callgraph --dir .` → EXIT=0, `no findings`
+- `spine gate go@1 deferred-cleanup-errcheck --dir .` → EXIT=0, `no findings`
+- a genuinely broken module → EXIT=2, message unchanged
+  (`--dir … does not type-check: example.com/i107live: ./broken.go:3:9: undefined:
+  undefinedIdentifier`), and no file written at `$MAIPIPE_RESULTS`
+
+Reviewed independently before merge rather than by the building team: a cold
+spec-review against the PRD (0 missing, 0 scope creep) and a fresh-context verify
+that re-ran the negative controls from scratch instead of accepting the team's
+claims. That re-run found the team's Task 2 control inert as prescribed — both
+target tests stub the very seam it mutates — and reddened it one level down at
+`goVersionOnPATH`. The team's one declared deviation (substituting Task 5's
+control) was adjudicated first and **upheld**: the plan's own control cannot
+discriminate, because a genuine type-check failure returns via `p.Error` before
+any importer runs, exactly as D44 already stated. Four spec defects found this
+way were corrected at `39a6972`.
 
 ## Related
 

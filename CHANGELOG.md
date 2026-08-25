@@ -8,6 +8,23 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Changed
 
+- **A panic inside a gate check is now a misconfiguration exit, not a crash.**
+  `spine gate` recovers panics at two seams and returns them through `gate.Run`'s
+  documented contract — message on stderr, exit 2, no results document — instead of
+  letting the Go runtime kill the process. The exit code an operator sees was
+  already 2, but only by accident: it was the runtime's status for an unrecovered
+  panic, and the missing `$MAIPIPE_RESULTS` file was the same accident. Both are now
+  real guarantees, for every check class rather than the two that prompted this.
+  Two new message classes, deliberately distinguishable from the existing
+  `--dir %s does not type-check` on their first line: an export-data mismatch names
+  the verbatim panic text, the toolchain the binary was built with, the toolchain on
+  PATH, and `make install`; anything else is an internal error carrying the panic
+  value and stack verbatim, and never suggests a rebuild. This matters after a Go
+  upgrade — `dead-code-callgraph` and `deferred-cleanup-errcheck` would fail a lane
+  with a `gcimporter` stack trace on a commit that had nothing to do with it. A
+  module that genuinely fails to type-check is unchanged. No toolchain version
+  comparison is performed anywhere in the gate; detection keys on the importer
+  actually failing. (I107, ADR 0021)
 - **`spine doctor` exit code on unstamped fleet repos.** New check D12 warns when a
   repo carrying `docs/issues/` lacks a maikanban repository slug (or has a malformed
   one). Warnings affect the exit code, so `spine doctor` now exits non-zero on such
