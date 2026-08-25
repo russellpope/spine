@@ -5,11 +5,11 @@ severity: med
 status: open
 affects: [I107]
 blocked-by: []
-execution-mode:
-tier:
+execution-mode: subagent-driven
+tier: routine
 effort:
 risk-triggers: []
-review-tier:
+review-tier: primary
 ---
 
 ## Problem

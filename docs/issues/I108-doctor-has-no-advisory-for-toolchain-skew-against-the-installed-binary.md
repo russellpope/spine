@@ -5,11 +5,11 @@ severity: low
 status: open
 affects: [I107]
 blocked-by: [I107]
-execution-mode:
-tier:
+execution-mode: subagent-driven
+tier: routine
 effort:
-risk-triggers: []
-review-tier:
+risk-triggers: [plan-flagged-ambiguity]
+review-tier: primary
 ---
 
 ## Problem
