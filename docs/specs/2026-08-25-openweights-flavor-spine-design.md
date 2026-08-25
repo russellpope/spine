@@ -107,7 +107,7 @@ This document deliberately contains **no line numbers**. Between the grill that 
 
 A good test here asserts an externally observable verdict — what `spine model` prints, or what verdict the audit reaches for a given transcript and ticket set — never the internal shape of the derivation. Prior art for every case below already exists in the audit and model test suites.
 
-**Change 1** is largely covered on arrival: an existing model test iterates every flavor and tier and asserts each resolves to its default, so a new flavor is picked up automatically. Add explicitly:
+**Change 1** is NOT covered on arrival. *(Corrected 2026-08-25 during I110's review gate. This paragraph originally claimed "an existing model test iterates every flavor and tier and asserts each resolves to its default, so a new flavor is picked up automatically." That is false: `TestResolve_NoRepoContext_ReturnsDefaultsForEveryFlavorTier` ranges over a hardcoded `want` map, not `Flavors()`. A flavor added without hand-writing its expectations there gets zero resolution assertions — the only test that would go red is `TestFlavors_DataDriven`, which asserts the flavor **list**, not any id or effort. `pi` demonstrates the gap: it ships in the table and has no entry in that map. Hardening it is carried as a named deliverable on I111.)* Add explicitly:
 
 1. Each `openweights` tier resolves to the id in the table above, and its effort resolves to `high` — with `routine` and `mechanical` called out, since those are the two the global defaults would otherwise give `medium` and `low`.
 2. A repo-level `WORKFLOW.md` override of an `openweights` row is honoured, matching the existing override test for other flavors.

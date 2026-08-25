@@ -101,6 +101,26 @@ codex evidence is judged per flavor). Model the new tests on those.
 Run the full suite, not the targeted tests — the change touches a file with
 substantial recent churn.
 
+### Two guards inherited from I110's review gate
+
+Both were surfaced by I110's cold review, are out of scope for a data-only
+change, and land here because this ticket is where they become load-bearing.
+
+7. **Enforce id/alias disjointness across flavors.** Story 5 says the ids
+   "stay disjoint", and this ticket's whole derivation rests on it — the spec
+   states outright that if a future edit points any `openweights` tier at a
+   `claude-*` id, the core assumption breaks and the tiebreaker path becomes
+   load-bearing. Disjointness was verified to hold as shipped (a scan of every
+   id, alias and history entry across all four flavors found no collision) but
+   **nothing fails if someone breaks it.** Add a table-level test that scans
+   ids + aliases + history across every flavor and fails on any cross-flavor
+   collision. This is the guard that keeps the unambiguous case unambiguous.
+8. **Make the per-flavor resolution test fail on an unasserted flavor.**
+   `TestResolve_NoRepoContext_ReturnsDefaultsForEveryFlavorTier` ranges over a
+   hardcoded `want` map, so a flavor can ship with no resolution assertions at
+   all — `pi` is in that state today. Drive the check from `Flavors()` and fail
+   when the table ships a flavor the map does not cover, then backfill `pi`.
+
 ## ADR
 
 Record the derivation change as an ADR at **0022 or higher** (0021 is taken by
