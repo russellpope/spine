@@ -2,14 +2,14 @@
 id: I107
 title: "gate analysis classes panic with a raw stack trace when the spine binary predates the Go toolchain"
 severity: med
-status: open
+status: in-progress
 affects: [I084]
 blocked-by: []
-execution-mode:
-tier:
+execution-mode: subagent-driven
+tier: routine
 effort:
 risk-triggers: []
-review-tier:
+review-tier: primary
 ---
 
 ## Problem
@@ -65,6 +65,28 @@ the panic path is never reached in the common case.
 
 Constraint: this must not swallow genuine type-check failures in the audited
 module. A module that legitimately fails to type-check keeps today's behavior.
+
+## Grilled 2026-08-24 — two corrections to the above
+
+**"Exit 2 is right" is half wrong.** Today's 2 is the Go runtime's exit status
+for an unrecovered panic, not `gate.Run`'s misconfiguration code — `Run` never
+finishes. The absence of a results document is the same accident: the process
+dies before `emit` writes `$SPINE_GATE_RESULTS`. Both guarantees are
+coincidences of where the process happens to die. The fix does not preserve
+them; it makes them real.
+
+**The "optionally cheaper and stronger" preflight is rejected**, not deferred.
+The panic is keyed to the export-data *format* version, which does not change on
+every Go release, so a 1.26.7-built binary reads a 1.26.8-populated cache fine.
+A `runtime.Version()` comparison would refuse that working configuration and
+turn a healthy lane red — the same false accusation this ticket exists to
+remove, moved one layer earlier and made unconditional. Detection keys on the
+importer actually failing. Recorded on evidence in ADR 0021.
+
+Design: `docs/specs/2026-08-24-i107-gate-panic-misconfiguration-design.md`
+(D38–D44). Scope grew by one item: a blanket recover at `gate.Run` so the exit
+contract holds for every check class, not only the two named here. The `spine
+doctor` toolchain-skew advisory is split out as **I108**.
 
 ## Related
 
