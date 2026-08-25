@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strconv"
@@ -305,11 +306,25 @@ func Run(pack, check, dir string, stdout, stderr io.Writer, cfg Config) int {
 	if plain {
 		var findings []Finding
 		cfg.pack = resolved
-		findings, runErr = fn(abs, cfg)
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					runErr = fmt.Errorf("internal error running gate %s %s: %v\n%s", pack, check, recovered, debug.Stack())
+				}
+			}()
+			findings, runErr = fn(abs, cfg)
+		}()
 		rep = Report{Findings: findings}
 	} else {
 		cfg.pack = resolved
-		rep, runErr = rfn(abs, cfg)
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					runErr = fmt.Errorf("internal error running gate %s %s: %v\n%s", pack, check, recovered, debug.Stack())
+				}
+			}()
+			rep, runErr = rfn(abs, cfg)
+		}()
 	}
 	if runErr != nil {
 		fmt.Fprintf(stderr, "gate %s %s: %v\n", pack, check, runErr)
