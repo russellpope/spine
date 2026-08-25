@@ -1,7 +1,9 @@
 package gate
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,6 +29,20 @@ func loaderFixture(t *testing.T) string {
 	for name, contents := range map[string]string{
 		"go.mod":     "module example.com/fixture\n\ngo 1.26\n",
 		"fixture.go": "package fixture\n\nimport \"fmt\"\n\nvar _ = fmt.Sprintf\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func brokenLoaderFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, contents := range map[string]string{
+		"go.mod":    "module example.com/i107broken\n\ngo 1.26\n",
+		"broken.go": "package i107broken\n\nvar _ = undefinedIdentifier\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644); err != nil {
 			t.Fatal(err)
@@ -133,5 +149,22 @@ func TestLoadModuleMismatchErrorOmitsFailedPathToolchainProbe(t *testing.T) {
 		if strings.Contains(message, unwanted) {
 			t.Errorf("mismatch error contains %q: %q", unwanted, message)
 		}
+	}
+}
+
+func TestGatePreservesGenuineTypeCheckFailure(t *testing.T) {
+	dir := brokenLoaderFixture(t)
+	want := fmt.Sprintf("--dir %s does not type-check: example.com/i107broken: ./broken.go:3:9: undefined: undefinedIdentifier\n", dir)
+
+	for _, check := range []string{"dead-code-callgraph", "deferred-cleanup-errcheck"} {
+		t.Run(check, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if got := Run("go@1", check, dir, &stdout, &stderr, EnvConfig()); got != 2 {
+				t.Fatalf("Run exit = %d, want 2; stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+			}
+			if got := stderr.String(); got != fmt.Sprintf("gate go@1 %s: %s", check, want) {
+				t.Errorf("Run stderr = %q, want %q", got, want)
+			}
+		})
 	}
 }
