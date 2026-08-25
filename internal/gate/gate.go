@@ -259,6 +259,14 @@ func CheckNames() []string {
 	return names
 }
 
+// recoverRunPanic turns a check panic into Run's internal-error path. It must
+// be deferred directly by the invocation scope for recover to observe a panic.
+func recoverRunPanic(pack, check string, runErr *error) {
+	if recovered := recover(); recovered != nil {
+		*runErr = fmt.Errorf("internal error running gate %s %s: %v\n%s", pack, check, recovered, debug.Stack())
+	}
+}
+
 // Run executes one check class of one pack against dir and reports through
 // the results contract. It is the single owner of the exit-code contract:
 //
@@ -307,22 +315,14 @@ func Run(pack, check, dir string, stdout, stderr io.Writer, cfg Config) int {
 		var findings []Finding
 		cfg.pack = resolved
 		func() {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					runErr = fmt.Errorf("internal error running gate %s %s: %v\n%s", pack, check, recovered, debug.Stack())
-				}
-			}()
+			defer recoverRunPanic(pack, check, &runErr)
 			findings, runErr = fn(abs, cfg)
 		}()
 		rep = Report{Findings: findings}
 	} else {
 		cfg.pack = resolved
 		func() {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					runErr = fmt.Errorf("internal error running gate %s %s: %v\n%s", pack, check, recovered, debug.Stack())
-				}
-			}()
+			defer recoverRunPanic(pack, check, &runErr)
 			rep, runErr = rfn(abs, cfg)
 		}()
 	}
