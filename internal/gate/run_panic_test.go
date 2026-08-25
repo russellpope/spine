@@ -8,6 +8,14 @@ import (
 	"testing"
 )
 
+// The tests below swap the function behind an existing check name rather than
+// registering a test-only class: Run refuses any check outside the pin's frozen
+// class list, and I098's TestFrozenClassLists pins the registries to that
+// union, so a new name would exit 2 before its panic could run. The swap is an
+// unsynchronized write to a package-level map, safe only because nothing in
+// internal/gate calls t.Parallel. Do not add t.Parallel to this package without
+// first giving these tests a synchronized seam.
+
 // TestRunRecoversPlainCheckPanics protects Run's exit-code contract: a future
 // plain check that panics must remain an internal error rather than killing the
 // gate process before it can report an outcome.
