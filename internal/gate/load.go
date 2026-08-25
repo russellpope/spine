@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 )
@@ -51,6 +53,8 @@ type loaded struct {
 	fset  *token.FileSet
 	units []*unit
 }
+
+var newLoaderImporter = importer.ForCompiler
 
 // goListPackage is the subset of `go list -json` output the loader reads.
 type goListPackage struct {
@@ -98,7 +102,20 @@ func (p goListPackage) isMainModule() bool {
 // dir. One `go list` call serves both purposes — the module's own packages
 // and every dependency's export data — because each check class is its own
 // pipeline stage, so every extra subprocess is paid again per enabled class.
-func loadModule(dir string) (*loaded, error) {
+func loadModule(dir string) (out *loaded, err error) {
+	packageUnderCheck := dir
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			value := fmt.Sprint(recovered)
+			if strings.Contains(value, "export data version") {
+				out = nil
+				err = fmt.Errorf("spine could not decode export data: %s; binary toolchain: %s; rebuild spine with make install", value, runtime.Version())
+				return
+			}
+			out = nil
+			err = fmt.Errorf("spine internal error while loading package %s: panic: %s\n%s", packageUnderCheck, value, debug.Stack())
+		}
+	}()
 	pkgs, err := goList(dir)
 	if err != nil {
 		return nil, err
@@ -136,15 +153,16 @@ func loadModule(dir string) (*loaded, error) {
 		}
 	}
 	fset := token.NewFileSet()
-	imp := importer.ForCompiler(fset, "gc", func(path string) (io.ReadCloser, error) {
+	imp := newLoaderImporter(fset, "gc", func(path string) (io.ReadCloser, error) {
 		file, ok := exports[path]
 		if !ok {
 			return nil, fmt.Errorf("no export data for %q", path)
 		}
 		return os.Open(file)
 	})
-	out := &loaded{dir: dir, fset: fset}
+	out = &loaded{dir: dir, fset: fset}
 	for _, p := range own {
+		packageUnderCheck = p.ImportPath
 		// One unit for the package plus its internal test files, one more
 		// for its external test package when it has one. CgoFiles belong to
 		// the first: a cgo package whose C-backed declarations are missing
