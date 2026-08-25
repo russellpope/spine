@@ -2,6 +2,8 @@ package gate
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -48,5 +50,26 @@ func TestRunRecoversReportCheckPanics(t *testing.T) {
 	}
 	if got := stdout.String(); got != "" {
 		t.Errorf("stdout = %q, want no emitted result", got)
+	}
+}
+
+// TestRunPanicDoesNotEmitResults protects the ordering that keeps a failed
+// check from publishing a verdict document before Run returns its error exit.
+func TestRunPanicDoesNotEmitResults(t *testing.T) {
+	const panicValue = "results check panic"
+	old := checks["tskip"]
+	checks["tskip"] = func(string, Config) ([]Finding, error) {
+		panic(panicValue)
+	}
+	t.Cleanup(func() { checks["tskip"] = old })
+
+	resultsPath := filepath.Join(t.TempDir(), "results.json")
+	t.Setenv(ResultsEnvVar, resultsPath)
+	var stdout, stderr bytes.Buffer
+	if got := Run("go@1", "tskip", t.TempDir(), &stdout, &stderr, EnvConfig()); got != 2 {
+		t.Fatalf("Run exit = %d, want 2; stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(resultsPath); !os.IsNotExist(err) {
+		t.Errorf("recovered panic wrote results file: err=%v", err)
 	}
 }
