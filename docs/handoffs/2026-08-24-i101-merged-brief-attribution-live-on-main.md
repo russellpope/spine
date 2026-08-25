@@ -22,9 +22,9 @@ records the rejection of disk reads on evidence.
 
 ## State (verify before relying)
 
-- `main` = this handoff's commit on `3eed1c6`, on merge `7e020cb` (`--no-ff` of
-  `i101-brief-attribution`, 10 commits, 41 files, +948/-46). **Unpushed as of this
-  doc** — `origin/main` is at `5bdf175`. Push is the first next step.
+- `main` = `3c17020`, **pushed**; `origin/main` in sync. Sits on merge `7e020cb`
+  (`--no-ff` of `i101-brief-attribution`, 10 commits, 41 files, +948/-46).
+- Lane at final HEAD: `maipipe run full` **#25 passed @3c17020**.
 - Gates at `7e020cb`: `maipipe run full` **#24 passed**; gofmt/vet clean;
   `SPINE_REQUIRE_MAIPIPE=1 make test` green (18 packages, 0 FAIL).
 - `spine doctor` exits **1** with two long-standing D4 notes on
@@ -44,15 +44,18 @@ records the rejection of disk reads on evidence.
 
 ## Next steps
 
-1. **Push** `main` (2 commits ahead: `7e020cb` merge + `3eed1c6` CHANGELOG, plus this
-   handoff). The lead merged locally and pushed nothing.
-2. **Untracked `README.md` at the repo root** (7.7 KB, appeared 12:20 during the team
-   run, never tracked in history). A full project README nobody asked for. Owner call:
-   keep and commit, or delete. Left untouched.
+1. **Next ticket: I107** — the only remaining med, and fully specified from this
+   session's live evidence (`spine gate` analysis classes panic with a raw
+   `gcimporter` stack trace when the installed binary predates the Go toolchain).
+   Below it: I102 (low — unify team-spawn pairing across flavors; I101 deliberately
+   left the claude/codex pairing divergence alone), I105 (low, no code), I106 (docs).
+2. **Untracked `README.md` at the repo root** is the owner's, requested in a separate
+   session — not a stray from the team run. Leave it alone; it is not this effort's
+   to commit or delete.
 3. Owner decisions still open from prior sessions: `maipipe gate approve-definition
-   fad20a5e…` (would start a baseline; never run in this repo), and removing
-   `../spine-wt-2`.
-4. Next ticket: I107 is the only remaining med.
+   fad20a5e…` (would start a baseline; never run in this repo), removing
+   `../spine-wt-2`, and closing cmux `workspace:45` ("spine: codex lead", done and
+   idle — auto-mode denies `cmux close-workspace`).
 
 ## Gotchas
 
