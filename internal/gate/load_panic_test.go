@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,6 +42,16 @@ func withPanickingLoaderImporter(t *testing.T, value string) {
 		return panickingImporter{value: value}
 	}
 	t.Cleanup(func() { newLoaderImporter = old })
+}
+
+func withGoVersionProbe(t *testing.T, probe func() (string, error)) {
+	t.Helper()
+	old := runGoVersionCommand
+	runGoVersionCommand = func() ([]byte, error) {
+		version, err := probe()
+		return []byte(version), err
+	}
+	t.Cleanup(func() { runGoVersionCommand = old })
 }
 
 func loadModuleWithoutPanic(t *testing.T, dir string) (got *loaded, err error) {
@@ -87,5 +98,40 @@ func TestLoadModuleReturnsInternalErrorForUnrelatedPanic(t *testing.T) {
 	}
 	if strings.Contains(message, "make install") {
 		t.Errorf("internal error suggested rebuild: %q", message)
+	}
+}
+
+func TestLoadModuleMismatchErrorNamesPathToolchain(t *testing.T) {
+	withPanickingLoaderImporter(t, exportDataMismatchPanic)
+	withGoVersionProbe(t, func() (string, error) { return "go1.path", nil })
+
+	_, err := loadModuleWithoutPanic(t, loaderFixture(t))
+	if err == nil {
+		t.Fatal("loadModule returned nil error after export-data panic")
+	}
+	if !strings.Contains(err.Error(), "go1.path") {
+		t.Errorf("mismatch error does not name PATH toolchain: %q", err)
+	}
+}
+
+func TestLoadModuleMismatchErrorOmitsFailedPathToolchainProbe(t *testing.T) {
+	const probeFailure = "PATH probe failed"
+	withPanickingLoaderImporter(t, exportDataMismatchPanic)
+	withGoVersionProbe(t, func() (string, error) { return "", errors.New(probeFailure) })
+
+	_, err := loadModuleWithoutPanic(t, loaderFixture(t))
+	if err == nil {
+		t.Fatal("loadModule returned nil error after export-data panic")
+	}
+	message := err.Error()
+	for _, want := range []string{exportDataMismatchPanic, runtime.Version(), "make install"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("mismatch error = %q; want %q", message, want)
+		}
+	}
+	for _, unwanted := range []string{"toolchain on PATH", probeFailure} {
+		if strings.Contains(message, unwanted) {
+			t.Errorf("mismatch error contains %q: %q", unwanted, message)
+		}
 	}
 }

@@ -56,6 +56,15 @@ type loaded struct {
 
 var newLoaderImporter = importer.ForCompiler
 
+var runGoVersionCommand = func() ([]byte, error) {
+	return exec.Command("go", "env", "GOVERSION").Output()
+}
+
+func goVersionOnPATH() (string, error) {
+	output, err := runGoVersionCommand()
+	return strings.TrimSpace(string(output)), err
+}
+
 // goListPackage is the subset of `go list -json` output the loader reads.
 type goListPackage struct {
 	Dir          string
@@ -108,8 +117,12 @@ func loadModule(dir string) (out *loaded, err error) {
 		if recovered := recover(); recovered != nil {
 			value := fmt.Sprint(recovered)
 			if strings.Contains(value, "export data version") {
+				message := fmt.Sprintf("spine could not decode export data: %s; binary toolchain: %s", value, runtime.Version())
+				if pathVersion, probeErr := goVersionOnPATH(); probeErr == nil && pathVersion != "" {
+					message += fmt.Sprintf("; toolchain on PATH: %s", pathVersion)
+				}
 				out = nil
-				err = fmt.Errorf("spine could not decode export data: %s; binary toolchain: %s; rebuild spine with make install", value, runtime.Version())
+				err = fmt.Errorf("%s; rebuild spine with make install", message)
 				return
 			}
 			out = nil
