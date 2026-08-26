@@ -55,7 +55,7 @@ spine adopt --write
 | `gate` | Run a gate-pack check class (`gate <pack>[@<v>] <check> [--dir D]`) |
 | `checkpoint` | Write or replay a session checkpoint (`new`, `latest`, `list`) |
 | `cursor` | Print or update the stage cursor (`start`, `tick`, `here`, `set`) |
-| `model` | Resolve the model table for a (flavor, tier) pair (read-only) |
+| `model` | Resolve the model table for a (harness, tier) pair (read-only; flags precede the positionals) |
 | `version` | Print the compiled template generation |
 
 ## The workflow it installs
@@ -70,7 +70,9 @@ Every managed repo gets the same shape:
 
 ## Model routing
 
-Tickets and plans name tiers, never model ids. The four tiers are `primary`, `routine`, `mechanical`, and `fallback`, mapped per harness (`claude`, `codex`, `pi`) in the `model_routing:` block of each repo's `WORKFLOW.md`. Shipped defaults live in `models/defaults.json` and compile into the binary.
+Tickets and plans name tiers, never model ids. The four tiers are `primary`, `routine`, `mechanical`, and `fallback`, mapped per harness (`claude`, `codex`, `openweights`, `pi`) in the `model_routing:` block of each repo's `WORKFLOW.md`. Shipped defaults live in `models/defaults.json` and compile into the binary.
+
+`openweights` (added 2026-08-25, I110) maps every tier to an open-weights model served through a gateway, each at effort `high`, with `fallback` deliberately equal to `primary` so a refusal re-run cannot silently leave open weights. Note that it is the one first-axis value that is **not** its own execution vehicle — those dispatches run the ordinary Claude Code binary through a wrapper that passes `--model` through. See CONTEXT.md's `harness` entry for why that distinction matters and what it currently costs.
 
 Two rules make this workable:
 
@@ -97,6 +99,7 @@ The coupling is thin by design. maikanban only needs the ledger file convention 
 ## Caveats
 
 - `spine audit routing` reads transcripts where the harnesses write them: `~/.claude/projects/<slug>` for Claude Code and `~/.codex/sessions` (or `$CODEX_HOME`) for Codex. Those formats are undocumented upstream and drift; the audit tracks them but may lag a harness release.
+- **Known gap:** the audit derives the harness from the *transcript source*, so `openweights` dispatches — which run Claude Code and therefore land in the Claude transcript layout — are currently judged against the `claude` tier table, where their model ids do not appear. Until **I111** lands, treat routing verdicts on open-weights runs as unreliable. Every other harness is unaffected.
 - The workflow templates assume the superpowers plugin's `.superpowers/sdd/` layout for progress files and checkpoints.
 - Developed and used on macOS; the code is portable Go with no cgo, but other platforms get little testing.
 

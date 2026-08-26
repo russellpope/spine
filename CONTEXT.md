@@ -22,12 +22,18 @@ declares exactly one.
 
 ## Model routing
 
-- **flavor** — which agent runtime executes work: **claude** or **codex**. The
-  second axis of the model table, orthogonal to tier. Artifacts never name a
-  flavor; the dispatcher supplies it, because the same ticket may be executed
-  by either. Distinct from **functional harness** (cli/rest/framebuffer),
-  which is about how a project is tested, not what runs the agent. Term
-  adopted from the deepthought glossary 2026-07-24.
+- **flavor** — *legacy name for* **harness**; see that entry, which supersedes
+  this one (ratified 2026-08-10, I067; migration I073). Retained because the
+  code and CLI still say "flavor" (`spine model <flavor> <tier>`,
+  `unknown flavor %q`, `models/defaults.json`'s `flavors` key), so a reader of
+  the source needs the mapping. The second axis of the model table, orthogonal
+  to tier. Artifacts never name one; the dispatcher supplies it, because the
+  same ticket may be executed by any of them. Distinct from **functional
+  harness** (cli/rest/framebuffer), which is about how a project is tested,
+  not what runs the agent. Term adopted from the deepthought glossary
+  2026-07-24. *(Amended 2026-08-25: this entry still read "claude or codex"
+  long after `pi` shipped, which is how a stale glossary entry survives —
+  nothing reads it.)*
 - **model tier** — a semantic role name, deliberately provider-agnostic:
   - **primary** — the default thinker: design, judgment, orchestration,
     final review.
@@ -102,6 +108,29 @@ declares exactly one.
   of a model from a given host is a separate, per-host constraint (I068/I072),
   never a harness. _Avoid_: flavor (legacy name, migration I073), "local
   flavor" — local is a property of where a model is served, not a harness.
+- **openweights** (added 2026-08-25, I110) — a fourth first-axis value, mapping
+  every tier to an open-weights model served through the Cascade gateway at
+  effort `high`, `fallback` deliberately equal to `primary`.
+  **It does not satisfy the definition above, and that is a known, unresolved
+  tension rather than an oversight.** An openweights dispatch runs the ordinary
+  Claude Code binary via a wrapper that passes `--model` through — it is not a
+  distinct execution vehicle but the *claude* harness pointed at other models.
+  By this glossary's own test it is closer to "where a model is served", which
+  the entry above says is *never* a harness and names as the thing to avoid.
+  Two consequences, both real:
+  - It is why **I111** has to exist. Those sessions write to
+    `~/.claude/projects` *because they are Claude Code sessions*, so deriving
+    the axis from the transcript source misfiles every one of them. Needing to
+    derive the first axis from the observed model id instead is the clearest
+    evidence that this value is not a harness.
+  - `pi` is a genuine counter-example and not a precedent: it is its own
+    driver binary, so it *is* an execution vehicle even though it also happens
+    to serve open weights.
+  Filed as **I112** for the owner to decide: rename the value, split the axis
+  into (harness, model-family), or ratify the widened definition. Nothing
+  blocks on it — resolution and dispatch work today — but the domain model and
+  the shipped table currently disagree, and the glossary should not pretend
+  otherwise.
 - **alternate** (decided 2026-08-18, local-harness grill) — an optional second
   `(id, effort)` a model-table cell names for the same (harness, tier), used
   when a critic should differ from the author (pure self-review is
