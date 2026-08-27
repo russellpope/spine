@@ -2,7 +2,7 @@
 id: I041
 title: Codex reader core — dispatch records, spawned-thread actuals, guardian exclusion
 severity: high
-status: open
+status: fixed
 affects: [audit, I009]
 blocked-by: [I040]
 execution-mode: subagent-driven
@@ -56,3 +56,15 @@ those, not from re-inspection.
 ## Blocked by
 
 - I040
+
+## Resolution — closed 2026-08-26 (ledger reconciliation)
+
+Shipped; never closed. `internal/audit/codex.go` is the reader, with
+`internal/audit/codex_test.go` covering it.
+
+Closed transitively by **I048** (`fixed` 2026-07-27), which lists this ticket in
+`blocked-by`. I048's closure records the live run finding four undocumented
+format surprises in this reader's input (the `cmd` arguments key, injected
+user-message preambles, polymorphic `session_meta.source`, and cmux leads
+dispatching via `custom_tool_call` script text) — each fixed on branch, which is
+direct evidence this reader shipped and was exercised against the real store.

@@ -103,3 +103,10 @@ they are — this ticket is about *finding* the block, not formatting it.
   are safe **today** — they are evidence that documenting the marker is normal,
   not live instances of the bug. The exposure is handoffs, which are parsed.
 - I107 — surfaced during that ticket's handoff, unrelated to its subject matter.
+- **[I064] is the same defect, filed earlier and closed 2026-08-26 as a
+  duplicate superseded by this ticket** (ledger reconciliation). It carries the
+  first live reproduction — the i062-tiebreak codex handoff on 2026-08-09, where
+  a backticked marker inside a Gotchas bullet took both `spine doctor` D9 and
+  `spine audit stages` red while the real spine-owned block was pristine. Use it
+  as the field case for the regression fixture; the defect itself is unfixed and
+  owned here.

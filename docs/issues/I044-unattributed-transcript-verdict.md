@@ -2,7 +2,7 @@
 id: I044
 title: unattributed-transcript verdict + source-file naming in details
 severity: med
-status: open
+status: fixed
 affects: [audit, I009]
 blocked-by: [I042]
 execution-mode: subagent-driven
@@ -53,3 +53,15 @@ exists for (declared luna/sol, actual terra visible to both).
 ## Blocked by
 
 - I042
+
+## Resolution — closed 2026-08-26 (ledger reconciliation)
+
+Shipped; never closed. The `unattributed` verdict appears in
+`internal/audit/audit.go`, `internal/audit/codex.go`,
+`internal/audit/teamspawn.go`, and `internal/audit/i090_test.go`.
+
+Closed transitively by **I048** (`fixed` 2026-07-27), which lists this ticket in
+`blocked-by`. I048 also resolves this ticket's carry-forward (review Minor 3,
+near-miss visibility) as **moot in practice**: M4a rows attribute via the worker
+scan as `unmapped-dispatch`, which is better than `unattributed`, and no live
+case surfaced where model-less spawn text was the only signal.

@@ -2,7 +2,7 @@
 id: I042
 title: Codex worker-session scan — opening-message rule, orchestrator exclusion
 severity: high
-status: open
+status: fixed
 affects: [audit, I009]
 blocked-by: [I041]
 execution-mode: subagent-driven
@@ -47,3 +47,16 @@ lead is still an orchestrator).
 ## Blocked by
 
 - I041
+
+## Resolution — closed 2026-08-26 (ledger reconciliation)
+
+Shipped; never closed. The opening-message rule and orchestrator exclusion live
+in `internal/audit/codex.go` (with `internal/audit/audit.go`), covered by
+`internal/audit/codex_test.go`.
+
+Closed transitively by **I048** (`fixed` 2026-07-27), which lists this ticket in
+`blocked-by` and whose closure ratifies a **second narrowing of D21** found
+live: multi-token opening lines are ambiguous and attribute to none, because
+single-line briefs had made "first line" the whole brief and a real I043 routine
+worker had been blocking maipipe's primary I044. That narrowing is a change to
+this ticket's rule, so the rule demonstrably shipped.

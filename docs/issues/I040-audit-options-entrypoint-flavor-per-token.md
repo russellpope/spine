@@ -2,7 +2,7 @@
 id: I040
 title: Prefactor — audit entry point takes options; flavor threads per token
 severity: med
-status: open
+status: fixed
 affects: [audit]
 blocked-by: []
 execution-mode: subagent-driven
@@ -34,3 +34,16 @@ Pure prefactor: no new inputs are read yet, no verdict changes.
 ## Blocked by
 
 - None — can start immediately.
+
+## Resolution — closed 2026-08-26 (ledger reconciliation)
+
+Shipped; never closed. Verified in the working tree:
+
+- `internal/audit/audit.go:221` — `type Options struct`, the options entry point.
+- `internal/audit/audit.go:200-206` — `evidenceToken` carries a `flavor` field,
+  the per-token threading this prefactor existed to add.
+- `internal/audit/audit.go:317` — mappings keyed by flavor "so judgeToken can
+  resolve each token" within its own flavor.
+
+Closed transitively by **I048** (`fixed` 2026-07-27), whose `blocked-by` lists
+this ticket and whose live-acceptance run could not have passed without it.

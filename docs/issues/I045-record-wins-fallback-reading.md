@@ -2,7 +2,7 @@
 id: I045
 title: Record-wins fallback reading of shared-id tokens (ADR 0012)
 severity: high
-status: open
+status: fixed
 affects: [audit]
 blocked-by: [I040]
 execution-mode: subagent-driven
@@ -36,3 +36,17 @@ hide behind a lateral fallback interpretation.
 ## Blocked by
 
 - I040
+
+## Resolution — closed 2026-08-26 (ledger reconciliation)
+
+Shipped; never closed. Two independent pieces of evidence:
+
+- **ADR 0012** is ratified and carries this ticket's decision by name:
+  `docs/adr/0012-fallback-records-excuse-the-fallback-reading-of-shared-id-tokens.md`.
+- The record-wins reading is implemented and documented in
+  `internal/audit/audit.go` (see the `FALLBACK` clauses around lines 21 and
+  71-76: "without a FALLBACK record the ordered reading … does not manufacture
+  descent"), and asserted by `internal/audit/audit_test.go:153-158`.
+
+Closed transitively by **I048** (`fixed` 2026-07-27), which lists this ticket in
+`blocked-by`.

@@ -2,7 +2,7 @@
 id: I043
 title: Codex repo scoping — cwd inside repo or commit known to repo
 severity: high
-status: open
+status: fixed
 affects: [audit, I008, I009]
 blocked-by: [I041]
 execution-mode: subagent-driven
@@ -38,3 +38,13 @@ are not "unattributed", they simply do not exist for this audit.
 ## Blocked by
 
 - I041
+
+## Resolution — closed 2026-08-26 (ledger reconciliation)
+
+Shipped; never closed. Repo scoping lives in `internal/audit/codex.go` and
+`internal/audit/audit.go`.
+
+Closed transitively by **I048** (`fixed` 2026-07-27), which lists this ticket in
+`blocked-by`. I048's acceptance includes the mis-scope proof this ticket exists
+to make possible: "praxis exit 0 with its own I024 unannotated and
+uncontaminated despite the shared store".

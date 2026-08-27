@@ -2,7 +2,7 @@
 id: I047
 title: Claude-side repo qualification + --since/--session filters
 severity: high
-status: open
+status: fixed
 affects: [audit, I008]
 blocked-by: [I040]
 execution-mode: subagent-driven
@@ -43,3 +43,25 @@ repos to earlier builds' transcripts).
 ## Blocked by
 
 - I040
+
+## Resolution — closed 2026-08-26 (ledger reconciliation)
+
+Shipped; never closed. Both halves verified in the working tree:
+
+- **Repo qualification** — `repoQualifies` is live at
+  `internal/audit/audit.go:401` and `:453`, both gated on
+  `flavor == "claude"`. This is the D28 predicate.
+- **`--since` / `--session` filters** — parsed at the CLI layer with acceptance
+  tests in `cmd/spine/main_test.go:1053-1109`, covering both the filtering
+  behaviour and the exit-2 usage error on an unparseable value.
+- Dedicated regression file `internal/audit/i047_test.go`.
+
+Closed transitively by **I048** (`fixed` 2026-07-27), which lists this ticket in
+`blocked-by`.
+
+**Still-live hazard — see [I111].** The two predicates above are gated on
+*flavor*, not on transcript source. The two were the same thing when this
+shipped and stop being the same the moment open-weights records are tagged
+`openweights`: those records would fall out of the D28 gate and begin claiming
+tickets they should not. Closing this ticket does not close that hazard; I111
+owns it and no existing test covers it.

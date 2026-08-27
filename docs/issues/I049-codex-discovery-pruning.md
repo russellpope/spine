@@ -2,7 +2,7 @@
 id: I049
 title: Codex discovery pruning — cheap pre-filter before full JSONL parse
 severity: med
-status: open
+status: fixed
 affects: [audit, I009]
 blocked-by: [I041]
 execution-mode: subagent-driven
@@ -45,3 +45,13 @@ the dispatch's pre-authorized resolution).
 ## Blocked by
 
 - I041
+
+## Resolution — closed 2026-08-26 (ledger reconciliation)
+
+Shipped; never closed. The pre-filter is covered by
+`internal/audit/codex_prune_test.go`, whose cases assert the pruning does not
+cost fidelity — malformed-file warnings are omitted when the token is absent,
+kept when present, and session-matched warnings are never suppressed.
+
+Closed transitively by **I048** (`fixed` 2026-07-27), which lists this ticket in
+`blocked-by`.

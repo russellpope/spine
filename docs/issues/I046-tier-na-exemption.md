@@ -2,7 +2,7 @@
 id: I046
 title: tier n/a — explicit routing exemption for pre-convention tickets
 severity: low
-status: open
+status: fixed
 affects: [audit]
 blocked-by: []
 execution-mode: subagent-driven
@@ -31,3 +31,14 @@ template gains the hint.
 ## Blocked by
 
 - None — can start immediately.
+
+## Resolution — closed 2026-08-26 (ledger reconciliation)
+
+Shipped; never closed. The `n/a` tier exemption is implemented in
+`internal/audit/audit.go`.
+
+Closed by **I048** (`fixed` 2026-07-27), whose live acceptance exercised this
+exemption directly and recorded the result: "tier: n/a applied to moo-clone
+I001-I007 -> 7 exempt rows, post-convention I100-I106 stay loud". That is
+precisely this ticket's intended behaviour — pre-convention noise silenced,
+post-convention tickets still enforced.
