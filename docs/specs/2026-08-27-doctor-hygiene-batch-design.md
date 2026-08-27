@@ -183,3 +183,8 @@ exit codes — never on the contents of internal tables.
 - The I065 ticket names the tier bullet as the drifted line; on spine the
   drifted line is the status bullet. Both are real in different repos; the
   full-history backfill covers both without adjudicating the ticket text.
+- Ruling (Task 2 review, upheld at final review): "a new template generation"
+  in the Solution section reads loosely — a content-bearing change to a
+  current-generation template file takes no `templates/VERSION` bump
+  (precedent d78f6ee); the propagation proof is the historical fixtures
+  re-passing against the post-I106 template, which was verified.
