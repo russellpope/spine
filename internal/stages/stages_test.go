@@ -50,6 +50,35 @@ func TestCleanCursorDerivesMatchNotBlocking(t *testing.T) {
 	}
 }
 
+// I109, the operator-visible regression: a handoff that explains the cursor
+// convention — quoting the fence in a sentence, and showing a whole block as
+// an indented example — used to hijack its own parse. The scan matched the
+// tag anywhere, so derivation opened the block at the prose quote, ran to the
+// real closing fence, and reported a wall of malformed body lines. That took
+// `spine audit stages` red (and doctor's D9 with it) against a byte-perfect
+// committed snapshot.
+//
+// Fences are line-anchored at column 0 now, so prose and indented examples are
+// skipped and this derives clean.
+func TestHandoffWithProseFenceMentionDerivesClean(t *testing.T) {
+	rep, err := stages.Derive(fixture("handoff-prose-fence"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Handoff.Applicable {
+		t.Fatal("want Handoff.Applicable true — a cursor exists")
+	}
+	if !rep.Handoff.HasBlock {
+		t.Errorf("want HasBlock true — the real fenced region is pristine: %s", rep.Handoff.Detail)
+	}
+	if rep.Handoff.Blocking() {
+		t.Errorf("want Handoff.Blocking() false, got detail %q", rep.Handoff.Detail)
+	}
+	if rep.Blocking() {
+		t.Errorf("a handoff that documents the convention must not block: handoff=%#v", rep.Handoff)
+	}
+}
+
 // Story 6: a cursor that claims prd done with no PRD file on disk is a
 // contradiction — ticked-but-missing blocks.
 func TestTickedButMissingBlocks(t *testing.T) {

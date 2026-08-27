@@ -2,7 +2,7 @@
 id: I109
 title: "cursor block scanning matches a marker anywhere in the file, so a marker quoted in prose hijacks the block"
 severity: med
-status: open
+status: fixed
 affects: [I107]
 blocked-by: []
 execution-mode: subagent-driven
@@ -88,6 +88,41 @@ Constraint: none of this may change what `spine cursor` writes. `Block()`'s
 canonical serialization and the `NonCanonical` byte-comparison stay exactly as
 they are — this ticket is about *finding* the block, not formatting it.
 
+## Design
+
+PRD: `docs/specs/2026-08-26-cursor-marker-anchoring-design.md` (grilled and
+ratified 2026-08-26). Effort `i109-cursor-marker-anchoring`.
+
+Where the design departs from the Fix section above:
+
+- **F1 anchors at strict column 0**, not "whitespace tolerated". Whitespace
+  tolerance would still match the indented grammar reference `WORKFLOW.md`
+  ships, so an author pasting that example into a handoff would be flagged for
+  doing nothing wrong. Strict column 0 makes indented examples safe by
+  construction and delivers most of F4's value for free.
+- **F1 covers a third call site the Fix section missed: `HasBlock`.** It is a
+  bare `strings.Contains`, and `internal/stages` calls it as a guard *before*
+  parsing the newest handoff. Anchoring `parse` without anchoring `HasBlock`
+  yields a presence test that is true while the parse finds nothing — an empty
+  result with zero findings, which falls through to the stale-effort branch and
+  reports an empty block effort. All three route through one shared scanner.
+- **F4 is declined.** No document in the repo has a column-0 fence inside a
+  triple-backtick block; the remedy ships as a clause in F2's finding ("indent
+  the example instead of fencing it") rather than as fence-state machinery.
+- **F2 counts whole-document and is symmetric** — exactly one open, exactly one
+  close, close after open, each violation its own finding.
+- **The `Save` seam below is escalated from anchoring to refusal.** An
+  anchored-but-still-first-match write against a corrupted ledger would still
+  destroy the intervening text.
+
+Repo audit backing these calls (all 40 committed handoffs):
+`2026-07-24-flavor-model-table-i033-i039.md` carries a real second full literal
+mid-line at :17 above its genuine block at :8–13 — the negative control, which
+must keep parsing clean. Six other handoffs mention the cursor in prose using
+the bare backticked word, never the full literal, and are unaffected. No
+currently-breaking document exists, so regression fixtures are synthetic,
+reconstructed from I064's and I107's descriptions.
+
 ## Related
 
 - `Save` (`cursor.go:229`) has the same first-match-anywhere weakness on the
@@ -110,3 +145,59 @@ they are — this ticket is about *finding* the block, not formatting it.
   `spine audit stages` red while the real spine-owned block was pristine. Use it
   as the field case for the regression fixture; the defect itself is unfixed and
   owned here.
+
+## Resolution
+
+Fixed 2026-08-26. Cursor delimiters are now **fences**, recognized only as a
+whole line starting at column 0. `internal/cursor` gains a `scanFences`/`locate`
+pair that `parse`, `Save` and `HasBlock` all route through, so the three cannot
+disagree about what a block is. `parseBody` takes a whole-document base line and
+numbers the findings that quote an offending line.
+
+What this retires: the standing "never write the literal marker in prose" rule
+that had appeared in every handoff's gotchas for months. A document may now
+quote a fence mid-sentence, and may show a complete worked block by indenting
+it — the form `WORKFLOW.md` already uses for its grammar reference.
+
+Behavior, each covered by a test:
+
+- Mid-line and indented occurrences are prose and are skipped.
+- More than one open (or close) fence is refused outright, naming every line
+  number and carrying the remedy: indent the example instead of fencing it.
+- Fence rules are symmetric — exactly one open, exactly one close, close after
+  open; a stray close with no open reports rather than falling silent. Quiet
+  means no fences of either kind.
+- `Save` refuses to rewrite on any fence-rule violation rather than replacing
+  open-through-close against an ambiguous file, leaving the ledger untouched.
+- `Block()`'s canonical serialization and the `NonCanonical` byte comparison are
+  unchanged, per the ticket's constraint.
+
+Evidence: 17 assertions in `internal/cursor/fence_test.go` plus a golden
+`internal/stages/testdata/handoff-prose-fence` tree; 14 observed RED before
+implementation, reproducing `unknown key "<!-- spine" in cursor block` — the
+string this ticket quotes from the live 2026-08-24 occurrence. Negative control
+run both arms: reverting only `cursor.go` takes the stages fixture red and
+restores byte-identically. Five scenarios against the live installed binary
+covered the documented handoff, duplicate fences, a stray close, the write path
+preserving prose, and the refused write leaving the ledger SHA-256 unchanged.
+
+Gates: cold primary-tier spec-axis review PASS (0 missing/partial); fresh-context
+primary-tier verification SHIP, having re-run the negative control itself.
+
+Two things the gates found, recorded because neither was in the original Fix
+section:
+
+- The reviewer found `Save` refusing more broadly than decision D8 authorized.
+  Owner ratified widening D8; the code stands.
+- The verifier found a **regression this change introduced** — the scanner
+  trimmed only space and tab, so a CRLF document's `<tag>\r` matched nothing and
+  a valid block reported as missing. Fixed here with its own test and both
+  control arms, rather than deferred: the substring scan this replaced handled
+  CRLF, so shipping without it would have been strictly worse than before.
+
+The spec carries three owner-ratified amendments made during review (story 9,
+D4, D8), each with its reason inline. A pre-existing gap found by the same
+verify probe — trailing whitespace after the closing fence escapes the
+`NonCanonical` comparison — is **[I113]**, deliberately not fixed here because it
+predates this change; confirmed by reading the original source rather than
+assuming.
