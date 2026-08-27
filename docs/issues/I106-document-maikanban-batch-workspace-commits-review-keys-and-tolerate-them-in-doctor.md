@@ -2,8 +2,9 @@
 id: I106
 title: "Document the `batch:` / `workspace:` / `commits:` / `review:` ticket keys and tolerate them in `spine doctor`"
 severity: low
-status: open
+status: in-progress
 batch: 2026-08-27-dhyg#2
+workspace: /Users/ldh/worktrees/spine-2026-08-27-dhyg
 affects: [I094]
 blocked-by: [I065]
 execution-mode: subagent-driven

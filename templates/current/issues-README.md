@@ -26,6 +26,19 @@ without them — `spine audit routing` reports unannotated tickets, never judges
 
 See `WORKFLOW.md` `model_routing` for the tier→model mapping and the full dispatch contract.
 
+Optional batch-coordination fields, written by the maikanban board and the claude-team skill
+(spine owns the schema; a ticket without them is valid, and `spine doctor` advises — never
+blocks — when a value contradicts the lifecycle below):
+
+- `batch` — written by the board at batch claim; `<YYYY-MM-DD>-<4 alnum>#<n>`
+  (e.g. 2026-08-27-dhyg#1). Historical: never cleared once set
+- `workspace` — written by the team lead while a worktree exists; an absolute path.
+  Cleared when the ticket closes
+- `commits` — written by the team lead in the close commit; the ticket's
+  implementation/fix SHAs
+- `review` — written by the board, human verdict only; pending | approved |
+  changes-requested. Absent ≡ pending
+
 ## Rationalize pass (before remediation)
 
 When the ledger has many items (e.g. dozens of deck slides or audit findings), build the
