@@ -2,9 +2,9 @@
 id: I065
 title: "Estate-wide: docs/issues/README.md carries pre-convention stock text the updater no longer recognizes"
 severity: low
-status: in-progress
+status: fixed
 batch: 2026-08-27-dhyg#1
-workspace: /Users/ldh/worktrees/spine-2026-08-27-dhyg
+commits: [6f306a2]
 affects: [update, I106]
 blocked-by: []
 execution-mode: subagent-driven
@@ -39,3 +39,18 @@ are the pattern) so the file refreshes cleanly, or run a one-time estate
 reconcile adopting the current stock text per repo. Prefer the known-stock
 fix: it's the general cure for stock-text drift and makes future sweeps
 exit 0.
+
+## Resolution
+
+Fixed 2026-08-27 (batch 2026-08-27-dhyg#1, commit 6f306a2, spec
+docs/specs/2026-08-27-doctor-hygiene-batch-design.md). The known-stock fix:
+the full-history audit of templates/current/issues-README.md found THREE
+retired lines — the pre-`superseded` `status` bullet (retired d78f6ee), the
+pre-I046 `tier` bullet this ticket names (retired c55ffb3), and the
+pre-`review-tier: n/a` `review-tier` bullet (retired 3dacdde) neither ticket
+nor spec had named — all added verbatim to the updater's superseded-lines
+set, with gen-migration tests per historical render plus a negative control.
+The gen-bump rule is now stated as binding in the set's doc comment. Spine's
+own README refreshed in the same commit; `spine update --dir .` and
+`spine doctor` both exit 0. The 11-repo estate sweep is the batch's
+deploy-stage checklist item, not this ticket's code.

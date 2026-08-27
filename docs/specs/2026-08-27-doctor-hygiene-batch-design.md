@@ -146,10 +146,13 @@ exit codes — never on the contents of internal tables.
 
 - **Updater seam (existing)**: the generation-migration test pattern
   (gen5→6/gen9→10 style). New tests: a README frozen at each retired
-  generation refreshes cleanly with zero unrecognized lines; the negative
-  control — a genuine local edit in the same file still reads as unrecognized
-  and skips the file — proves the backfill is load-bearing and not
-  over-broad.
+  generation refreshes cleanly with zero unrecognized lines — these positive
+  fixtures are what prove the backfill load-bearing (they fail if it is
+  removed); the negative control — a genuine local edit in the same file
+  still reads as unrecognized and skips the file — proves it is not
+  over-broad. The two test groups together carry the claim; neither alone
+  does. (Wording corrected at Task 1 review, which caught the original
+  sentence attributing both halves to the negative control.)
 - **Doctor seam (existing)**: the doctor package's findings-table tests. New
   tests per check: each warn condition fires with the expected severity and
   message; a healthy fixture yields no per-ticket findings; a malformed
