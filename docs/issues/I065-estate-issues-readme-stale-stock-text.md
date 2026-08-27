@@ -2,8 +2,9 @@
 id: I065
 title: "Estate-wide: docs/issues/README.md carries pre-convention stock text the updater no longer recognizes"
 severity: low
-status: open
+status: in-progress
 batch: 2026-08-27-dhyg#1
+workspace: /Users/ldh/worktrees/spine-2026-08-27-dhyg
 affects: [update, I106]
 blocked-by: []
 execution-mode: subagent-driven

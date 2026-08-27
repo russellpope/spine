@@ -5,9 +5,7 @@ Each issue is a markdown file in this directory (copy `_template.md`). Frontmatt
 - `id` — stable, unique (e.g. I001)
 - `title` — short title
 - `severity` — low | med | high | critical
-- `status` — open | in-progress | fixed | wontfix | superseded. `superseded` is
-  closed: a later binding decision or spec replaced the requirement, and the
-  ticket's `## Resolution` must name that replacement.
+- `status` — open | in-progress | fixed | wontfix
 - `affects` — issue ids whose fix this one changes/overlaps (e.g. [I009])
 - `blocked-by` — issue ids that must be resolved first (e.g. [I003])
 
@@ -15,9 +13,7 @@ Optional model-routing annotation fields (build tickets only; plain bug issues s
 without them — `spine audit routing` reports unannotated tickets, never judges them):
 
 - `execution-mode` — inline | subagent-driven | ultracode; how the work runs
-- `tier` — primary | routine | mechanical | fallback; the model tier the work is dispatched at.
-  Pre-convention tickets may carry `tier: n/a` to opt out of routing judgment entirely —
-  `spine audit routing` reports them exempt, distinct from unannotated
+- `tier` — primary | routine | mechanical | fallback; the model tier the work is dispatched at
 - `effort` — override of the tier's default effort; set only on deviation
 - `risk-triggers` — zero or more of cross-task-integration, concurrency-subtle-state,
   security-surface, plan-flagged-ambiguity; any present forces primary-tier review

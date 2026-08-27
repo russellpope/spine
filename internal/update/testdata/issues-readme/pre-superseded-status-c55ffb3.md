@@ -5,9 +5,7 @@ Each issue is a markdown file in this directory (copy `_template.md`). Frontmatt
 - `id` — stable, unique (e.g. I001)
 - `title` — short title
 - `severity` — low | med | high | critical
-- `status` — open | in-progress | fixed | wontfix | superseded. `superseded` is
-  closed: a later binding decision or spec replaced the requirement, and the
-  ticket's `## Resolution` must name that replacement.
+- `status` — open | in-progress | fixed | wontfix
 - `affects` — issue ids whose fix this one changes/overlaps (e.g. [I009])
 - `blocked-by` — issue ids that must be resolved first (e.g. [I003])
 

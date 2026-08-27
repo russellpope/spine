@@ -536,6 +536,14 @@ func dropRetiredKeyLines(unrec []string) []string {
 // without this list a machine-emitted line changed by a content-bearing bump
 // would read as a local edit and skip the file. Each generation that changes
 // emitted content appends its predecessors' dropped lines here.
+//
+// This is binding, not advisory: a generation bump that changes emitted
+// content is incomplete until the lines its predecessors emitted and it no
+// longer does are appended here, in the same change. Skipping the append
+// leaves every pristine repo of the older generation stuck — reported as
+// locally modified and never refreshed (I065). The keys are the historical
+// render verbatim, copied off the old template rather than retyped, with
+// on-disk indentation intact (unrecognizedLines only right-trims).
 var supersededLines = map[string]bool{
 	// gen0–4 WORKFLOW.md gates line, reworded in gen 5 (to-spec, spec-review).
 	"Mandatory gates: a PRD up front (grill-with-docs -> to-prd) and verification before completion.": true,
@@ -606,6 +614,21 @@ var supersededLines = map[string]bool{
 	"effort: high                       # tier default: primary=high, routine=medium, mechanical=low, fallback=high; xhigh reserved for final verification and security-critical passes; per-ticket effort: only on deviation": true,
 	"model_default: claude-fable-5      # swappable; re-evaluate on major model/platform releases":                                                                                                                             true,
 	"model_default: claude-opus-4-8     # swappable; re-evaluate on major model/platform releases":                                                                                                                             true,
+
+	// docs/issues/README.md frontmatter bullets, backfilled by I065 from
+	// the full history of templates/current/issues-README.md. All three
+	// were reworded in place (no generation bump rode them), so a pristine
+	// repo carrying any of them read as locally edited and was skipped.
+	// The gen-0..10 status bullet, extended in d78f6ee to document the
+	// superseded status value.
+	"- `status` — open | in-progress | fixed | wontfix": true,
+	// The gen-6..10 tier bullet, extended in c55ffb3 (I046) to document the
+	// tier: n/a routing exemption.
+	"- `tier` — primary | routine | mechanical | fallback; the model tier the work is dispatched at": true,
+	// The gen-6 review-tier bullet as first shipped in ee0d0b3 (I003),
+	// extended within the same generation by 3dacdde to document
+	// review-tier: n/a for inline tickets.
+	"- `review-tier` — the tier review runs at; never below `tier`": true,
 }
 
 // unrecognizedLines returns non-blank lines of got that expected does not
