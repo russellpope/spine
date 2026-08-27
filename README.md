@@ -67,6 +67,7 @@ Every managed repo gets the same shape:
 - `docs/issues/` is the issue ledger: one markdown file per ticket with frontmatter (`id`, `title`, `severity`, `status`, `affects`, `blocked-by`, plus optional routing fields). The files are canonical; there is no separate tracker.
 - `docs/specs/` holds paired `<date>-<topic>-design.md` and `-plan.md` files. `docs/adr/` holds numbered decision records. `docs/handoffs/` holds session-end briefs. `docs/evals/` holds model evaluation runs. `docs/remediation/` holds bounded fix-it rounds with a three-round budget.
 - The stage cursor is a `<!-- spine:cursor -->` block at the head of `.superpowers/sdd/progress.md`. Only `spine cursor` may write it. `spine audit stages` treats a valid-looking block in non-canonical form as evidence of hand-editing and fails.
+- The block's delimiters are **fences**, and a fence counts only when it is the whole line starting at column 0. A delimiter quoted mid-sentence — as in the line above — is prose and is skipped, so documents can explain the convention freely. To show a *complete* block in a document, indent the example rather than fencing it; `WORKFLOW.md`'s grammar reference does exactly that. A document carrying two open fences is refused outright, naming both line numbers, rather than silently parsing one of them.
 
 ## Model routing
 

@@ -157,6 +157,17 @@ declares exactly one.
 - **canonical form** — the byte-deterministic serialization the tool emits.
   A valid-but-non-canonical block is evidence of a hand edit and fails the
   stage audit.
+- **open fence** / **close fence** (added 2026-08-26, I109) — the two HTML
+  comments delimiting the cursor, and the **fenced region** they bound. A fence
+  counts only when it is the whole line starting at column 0; trailing
+  whitespace is tolerated, leading whitespace is not. So a delimiter quoted
+  mid-sentence, or indented as a worked example, is prose — which is what lets a
+  document explain the convention without hijacking its own parse. Exactly one
+  fence of each kind per document, close after open. _Avoid_ "marker" for these:
+  that word is taken by the per-stage state characters below.
+- **marker** — a per-stage state character inside the cursor: done, YOU ARE
+  HERE, or pending. Distinct from a fence; the two collide in a single sentence
+  otherwise ("the marker before the marker").
 - **write-time tripwire** — stage-completion claims are checked against
   artifact derivation at the moment of the write, not only at audit time; a
   forced write defers the reckoning to the audit, never waives it.
