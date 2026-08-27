@@ -3,13 +3,14 @@ id: I065
 title: "Estate-wide: docs/issues/README.md carries pre-convention stock text the updater no longer recognizes"
 severity: low
 status: open
-affects: [update]
+batch: 2026-08-27-dhyg#1
+affects: [update, I106]
 blocked-by: []
-execution-mode:
-tier:
+execution-mode: subagent-driven
+tier: routine
 effort:
 risk-triggers: []
-review-tier:
+review-tier: routine
 ---
 
 ## Problem

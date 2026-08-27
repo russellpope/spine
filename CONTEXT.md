@@ -260,3 +260,14 @@ declares exactly one.
 - **tier: n/a** — explicit per-ticket exemption from routing judgment, for
   tickets predating the tier convention (mirrors `review-tier: n/a`). An
   empty tier stays loud: absence is a gap, n/a is a decision.
+
+## Ticket batch (decided 2026-08-27, doctor-hygiene grill)
+
+- **batch** — a set of tickets claimed together and worked as one unit,
+  recorded on each member ticket by a board-issued id. The membership record
+  is historical: it is never cleared, so a closed ticket keeps the batch it
+  shipped in. Shared vocabulary across maikanban (which claims batches),
+  claude-team (which executes them), and spine (which owns the ledger schema,
+  I106). Distinct from the cursor's `tickets:` value — the cursor names what
+  the current effort works; batch membership names what a board once claimed
+  together, and the two need not coincide.
