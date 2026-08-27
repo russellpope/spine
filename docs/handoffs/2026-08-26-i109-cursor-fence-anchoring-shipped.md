@@ -32,13 +32,14 @@ reading rather than asserted:
 
 ## State (verify before relying)
 
-- **spine `main` = `fbd6ebd`**, two commits ahead of `f0e8828`, **unpushed**.
-  `8391b72` is the implementation; `fbd6ebd` is docs-only.
+- **spine `main` = `6efc443`, PUSHED and in sync with origin.** Three commits:
+  `8391b72` implementation, `fbd6ebd` docs, `6efc443` this handoff. (This block
+  was written before the push and corrected immediately after — a handoff cannot
+  describe its own commit, so verify with `git status --short --branch`.)
 - `gofmt -l .` empty, `go vet ./...` **exit 0**, `go test ./...` **exit 0**
   (18 packages). `spine audit routing` **exit 0**, I109 `escalated-with-reason`.
-- **`maipipe run full --wait` has NOT been run at `fbd6ebd`.** The stop hook
-  wants it whenever HEAD moves; both commits landed together so one run covers
-  them. Do this first.
+- **`maipipe run full #38 PASSED @`6efc443`.** One run covered all three commits,
+  batched deliberately because the stop hook wants a run whenever HEAD moves.
 - `~/bin/spine` rebuilt at `8391b72` and SHA-256-matched against a fresh
   `go build`. It carries the CRLF fix; the earlier install did not.
 - `spine doctor` **exit 1** on the two long-standing D4 notes
@@ -71,22 +72,22 @@ recorded inline in the PRD with its reason. No code changed for any of them.
 
 ## Next steps
 
-1. **`maipipe run full --wait`** at `fbd6ebd`, then push. Both repos were pushed
-   at session start; these two commits are the only local-only work.
-2. **I113** (`low`, `mechanical`) — the natural follow-on, found by I109's verify
+Nothing is left over from I109 — the lane passed and main is pushed. Pick from:
+
+1. **I113** (`low`, `mechanical`) — the natural follow-on, found by I109's verify
    probe and confirmed **pre-existing** by reading the original source: trailing
    whitespace after the *closing* fence escapes the `NonCanonical` comparison,
    so one hand-edit shape passes the sole-writer guard. Opening-fence padding is
    caught; closing is not. `scanFences` already computes the boundary the fix
    needs.
-3. **Doctor hygiene as one batch** — I065 (the permanent red; a gate nobody reads
+2. **Doctor hygiene as one batch** — I065 (the permanent red; a gate nobody reads
    is not a gate) + I106 (tolerate `batch:`/`workspace:`/`commits:`/`review:`
    keys). Both small, same surface.
-4. **I032** (`mechanical`) — two accepted Minors, verified NOT shipped:
+3. **I032** (`mechanical`) — two accepted Minors, verified NOT shipped:
    `stages.go:288` still passes `c.Tickets` where the fix says pass `""`, and
    `maxNamedMissingIDs` appears nowhere in the test file.
-5. **I093 items 3–5 need an owner call**, not a build.
-6. Larger forward work: the I066 map's open children — **I072** (host config
+4. **I093 items 3–5 need an owner call**, not a build.
+5. Larger forward work: the I066 map's open children — **I072** (host config
    schema; unblocks I073 + I077), I074, I075, I076, I078.
 
 Frontier: I007 I032 I050 I051 I065 I066 I072 I074 I075 I076 I078 I093 I102 I105
