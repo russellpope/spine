@@ -27,8 +27,8 @@ without them — `spine audit routing` reports unannotated tickets, never judges
 See `WORKFLOW.md` `model_routing` for the tier→model mapping and the full dispatch contract.
 
 Optional batch-coordination fields, written by the maikanban board and the claude-team skill
-(spine owns the schema; a ticket without them is valid, and `spine doctor` advises — never
-blocks — when a value contradicts the lifecycle below):
+(spine owns the schema; a ticket without them is valid, and `spine doctor` warns — which, like
+every other doctor warn, sets a non-zero exit — when a value contradicts the lifecycle below):
 
 - `batch` — written by the board at batch claim; `<YYYY-MM-DD>-<4 alnum>#<n>`
   (e.g. 2026-08-27-dhyg#1). Historical: never cleared once set
