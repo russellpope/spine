@@ -54,7 +54,10 @@ func ticketCheck(dir string) []Finding {
 		fm := frontmatter(string(raw))
 		status := fm["status"]
 		if ws := fm["workspace"]; ws != "" {
-			if _, err := os.Stat(ws); err != nil {
+			if !filepath.IsAbs(ws) {
+				findings = append(findings, Finding{"D13", "warn", rel, fmt.Sprintf(
+					"%s: workspace: %s must be absolute — relative paths are not portable worktree identities", name, ws)})
+			} else if _, err := os.Stat(ws); err != nil {
 				findings = append(findings, Finding{"D13", "warn", rel, fmt.Sprintf(
 					"%s: workspace: %s does not exist — the worktree is gone; clear the key or restore it", name, ws)})
 			}
@@ -89,7 +92,13 @@ func frontmatter(content string) map[string]string {
 		if !ok {
 			continue
 		}
-		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		value := strings.TrimSpace(v)
+		// Do not strip inline comments: valid batch IDs contain `#`, so this
+		// parser deliberately diverges from YAML-style comment handling.
+		if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"')) {
+			value = value[1 : len(value)-1]
+		}
+		out[strings.TrimSpace(k)] = value
 	}
 	return out
 }

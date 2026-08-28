@@ -84,6 +84,60 @@ func TestD13WarnsOnMissingWorkspacePath(t *testing.T) {
 	}
 }
 
+// TestD13WarnsOnRelativeWorkspaceWithoutStattingIt prevents D13 from
+// resolving workspace values against doctor’s process CWD. A workspace is a
+// portable worktree identity, so it must be absolute before existence is
+// meaningful.
+func TestD13WarnsOnRelativeWorkspaceWithoutStattingIt(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	if err := os.Mkdir(filepath.Join(cwd, "relative-live"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, workspace := range []string{"relative-live", "relative-missing"} {
+		dir := ticketFixture(t, map[string]string{
+			"I001-open.md": ticket("I001", "in-progress", "workspace: "+workspace),
+		})
+		fs := ticketFindings(t, dir)
+		if len(fs) != 1 || fs[0].Severity != "warn" {
+			t.Errorf("workspace %q: want one D13 warn, got %#v", workspace, fs)
+			continue
+		}
+		if !strings.Contains(fs[0].Message, "must be absolute") {
+			t.Errorf("workspace %q: message %q must explain the absolute-path requirement", workspace, fs[0].Message)
+		}
+		if strings.Contains(fs[0].Message, "does not exist") {
+			t.Errorf("workspace %q: message %q must not report an existence check", workspace, fs[0].Message)
+		}
+	}
+}
+
+// TestD13SilentOnQuotedFrontmatterValues prevents quoted scalar values from
+// reaching D13 validation or the filesystem unchanged.
+func TestD13SilentOnQuotedFrontmatterValues(t *testing.T) {
+	live := t.TempDir()
+	dir := ticketFixture(t, map[string]string{
+		"I001-open.md": ticket("I001", "in-progress",
+			`batch: "2026-08-28-chyg#1"`,
+			"workspace: '"+live+"'"),
+	})
+	if fs := ticketFindings(t, dir); len(fs) != 0 {
+		t.Fatalf("want no D13 findings for quoted frontmatter values, got %#v", fs)
+	}
+}
+
+// TestD13SilentOnFenceLessTicket pins the existing parser contract: content
+// without a leading frontmatter fence has no coordination fields to validate.
+func TestD13SilentOnFenceLessTicket(t *testing.T) {
+	dir := ticketFixture(t, map[string]string{
+		"I001-open.md": "status: open\nworkspace: relative-worktree\nbatch: malformed\n",
+	})
+	if fs := ticketFindings(t, dir); len(fs) != 0 {
+		t.Fatalf("want no D13 findings without a frontmatter fence, got %#v", fs)
+	}
+}
+
 // TestD13WarnsOnMissingWorkspaceAtAnyStatus: condition (a) is unscoped — a
 // vanished worktree is wrong however the ticket stands.
 func TestD13WarnsOnMissingWorkspaceAtAnyStatus(t *testing.T) {
