@@ -340,6 +340,11 @@ func TestCommaListTicketGrammarResolvesInOrder(t *testing.T) {
 			wantDetail: "2/2 ticket file(s) missing: I065, I106",
 		},
 		{
+			name:       "descending tickets",
+			tickets:    "I106,I065",
+			wantDetail: "2/2 ticket file(s) missing: I106, I065",
+		},
+		{
 			name:       "three tickets",
 			tickets:    "I065,I106,I114",
 			wantDetail: "3/3 ticket file(s) missing: I065, I106, I114",

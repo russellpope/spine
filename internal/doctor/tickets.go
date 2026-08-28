@@ -92,9 +92,9 @@ func frontmatter(content string) map[string]string {
 		if !ok {
 			continue
 		}
-		value := strings.TrimSpace(v)
 		// Do not strip inline comments: valid batch IDs contain `#`, so this
 		// parser deliberately diverges from YAML-style comment handling.
+		value := strings.TrimSpace(v)
 		if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"')) {
 			value = value[1 : len(value)-1]
 		}

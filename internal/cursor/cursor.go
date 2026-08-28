@@ -2,7 +2,7 @@
 // the head of a repo's .superpowers/sdd/progress.md recording which
 // WORKFLOW.md stage an effort is at.
 //
-// Grammar (defined once here; the gen 9 WORKFLOW.md template section reuses
+// Grammar (defined once here; the gen 11 WORKFLOW.md template section reuses
 // this text verbatim — see Grammar):
 //
 //	<!-- spine:cursor -->
@@ -69,7 +69,7 @@ import (
 )
 
 // Grammar is the canonical cursor block text, documented once here and
-// reused verbatim by the gen 9 WORKFLOW.md template section (I020, I026,
+// reused verbatim by the gen 11 WORKFLOW.md template section (I020, I026,
 // I114).
 // It is illustrative documentation, never a live cursor: the trailing "..."
 // on the stages: line is a "more stages may follow" marker, not a real

@@ -590,6 +590,7 @@ var supersededLines = map[string]bool{
 	// edit without a generation bump, so the exact predecessor must be
 	// recognized here for an ordinary refresh to replace it.
 	"    tickets: I0NN | I0NN-I0MM | prefix I0": true,
+
 	// gen 8/early-gen-9's **Handoff rule:** line, extended in place (M11,
 	// I027, rides I026's gen-9 bump — no further generation bump) to state
 	// the doctor-advises half of the I014 backstop alongside the
