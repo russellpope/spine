@@ -12,6 +12,23 @@ const (
 	currentTicketsGrammar  = "tickets: I0NN | I0NN,I0MM[,...] | I0NN-I0MM | prefix I0"
 )
 
+var i114ContentLines = map[string]bool{
+	"## Template authoring": true,
+	"Any content-changing template edit appends its predecessors' dropped lines to the superseded set in the same change.": true,
+	outgoingTicketsGrammar: true,
+	currentTicketsGrammar:  true,
+}
+
+// isI114ContentDiffLine reports whether a unified-diff line carries I114's
+// conscious current-generation template edit, or one of its blank separators.
+func isI114ContentDiffLine(line string) bool {
+	if len(line) == 0 || (line[0] != '+' && line[0] != '-') {
+		return false
+	}
+	body := strings.TrimSpace(line[1:])
+	return body == "" || i114ContentLines[body]
+}
+
 // outgoingGrammarWorkflow is a pristine current WORKFLOW render frozen at the
 // grammar emitted immediately before I114's comma-list documentation change.
 func outgoingGrammarWorkflow(t *testing.T) string {
@@ -69,6 +86,7 @@ func TestHandEditedTicketsGrammarStaysUnrecognized(t *testing.T) {
 		t.Fatal(err)
 	}
 	wf := report(t, reports, "WORKFLOW.md")
+	t.Logf("local grammar edit state=%v unrecognized=%v", wf.State, wf.Unrecognized)
 	if wf.State != SkippedUnrecognized {
 		t.Fatalf("local grammar edit state=%v, want SkippedUnrecognized; unrecognized=%v", wf.State, wf.Unrecognized)
 	}

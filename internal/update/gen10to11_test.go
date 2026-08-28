@@ -92,6 +92,9 @@ func TestGen10To11PristineUpdatesCleanly(t *testing.T) {
 				if isGen11ContentDiffLine(line) {
 					continue
 				}
+				if isI114ContentDiffLine(line) { // I114's conscious current-template edit; see cursor_hygiene_test.go
+					continue
+				}
 				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh; see modelrouting_test.go
 					continue
 				}

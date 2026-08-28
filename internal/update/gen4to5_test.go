@@ -93,6 +93,9 @@ func TestGen4To5IsStampPlusDeclaredContent(t *testing.T) {
 				if isGen11ContentDiffLine(line) { // gen 11's conscious content edit; see gen10to11_test.go
 					continue
 				}
+				if isI114ContentDiffLine(line) { // I114's conscious current-template edit; see cursor_hygiene_test.go
+					continue
+				}
 				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
 					continue
 				}

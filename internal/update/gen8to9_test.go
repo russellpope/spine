@@ -91,6 +91,9 @@ func TestGen8To9PristineUpdatesCleanly(t *testing.T) {
 				if isGen11ContentDiffLine(line) { // gen 11's conscious content edit; see gen10to11_test.go
 					continue
 				}
+				if isI114ContentDiffLine(line) { // I114's conscious current-template edit; see cursor_hygiene_test.go
+					continue
+				}
 				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
 					continue
 				}
@@ -131,8 +134,8 @@ func TestGen8To9MigrationCarriesNewGrammarLine(t *testing.T) {
 	if !strings.Contains(gotStr, "template_version: 11") {
 		t.Errorf("migrated WORKFLOW.md missing template_version: 11")
 	}
-	if !strings.Contains(gotStr, "tickets: I0NN | I0NN-I0MM | prefix I0") {
-		t.Errorf("migrated WORKFLOW.md missing gen-9 tickets: grammar line")
+	if !strings.Contains(gotStr, currentTicketsGrammar) {
+		t.Errorf("migrated WORKFLOW.md missing current tickets grammar line")
 	}
 	if strings.Contains(gotStr, "tickets: I0NN-I0MM | prefix I0") {
 		t.Errorf("migrated WORKFLOW.md still contains the superseded gen-8 tickets: grammar line")
