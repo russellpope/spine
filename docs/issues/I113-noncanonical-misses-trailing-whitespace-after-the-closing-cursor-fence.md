@@ -2,14 +2,14 @@
 id: I113
 title: "NonCanonical misses trailing whitespace after the closing cursor fence, so one hand-edit shape goes undetected"
 severity: low
-status: open
+status: fixed
 batch: 2026-08-28-chyg#2
-workspace: /private/tmp/spine-cursor-hygiene-lane-a
+commits: [0745db6, 54f5a7d, 0f4adc8]
 affects: [I109]
 blocked-by: []
 execution-mode: subagent-driven
 tier: mechanical
-effort: cursor-hygiene-batch
+effort:
 risk-triggers: []
 review-tier: routine
 ---
@@ -78,3 +78,16 @@ what the tool *emits*.
   area (CRLF fence lines were no longer recognized because the scanner trimmed
   only space and tab). That one shipped with I109; this one did not, because it
   predates the change.
+
+## Resolution
+
+Fixed 2026-08-28. The fence scanner now carries the end of each fence line,
+excluding LF and the CR in a CRLF terminator, and `NonCanonical` compares
+through that boundary. Closing-fence spaces and tabs are therefore detected
+without changing `Block()` or any cursor output.
+
+Tests pin closing spaces, closing tabs, EOF without a trailing newline, CRLF
+recognition, and a mixed LF-body/CRLF-close document. The comparison-hunk and
+CR-trim negative controls both went red when removed. Routine review found the
+mixed-ending branch needed a load-bearing test; `54f5a7d` added it, and scoped
+re-review passed. The primary final review and fresh verification passed.

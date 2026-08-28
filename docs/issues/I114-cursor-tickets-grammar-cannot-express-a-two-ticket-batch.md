@@ -2,14 +2,14 @@
 id: I114
 title: "Cursor tickets: grammar cannot express a two-ticket batch — add a comma-list form"
 severity: low
-status: open
+status: fixed
 batch: 2026-08-28-chyg#1
-workspace: /private/tmp/spine-cursor-hygiene-lane-a
+commits: [1ea145b, d06330d, 3acc8b7, 0f4adc8]
 affects: [I026]
 blocked-by: []
 execution-mode: subagent-driven
 tier: routine
-effort: cursor-hygiene-batch
+effort:
 risk-triggers: []
 review-tier: routine
 ---
@@ -53,3 +53,19 @@ unresolvable as a whole (no partial resolution).
 - **The gen-bump rule's binding one-liner lands here too** (folded from the
   dhyg spec-review partial): stated in the WORKFLOW template's authoring
   notes, so it binds template authors who never open the updater's source.
+
+## Resolution
+
+Fixed 2026-08-28. Cursor ticket resolution now accepts comma-separated bare
+IDs in input order and rejects the whole value on whitespace, malformed or
+empty elements, or duplicates. The diagnostic names the new form. The
+canonical grammar text, WORKFLOW template, checked-in WORKFLOW, authoring
+note, and updater superseded-line set were updated together without a
+template-version bump.
+
+The resolver, migration, local-edit guard, and superseded-entry negative
+controls all went red when their load-bearing hunks were removed. A final
+review required a descending-ID case so accidental sorting would fail; that
+case landed in `0f4adc8` and passed scoped re-review. A fresh final CLI then
+reported issues and implement evidence as `2/2 match` for `I113,I115`, with
+clean derivation and a healthy doctor fixture.

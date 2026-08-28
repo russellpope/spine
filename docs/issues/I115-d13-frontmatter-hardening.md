@@ -2,14 +2,14 @@
 id: I115
 title: "D13/frontmatter hardening: parser-divergence guard, absolute-path warn, quoted values, fence-less test"
 severity: low
-status: open
+status: fixed
 batch: 2026-08-28-chyg#3
-workspace: /private/tmp/spine-cursor-hygiene-lane-b
+commits: [d51c6d0, 0f4adc8]
 affects: [I106]
 blocked-by: []
 execution-mode: subagent-driven
 tier: routine
-effort: cursor-hygiene-batch
+effort:
 risk-triggers: []
 review-tier: routine
 ---
@@ -54,3 +54,16 @@ fence-less-ticket test asserting zero D13 findings.
   document-bare-values-only — quoting is a property of whichever board
   emits the YAML, not of the value; a false warn on semantically identical
   input erodes trust in D13.
+
+## Resolution
+
+Fixed 2026-08-28. D13 now warns on non-absolute workspaces without statting
+them, preserves the missing-path warning for absolute paths, strips one
+matching pair of surrounding quotes from frontmatter values, and documents
+why this parser must not strip inline comments from batch IDs. A fence-less
+ticket remains silent and is pinned by a test.
+
+The relative-path and quoted-value cases were red before implementation. The
+quote-stripping negative control went red when reverted, while existing
+absolute-missing and fixed-ticket controls stayed green. Routine review,
+primary final review, scoped re-review, and fresh verification passed.
