@@ -43,18 +43,20 @@
 // marker — it can never block.
 //
 // Design-latitude choices (pinned here):
-//   - tickets: grammar has three forms (docs/issues/README.md, the cursor
-//     grammar comment; I026 added the bare-id form): "I0NN" (a bare
-//     single-ticket id), "I0NN-I0MM" (an inclusive numeric range, both ends
-//     the same digit width — a same-endpoint range like "I001-I001" is a
-//     valid, if redundant, alias for the bare-id form), or "prefix <str>"
-//     (every docs/issues ticket id sharing that literal prefix). Anything
-//     else fails to resolve. An unresolved-but-non-empty ticket set degrades
-//     to zero evidence for both the issues and implement stages (never a
-//     block, same as any other absent evidence) but is surfaced as a
-//     Report.Notes entry naming the bad value (I026) — conservative and
-//     non-blocking, but visible, rather than a silent degradation
-//     indistinguishable from a legitimately empty "prefix" match.
+//   - tickets: grammar has four forms (docs/issues/README.md, the cursor
+//     grammar comment; I026 added the bare-id form and I114 added the
+//     comma-list form): "I0NN" (a bare single-ticket id),
+//     "I0NN,I0MM[,...]" (a comma-list of distinct bare ids, preserving input
+//     order), "I0NN-I0MM" (an inclusive numeric range, both ends the same
+//     digit width — a same-endpoint range like "I001-I001" is a valid, if
+//     redundant, alias for the bare-id form), or "prefix <str>" (every
+//     docs/issues ticket id sharing that literal prefix). Anything else fails
+//     to resolve. An unresolved-but-non-empty ticket set degrades to zero
+//     evidence for both the issues and implement stages (never a block, same
+//     as any other absent evidence) but is surfaced as a Report.Notes entry
+//     naming the bad value (I026) — conservative and non-blocking, but
+//     visible, rather than a silent degradation indistinguishable from a
+//     legitimately empty "prefix" match.
 //   - Evidence over an anchored *set* (issues' ticket ids; implement's same
 //     set) uses an asymmetric bar to keep both directions conservative:
 //     the done-direction check requires ALL items present to count as
@@ -531,19 +533,20 @@ var ticketIDRe = regexp.MustCompile(`^I\d+$`)
 var ticketRangeRe = regexp.MustCompile(`^I(\d+)-I(\d+)$`)
 
 // resolveTicketIDs parses the cursor's tickets: value into the concrete set
-// of ticket ids it anchors. Three grammar forms resolve (see package doc
-// and cursor.Grammar, I026): a bare single-ticket id "I0NN" (resolves to
-// that one id, unconditionally — unlike "prefix", a bare id names a
-// specific ticket rather than a repo-resolved set, so it never needs a
-// docs/issues lookup to resolve); "I0NN-I0MM" (an inclusive numeric range,
-// equal digit width — a same-endpoint range like "I001-I001" resolves to
-// the same single-element set as the bare-id form, structurally, though the
-// bare form is the documented idiom); and "prefix <str>" (every docs/issues
-// ticket id sharing that prefix, resolved against the repo — so it can
-// legitimately resolve to an empty set). Anything else returns ok=false:
-// unresolvable, never a block — the caller surfaces this as a Notes entry
-// naming the bad value (see unresolvableTicketsNote) rather than silently
-// treating it like a resolved-but-empty set.
+// of ticket ids it anchors. Four grammar forms resolve (see package doc and
+// cursor.Grammar, I026, I114): a bare single-ticket id "I0NN" (resolves to
+// that one id, unconditionally — unlike "prefix", a bare id names a specific
+// ticket rather than a repo-resolved set, so it never needs a docs/issues
+// lookup to resolve); "I0NN,I0MM[,...]" (a comma-list of distinct bare ids,
+// preserving input order); "I0NN-I0MM" (an inclusive numeric range, equal
+// digit width — a same-endpoint range like "I001-I001" resolves to the same
+// single-element set as the bare-id form, structurally, though the bare form
+// is the documented idiom); and "prefix <str>" (every docs/issues ticket id
+// sharing that prefix, resolved against the repo — so it can legitimately
+// resolve to an empty set). Anything else returns ok=false: unresolvable,
+// never a block — the caller surfaces this as a Notes entry naming the bad
+// value (see unresolvableTicketsNote) rather than silently treating it like a
+// resolved-but-empty set.
 func resolveTicketIDs(dir, raw string) ([]string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -567,6 +570,17 @@ func resolveTicketIDs(dir, raw string) ([]string, bool) {
 	if ticketIDRe.MatchString(raw) {
 		return []string{raw}, true
 	}
+	if strings.Contains(raw, ",") {
+		ids := strings.Split(raw, ",")
+		seen := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			if !ticketIDRe.MatchString(id) || seen[id] {
+				return nil, false
+			}
+			seen[id] = true
+		}
+		return ids, true
+	}
 	m := ticketRangeRe.FindStringSubmatch(raw)
 	if m == nil || len(m[1]) != len(m[2]) {
 		return nil, false
@@ -585,7 +599,7 @@ func resolveTicketIDs(dir, raw string) ([]string, bool) {
 }
 
 // unresolvableTicketsNote explains a non-empty tickets: value that failed
-// to resolve against the grammar (I026): conservative and non-blocking —
+// to resolve against the grammar (I026, I114): conservative and non-blocking —
 // Report.Blocking() never consults Notes, so this can never gate anything —
 // but visible, naming the exact bad value, following the same explanatory
 // pattern as noCursorNote. Without this, an unresolvable tickets: value
@@ -593,7 +607,7 @@ func resolveTicketIDs(dir, raw string) ([]string, bool) {
 // exactly like a well-formed-but-empty "prefix" match, with no
 // operator-visible signal that the degradation happened at all.
 func unresolvableTicketsNote(raw string) string {
-	return fmt.Sprintf("tickets: %q does not resolve (grammar: I0NN | I0NN-I0MM | prefix <str>) — issues/implement evidence not judged", raw)
+	return fmt.Sprintf("tickets: %q does not resolve (grammar: I0NN | I0NN,I0MM[,...] | I0NN-I0MM | prefix <str>) — issues/implement evidence not judged", raw)
 }
 
 // roundBudgetNotes implements the round-budget advisory (I087): the

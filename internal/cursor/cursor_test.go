@@ -161,6 +161,13 @@ func TestAllDoneCursorHasNoHereMarkerFinding(t *testing.T) {
 	}
 }
 
+func TestGrammarDocumentsCommaListTickets(t *testing.T) {
+	const want = "tickets: I0NN | I0NN,I0MM[,...] | I0NN-I0MM | prefix I0"
+	if !strings.Contains(cursor.Grammar, want) {
+		t.Errorf("Grammar = %q, want it to contain %q", cursor.Grammar, want)
+	}
+}
+
 func TestUnknownStageNameIsFinding(t *testing.T) {
 	res, err := cursor.Load(fixture("unknown-stage"))
 	if err != nil {

@@ -325,6 +325,98 @@ func TestPrefixTicketGrammarResolves(t *testing.T) {
 	}
 }
 
+// I114: a comma-list anchors exactly its listed ticket ids, in input order.
+// With no ticket files present, the missing-id detail is the public evidence
+// seam for both the resolved count and ordering.
+func TestCommaListTicketGrammarResolvesInOrder(t *testing.T) {
+	tests := []struct {
+		name       string
+		tickets    string
+		wantDetail string
+	}{
+		{
+			name:       "two tickets",
+			tickets:    "I065,I106",
+			wantDetail: "2/2 ticket file(s) missing: I065, I106",
+		},
+		{
+			name:       "three tickets",
+			tickets:    "I065,I106,I114",
+			wantDetail: "3/3 ticket file(s) missing: I065, I106, I114",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
+			writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+				"effort: x\nprd: docs/specs/x.md\ntickets: "+tt.tickets+"\nstages: grill[x] prd[ ] issues[x] implement[<]\n"+
+				"<!-- /spine:cursor -->\n")
+
+			rep, err := stages.Derive(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			issues := rowByName(t, rep.Stages, "issues")
+			if issues.Verdict != stages.VerdictTickedMissing {
+				t.Fatalf("issues verdict = %s (%s), want ticked-missing", issues.Verdict, issues.Detail)
+			}
+			if !strings.Contains(issues.Detail, tt.wantDetail) {
+				t.Errorf("issues detail = %q, want %q", issues.Detail, tt.wantDetail)
+			}
+			if len(rep.Notes) != 0 {
+				t.Errorf("resolvable comma-list must not produce a Notes entry, got %#v", rep.Notes)
+			}
+		})
+	}
+}
+
+// I114: malformed comma-lists are unresolvable as a whole. The valid ticket
+// files make an accidental partial resolution observable as a judged stage.
+func TestCommaListTicketGrammarRejectsWholeInvalidValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		tickets string
+	}{
+		{name: "internal whitespace", tickets: "I065, I106"},
+		{name: "duplicate", tickets: "I065,I065"},
+		{name: "malformed element", tickets: "I065,nope"},
+		{name: "empty middle element", tickets: "I065,,I106"},
+		{name: "trailing empty element", tickets: "I065,"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
+			writeFile(t, dir, "docs/issues/I065-a.md", "---\nid: I065\n---\nx\n")
+			writeFile(t, dir, "docs/issues/I106-b.md", "---\nid: I106\n---\nx\n")
+			writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+				"effort: x\nprd: docs/specs/x.md\ntickets: "+tt.tickets+"\nstages: grill[x] prd[ ] issues[x] implement[<]\n"+
+				"<!-- /spine:cursor -->\n")
+
+			rep, err := stages.Derive(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			issues := rowByName(t, rep.Stages, "issues")
+			if issues.Verdict != stages.VerdictNotJudged {
+				t.Errorf("issues verdict = %s (%s), want not-judged for unresolvable list", issues.Verdict, issues.Detail)
+			}
+			if len(rep.Notes) != 1 {
+				t.Fatalf("want exactly one Notes entry for unresolvable comma-list, got %#v", rep.Notes)
+			}
+			if !strings.Contains(rep.Notes[0], tt.tickets) {
+				t.Errorf("Notes[0] = %q, want it to name %q", rep.Notes[0], tt.tickets)
+			}
+			if !strings.Contains(rep.Notes[0], "I0NN | I0NN,I0MM[,...] | I0NN-I0MM | prefix <str>") {
+				t.Errorf("Notes[0] = %q, want the comma-list grammar summary", rep.Notes[0])
+			}
+		})
+	}
+}
+
 // An unresolvable tickets: value (neither bare id, range, nor prefix
 // grammar) must degrade to no evidence, never a block — absence of evidence
 // never blocks, even when the absence is "we couldn't even parse the ticket
