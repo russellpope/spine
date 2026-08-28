@@ -100,6 +100,43 @@ func TestTrailingWhitespaceFenceIsRecognizedButNonCanonical(t *testing.T) {
 	}
 }
 
+func TestTrailingSpacesOnClosingFenceAreNonCanonical(t *testing.T) {
+	content := openFence + "\n" + body() + closeFence + "   \n"
+
+	res := cursor.ParseBlockResult(content)
+
+	if len(res.Findings) != 0 {
+		t.Fatalf("want no findings, got %#v", res.Findings)
+	}
+	if !res.NonCanonical {
+		t.Error("want NonCanonical true — spaces after the closing fence are not canonical")
+	}
+}
+
+func TestTrailingTabsOnClosingFenceAreNonCanonical(t *testing.T) {
+	content := openFence + "\n" + body() + closeFence + "\t\t\n"
+
+	res := cursor.ParseBlockResult(content)
+
+	if len(res.Findings) != 0 {
+		t.Fatalf("want no findings, got %#v", res.Findings)
+	}
+	if !res.NonCanonical {
+		t.Error("want NonCanonical true — tabs after the closing fence are not canonical")
+	}
+}
+
+func TestCanonicalBlockAtEOFWithoutTrailingNewlineIsCanonical(t *testing.T) {
+	res := cursor.ParseBlockResult(block())
+
+	if len(res.Findings) != 0 {
+		t.Fatalf("want no findings, got %#v", res.Findings)
+	}
+	if res.NonCanonical {
+		t.Error("want NonCanonical false — the canonical block ends at EOF without a trailing newline")
+	}
+}
+
 // A CRLF document's fence line carries a trailing carriage return. It is a
 // line ending, not authored content, so it must not stop a fence from being
 // recognized — the substring scan this replaced found the tag in CRLF files,

@@ -271,9 +271,10 @@ func Save(dir string, c Cursor) error {
 
 // fence is one line-anchored cursor delimiter found in a document.
 type fence struct {
-	line  int // 1-based line number, for findings the operator can act on
-	start int // byte offset of the line's first byte
-	end   int // byte offset just past the tag text
+	line    int // 1-based line number, for findings the operator can act on
+	start   int // byte offset of the line's first byte
+	end     int // byte offset just past the tag text
+	lineEnd int // byte offset just past line content, excluding its terminator
 }
 
 // fenceRemedy is appended to duplicate-fence findings. The escape hatch ships
@@ -301,15 +302,19 @@ func scanFences(content string) (opens, closes []fence) {
 		if nl >= 0 {
 			text = content[off : off+nl]
 		}
+		lineEnd := off + len(text)
+		if nl >= 0 && strings.HasSuffix(text, "\r") {
+			lineEnd--
+		}
 		// "\r" is trimmed as a line ending, not as authored content: on a CRLF
 		// document the fence line is "<tag>\r", and the substring scan this
 		// replaced matched it. Dropping that would be a regression rather than
 		// a tightening.
 		switch strings.TrimRight(text, " \t\r") {
 		case openTag:
-			opens = append(opens, fence{line: line, start: off, end: off + len(openTag)})
+			opens = append(opens, fence{line: line, start: off, end: off + len(openTag), lineEnd: lineEnd})
 		case closeTag:
-			closes = append(closes, fence{line: line, start: off, end: off + len(closeTag)})
+			closes = append(closes, fence{line: line, start: off, end: off + len(closeTag), lineEnd: lineEnd})
 		}
 		if nl < 0 {
 			return opens, closes
@@ -385,7 +390,7 @@ func parse(content string, validStages []string) Result {
 		Cursor:       c,
 		HasCursor:    true,
 		Findings:     findings,
-		NonCanonical: len(findings) == 0 && content[open.start:closeF.end] != c.Block(),
+		NonCanonical: len(findings) == 0 && content[open.start:closeF.lineEnd] != c.Block(),
 	}
 }
 
