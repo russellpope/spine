@@ -35,6 +35,10 @@ stages: [grill, prd, issues, implement, functional-test, review, verify, ship, d
 See `docs/harness-interface.md` for the functional-test harness contract.
 Mandatory gates: a PRD up front (grill-with-docs -> to-spec), spec-review of the finished diff against the PRD, and verification before completion.
 
+## Template authoring
+
+Any content-changing template edit appends its predecessors' dropped lines to the superseded set in the same change.
+
 ## Stage cursor (consistency rule)
 
 Stages run **in order**; none may be silently skipped (the miss mode is a handoff that names an
@@ -51,7 +55,7 @@ Grammar reference (documentation only — the real block lives at the head of
     <!-- spine:cursor -->
     effort: <kebab-name>
     prd: docs/specs/<file>.md
-    tickets: I0NN | I0NN-I0MM | prefix I0
+    tickets: I0NN | I0NN,I0MM[,...] | I0NN-I0MM | prefix I0
     stages: grill[x] prd[x] issues[x] implement[<] functional-test[ ] review[ ] verify[ ] ship[ ] ...
     <!-- /spine:cursor -->
 

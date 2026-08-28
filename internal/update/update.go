@@ -585,6 +585,11 @@ var supersededLines = map[string]bool{
 	// right-trims, so the key must carry the on-disk indentation verbatim.
 	"    tickets: I0NN-I0MM | prefix I0": true,
 
+	// gen 11's indented tickets grammar line, reworded in place by I114 to
+	// document the comma-list form. This remains a content-bearing template
+	// edit without a generation bump, so the exact predecessor must be
+	// recognized here for an ordinary refresh to replace it.
+	"    tickets: I0NN | I0NN-I0MM | prefix I0": true,
 	// gen 8/early-gen-9's **Handoff rule:** line, extended in place (M11,
 	// I027, rides I026's gen-9 bump — no further generation bump) to state
 	// the doctor-advises half of the I014 backstop alongside the
