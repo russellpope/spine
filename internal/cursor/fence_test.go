@@ -159,6 +159,22 @@ func TestCRLFDocumentFencesAreRecognized(t *testing.T) {
 	}
 }
 
+func TestMixedLineEndingBlockIsCanonical(t *testing.T) {
+	content := openFence + "\n" + body() + closeFence + "\r\n"
+
+	res := cursor.ParseBlockResult(content)
+
+	if !res.HasCursor {
+		t.Fatal("want HasCursor true for a mixed-ending document")
+	}
+	if len(res.Findings) != 0 {
+		t.Fatalf("want no findings, got %#v", res.Findings)
+	}
+	if res.NonCanonical {
+		t.Error("want NonCanonical false — the closing CR is a line terminator, not authored content")
+	}
+}
+
 // Two column-0 open fences is refused outright, naming both line numbers and
 // the remedy. Picking one of two candidate blocks is the failure class this
 // work exists to eliminate.
