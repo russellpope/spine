@@ -5,9 +5,9 @@ severity: low
 status: open
 affects: [I109]
 blocked-by: []
-execution-mode: inline
+execution-mode: subagent-driven
 tier: mechanical
-effort:
+effort: cursor-hygiene-batch
 risk-triggers: []
 review-tier: routine
 ---

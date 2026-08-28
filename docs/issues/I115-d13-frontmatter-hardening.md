@@ -5,11 +5,11 @@ severity: low
 status: open
 affects: [I106]
 blocked-by: []
-execution-mode:
-tier:
-effort:
+execution-mode: subagent-driven
+tier: routine
+effort: cursor-hygiene-batch
 risk-triggers: []
-review-tier:
+review-tier: routine
 ---
 
 ## Problem
@@ -41,3 +41,14 @@ on the parser naming the no-comment-stripping divergence and why; a
 dependence of the existence stat); strip surrounding quotes in the
 frontmatter values (or document bare-values-only in the convention); and a
 fence-less-ticket test asserting zero D13 findings.
+
+## Rulings (grill 2026-08-28, spec docs/specs/2026-08-28-cursor-hygiene-batch-design.md)
+
+- Item 2: **warn on non-absolute and do not stat it** — the convention
+  mandates absolute paths, so resolving a relative value against `--dir`
+  would legitimize a forbidden form. Absolute-and-missing keeps the
+  existing existence warn.
+- Item 3: **strip surrounding quotes** (tolerant reader), not
+  document-bare-values-only — quoting is a property of whichever board
+  emits the YAML, not of the value; a false warn on semantically identical
+  input erodes trust in D13.

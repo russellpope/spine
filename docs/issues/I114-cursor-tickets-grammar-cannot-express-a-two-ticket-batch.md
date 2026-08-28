@@ -5,11 +5,11 @@ severity: low
 status: open
 affects: [I026]
 blocked-by: []
-execution-mode:
-tier:
-effort:
+execution-mode: subagent-driven
+tier: routine
+effort: cursor-hygiene-batch
 risk-triggers: []
-review-tier:
+review-tier: routine
 ---
 
 ## Problem
@@ -36,3 +36,18 @@ grammar in `internal/cursor` (cursor.Grammar and the package doc) and to
 text to name the new form. Tests follow the I026 pattern: a two-element list
 resolves to exactly those ids; a list with a malformed element stays
 unresolvable as a whole (no partial resolution).
+
+## Rulings (grill 2026-08-28, spec docs/specs/2026-08-28-cursor-hygiene-batch-design.md)
+
+- **No whitespace tolerance** inside the list: spine emits the value, so a
+  spaced list (`I065, I106`) is a hand edit and is unresolvable as a whole.
+- **A duplicate element makes the whole value unresolvable** — same
+  no-partial-resolution rule as a malformed element.
+- **This is a template-content change.** `templates/current/WORKFLOW.md.tmpl`
+  embeds the grammar line verbatim, so the gen-bump rule fires: the outgoing
+  grammar line joins the updater's superseded set in the same change (no
+  `templates/VERSION` bump, per the dhyg ruling). Estate WORKFLOW files go
+  one line stale until swept.
+- **The gen-bump rule's binding one-liner lands here too** (folded from the
+  dhyg spec-review partial): stated in the WORKFLOW template's authoring
+  notes, so it binds template authors who never open the updater's source.
