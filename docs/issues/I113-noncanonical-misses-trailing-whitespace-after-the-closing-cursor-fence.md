@@ -3,6 +3,8 @@ id: I113
 title: "NonCanonical misses trailing whitespace after the closing cursor fence, so one hand-edit shape goes undetected"
 severity: low
 status: open
+batch: 2026-08-28-chyg#2
+workspace: /private/tmp/spine-cursor-hygiene-lane-a
 affects: [I109]
 blocked-by: []
 execution-mode: subagent-driven

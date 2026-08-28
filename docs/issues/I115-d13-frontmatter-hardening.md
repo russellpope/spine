@@ -3,6 +3,8 @@ id: I115
 title: "D13/frontmatter hardening: parser-divergence guard, absolute-path warn, quoted values, fence-less test"
 severity: low
 status: open
+batch: 2026-08-28-chyg#3
+workspace: /private/tmp/spine-cursor-hygiene-lane-b
 affects: [I106]
 blocked-by: []
 execution-mode: subagent-driven

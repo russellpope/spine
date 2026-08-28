@@ -3,6 +3,8 @@ id: I114
 title: "Cursor tickets: grammar cannot express a two-ticket batch — add a comma-list form"
 severity: low
 status: open
+batch: 2026-08-28-chyg#1
+workspace: /private/tmp/spine-cursor-hygiene-lane-a
 affects: [I026]
 blocked-by: []
 execution-mode: subagent-driven
