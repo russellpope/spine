@@ -8,6 +8,34 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Added
 
+- **A comma-list cursor `tickets:` form.** `tickets: I0NN,I0MM[,...]` resolves to
+  exactly the listed ids, in input order — the form a non-adjacent ticket batch
+  needs, which previously ran with its issues/implement evidence degraded to
+  not-judged. Strict by design: internal whitespace, a malformed or empty
+  element, or a duplicate makes the whole value unresolvable (no partial
+  resolution), and the unresolvable-tickets note names the new form. The
+  WORKFLOW template's grammar line is updated in the same change, with the
+  outgoing line joining the updater's superseded set, so estate repos refresh
+  cleanly on their next `spine update`. The template also gains the binding
+  gen-bump authoring note: any content-changing template edit appends its
+  predecessors' dropped lines to the superseded set in the same change. (I114)
+
+### Fixed
+
+- **Trailing whitespace after the closing cursor fence now reports
+  non-canonical form.** The canonical-form guard compared bytes only up to the
+  closing tag text, so a hand edit that padded the closing fence line went
+  undetected while the same padding on the opening line was caught. The
+  compared span now ends at the closing fence line's end. What `spine cursor`
+  writes is unchanged. (I113)
+- **D13 per-ticket checks hardened.** A non-absolute `workspace:` value now
+  warns and is never stat'd (removing the false-warn dependence on the process
+  CWD under `--dir`); one pair of surrounding quotes is stripped from ticket
+  frontmatter values before validation, so YAML-quoted `batch:` ids no longer
+  read as malformed; the parser's deliberate no-comment-stripping divergence is
+  guarded by a comment; and a fence-less ticket's silence is pinned by a test.
+  (I115)
+
 - **An `openweights` model flavor.** `spine model openweights <primary|routine|mechanical|fallback>`
   resolves to `FW-Kimi-K3`, `DeepSeek-V4-Pro`, `FW-GLM-5.2` and `FW-Kimi-K3`, every
   tier at effort `high` — `routine` and `mechanical` included, which the global tier
