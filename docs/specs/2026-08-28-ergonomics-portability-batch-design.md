@@ -90,12 +90,18 @@ the previous batch shipped.
 ## Implementation Decisions
 
 - **I116 detection**: after `fs.Parse` succeeds, any remaining positional
-  beginning with `-` triggers the ordering error — not just when the
-  positional count is wrong. (`spine model openweights --json` leaves
-  NArg == 2 but `--json` is never a valid tier; without this the trap
-  survives in a second shape.) Message shape:
-  `model: flags must precede positionals (saw "--effort" after "openweights")`
-  followed by the existing usage line; exit 2 unchanged.
+  beyond the first beginning with `-` triggers the ordering error — not
+  just when the positional count is wrong. (`spine model openweights
+  --json` leaves NArg == 2 but `--json` is never a valid tier; without
+  this the trap survives in a second shape.) The first positional is
+  exempt: a flag-like token there is only reachable via an explicit `--`
+  terminator — a deliberate positional, not an ordering mistake — and
+  falls through to `model.Resolve`'s own error. Message shape:
+  `model: flags must precede positionals (saw "--effort" after "primary")`
+  — the offending token and the *immediately preceding* positional, which
+  pinpoints where ordering broke — followed by the existing usage line;
+  exit 2 unchanged. [Amended at spec-review: example previously named the
+  first positional (C1); the first-position exemption was uncodified (C3).]
 - **I116 helper stays in `cmd/spine/main.go`** and is wired into `cmdModel`
   only. Other subcommands keep today's behavior; generalizing is deliberate
   follow-up scope, not silent creep.
@@ -110,7 +116,9 @@ the previous batch shipped.
   (`spine template generation N` — scripts may parse it). Second line
   `build: <module-version> <rev-12> <vcs-time> [dirty]`, omitting fields
   ReadBuildInfo does not provide; `build: (no build info)` when the read
-  fails. No ldflags, no goreleaser, no VERSION bump.
+  fails or yields no usable fields — never a bare `build:` with an empty
+  payload. No ldflags, no goreleaser, no VERSION bump. [Amended at
+  spec-review: fallback previously scoped to a failed read only (C2).]
 - **I118 README**: an Install subsection next to Development:
   `go install github.com/russellpope/spine/cmd/spine@latest`, note that the
   binary is self-contained (embedded templates), and that `spine version`
