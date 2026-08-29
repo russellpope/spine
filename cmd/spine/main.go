@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -265,26 +266,69 @@ func warnDirty(dir string, stderr io.Writer) {
 	}
 }
 
+// parseADRID parses an ADR id as base-10 regardless of zero-padding.
+func parseADRID(s string) (int, error) {
+	if s == "" {
+		return 0, fmt.Errorf("--supersedes needs a value (an ADR id like 0011)")
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("--supersedes %q: ADR ids are base-10 digits only", s)
+		}
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("--supersedes %q: ADR id out of range", s)
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("--supersedes %q: ADR ids start at 0001", s)
+	}
+	return n, nil
+}
+
 func cmdADR(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, `usage: spine adr <new|list> [flags]  (adr new [--dir D] [--supersedes N] "Title")`)
+		fmt.Fprintln(stderr, `usage: spine adr <new|list> [flags]  (adr new [--dir D] [--supersedes NNNN] "Title")`)
 		return 2
 	}
 	switch args[0] {
 	case "new":
 		fs := flag.NewFlagSet("adr new", flag.ContinueOnError)
 		dir := fs.String("dir", ".", "repo root")
-		supersedes := fs.Int("supersedes", 0, "ADR number this decision supersedes")
-		pos, ok := parseArgs(fs, args[1:], "adr new", `usage: spine adr new [--dir D] [--supersedes N] "Title" (flags before title)`, 1, stderr)
+		supersedes := fs.String("supersedes", "", "ADR id this decision supersedes (base-10; zero-padding ok)")
+		pos, ok := parseArgs(fs, args[1:], "adr new", `usage: spine adr new [--dir D] [--supersedes NNNN] "Title" (flags before title)`, 1, stderr)
 		if !ok {
 			return 2
 		}
-		path, err := adr.New(*dir, pos[0], *supersedes)
+		// I120: this went through flag.Int, whose base-0 parse read the
+		// conventional zero-padded ids as octal ("0011" -> 9) and silently
+		// flipped the wrong ADR. Parse base-10 ourselves. Visit (not a ""
+		// sentinel) so an explicitly empty value errors instead of silently
+		// meaning "no supersede".
+		supSet := false
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "supersedes" {
+				supSet = true
+			}
+		})
+		supN := 0
+		if supSet {
+			n, err := parseADRID(*supersedes)
+			if err != nil {
+				fmt.Fprintln(stderr, "adr new:", err)
+				return 2
+			}
+			supN = n
+		}
+		path, err := adr.New(*dir, pos[0], supN)
 		if err != nil {
 			fmt.Fprintln(stderr, "adr new:", err)
 			return 2
 		}
 		fmt.Fprintln(stdout, path)
+		if supN > 0 {
+			fmt.Fprintf(stdout, "superseded: %04d\n", supN)
+		}
 		return 0
 	case "list":
 		fs := flag.NewFlagSet("adr list", flag.ContinueOnError)
