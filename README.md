@@ -52,11 +52,13 @@ spine adopt --write
 | `eval` | Manage `docs/evals` (`new`, `add-run`, `list`) |
 | `doctor` | Read-only workflow health checks |
 | `audit` | Verify declared model routing (`routing`) or stage cursor derivation (`stages`) against on-disk artifacts |
-| `gate` | Run a gate-pack check class (`gate <pack>[@<v>] <check> [--dir D]`) |
+| `gate` | Run a gate-pack check class (`gate [--dir D] <pack>[@<v>] <check>`) |
 | `checkpoint` | Write or replay a session checkpoint (`new`, `latest`, `list`) |
 | `cursor` | Print or update the stage cursor (`start`, `tick`, `here`, `set`) |
-| `model` | Resolve the model table for a (harness, tier) pair (read-only; flags precede the positionals) |
+| `model` | Resolve the model table for a (harness, tier) pair (read-only) |
 | `version` | Print the compiled template generation |
+
+Flags precede positionals on every subcommand. A flag after a positional, a stray positional, or an unknown sub-subcommand errors naming the rule (exit 2) — input is never silently discarded.
 
 ## The workflow it installs
 
