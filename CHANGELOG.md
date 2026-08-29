@@ -8,6 +8,14 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Added
 
+- **`spine version` prints build provenance.** A second `build:` line carries
+  the module version, 12-char vcs revision, vcs time, and a dirty flag from
+  the binary's embedded build info (`build: (no build info)` when absent), so
+  two devices compare installs with one command instead of hashing binaries.
+  The first line is byte-identical to before. The README documents the
+  portable install path: `go install github.com/russellpope/spine/cmd/spine@latest`.
+  (I118)
+
 - **A comma-list cursor `tickets:` form.** `tickets: I0NN,I0MM[,...]` resolves to
   exactly the listed ids, in input order — the form a non-adjacent ticket batch
   needs, which previously ran with its issues/implement evidence degraded to
@@ -22,6 +30,16 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Fixed
 
+- **`spine model` names the flag-ordering rule at the point of failure.** A
+  flag placed after the positionals (or standing in for one) previously
+  printed bare usage or an unknown-tier error, reading as a broken flavor;
+  it now errors `flags must precede positionals (saw … after …)` naming the
+  offending token. The leading-flag form is unchanged. (I116)
+- **The implement-tick zero-evidence message no longer misdirects to a
+  tickets typo.** When ledger lines for the anchored ids exist but none
+  carries done/complete/completed as a whole word, the derivation detail now
+  names that requirement; the typo hint remains for ids with no ledger line
+  at all. (I117)
 - **Trailing whitespace after the closing cursor fence now reports
   non-canonical form.** The canonical-form guard compared bytes only up to the
   closing tag text, so a hand edit that padded the closing fence line went

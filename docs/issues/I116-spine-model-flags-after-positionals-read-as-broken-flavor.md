@@ -2,7 +2,9 @@
 id: I116
 title: "spine model: flags after positionals print bare usage and exit 2, reading as a broken flavor"
 severity: low
-status: open
+status: fixed
+batch: 2026-08-28-ergo#1
+commits: [947a87a, b81292d]
 affects: [I034]
 blocked-by: []
 execution-mode: inline
@@ -41,3 +43,19 @@ leading-flag form stays green either way.
 - **I034** — the `spine model` command this ergonomics trap lives in.
 - docs/handoffs/2026-08-25-openweights-docs-and-the-i112-axis-question.md —
   where the trap was recorded as a gotcha instead of a ticket.
+
+## Resolution
+
+Option B from the grill (2026-08-28 ergonomics batch): strict stdlib
+ordering kept; a flag-like token among the positionals (beyond the first,
+which is only reachable via an explicit `--`) now errors
+`model: flags must precede positionals (saw "--effort" after "primary")`
+plus the usage line, exit 2 — covering both the trailing-flag and
+correct-arity (`claude --json`) shapes. Detection keys on the leading
+dash, not resolution failure (negative control observed red). Helper
+`flagAmongPositionals` lives in cmd/spine/main.go, wired into `cmdModel`
+only per the grill's scope ruling; the same trap observed live on
+`spine cursor show --dir X` (trailing `--dir` silently ignored) is the
+named candidate for a generalization follow-up. Commits `947a87a`
+(implementation, TDD both arms) and `b81292d` (PRD amendments C1/C3 at
+spec-review). Work done.

@@ -2,7 +2,9 @@
 id: I117
 title: "Implement-tick failure with zero evidence blames the tickets value, not the ledger wording that failed the done-word match"
 severity: low
-status: open
+status: fixed
+batch: 2026-08-28-ergo#2
+commits: [6e22c98]
 affects: [I019, I032]
 blocked-by: []
 execution-mode: inline
@@ -45,3 +47,18 @@ split is load-bearing).
 - **I032** — introduced the typo hint whose scope this ticket narrows.
 - docs/handoffs/2026-08-25-openweights-docs-and-the-i112-axis-question.md —
   the gotcha entry this ticket retires.
+
+## Resolution
+
+Commit `6e22c98` (2026-08-28 ergonomics batch). `implementAnchoredLines`
+records, per anchored id, whether any ledger line starts with `<id>:`
+regardless of done-word; `judgeSet` gains an `anchoredNoEvidence`
+parameter used only in the zero-evidence ticked-missing branch. Any
+anchored line ⇒ the detail names the done/complete/completed whole-word
+requirement and the typo hint is suppressed (the ids demonstrably
+resolved); no anchored line ⇒ the I032 typo hint verbatim (negative
+control observed red on the split); mixed case ⇒ wording message wins
+while the missing-ids list still names every id, per the grill's Q3/Q4
+rulings. prd/issues judging untouched. Verified live on a scratch repo,
+both arms, and exercised for real when this very batch's implement tick
+was refused until the ledger carried done-words. Work complete.

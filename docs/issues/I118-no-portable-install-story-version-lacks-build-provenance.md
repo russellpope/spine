@@ -2,7 +2,9 @@
 id: I118
 title: "No documented portable install path, and spine version cannot answer which build a device runs"
 severity: low
-status: open
+status: fixed
+batch: 2026-08-28-ergo#3
+commits: [6d2a03c, b81292d]
 affects: []
 blocked-by: []
 execution-mode: inline
@@ -45,3 +47,17 @@ the formatter handles nil build info and the dirty flag.
 
 - docs/specs/2026-08-28-ergonomics-portability-batch-design.md — the
   batch PRD carrying scope decisions (binary only; no goreleaser).
+
+## Resolution
+
+Commit `6d2a03c` (2026-08-28 ergonomics batch), fallback wording amended
+at spec-review in `b81292d` (C2). README gains an Install section with
+the `go install github.com/russellpope/spine/cmd/spine@latest` one-liner
+and the self-contained-binary note. `spine version` keeps its first line
+byte-identical and adds `build: <module-version> <rev-12> <vcs-time>
+[dirty]` from `debug.ReadBuildInfo`, degrading to `build: (no build
+info)` when the read fails or yields no fields. Verified live: the
+installed binary at the merge SHA prints
+`build: v0.0.0-20260829050353-b81292de0263+dirty b81292de0263 …` with a
+correct dirty flag; sha256 prefix `b6150787d94b` is the drift baseline
+for other devices. Work done.
