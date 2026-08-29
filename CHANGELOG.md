@@ -6,6 +6,21 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ## Unreleased
 
+### Changed
+
+- **No subcommand silently discards input.** The I116 ordering guard is
+  generalized to every parsing subcommand via a shared strict-parse helper:
+  a flag after a positional errors `flags must precede positionals` naming
+  the token, a stray positional errors `unexpected argument`, and an
+  unknown `spine cursor` sub-subcommand errors naming the real verbs
+  (previously `spine cursor show --dir X` silently answered for the CWD
+  repo with exit 0). Flag-only `spine cursor` invocations keep the exit-0
+  hook contract. **Breaking:** `spine gate` now takes flags first —
+  `gate [--dir D] <pack>[@<v>] <check>`; the old trailing-`--dir` form
+  errors naming the rule (bare maipipe run lines are unaffected).
+  Trailing `--force` on `cursor start`/`tick` and `version`/`help`
+  leniency are unchanged. (I119)
+
 ### Added
 
 - **`spine version` prints build provenance.** A second `build:` line carries
