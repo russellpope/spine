@@ -261,14 +261,18 @@ func deriveStages(dir string, c cursor.Cursor) ([]StageRow, []string) {
 	var issuesPresent, implPresent []bool
 	var ids []string
 	var notes []string
+	implAnchored := false
 	if resolved, ok := resolveTicketIDs(dir, c.Tickets); ok {
 		ids = resolved
 		if len(ids) > 0 {
 			have := issueIDs(filepath.Join(dir, "docs", "issues"))
-			evidenced := implementEvidence(readLedgerRaw(dir), ids)
+			ledger := readLedgerRaw(dir)
+			evidenced := implementEvidence(ledger, ids)
+			anchored := implementAnchoredLines(ledger, ids)
 			for _, id := range ids {
 				issuesPresent = append(issuesPresent, have[id])
 				implPresent = append(implPresent, evidenced[id])
+				implAnchored = implAnchored || anchored[id]
 			}
 		}
 	} else if strings.TrimSpace(c.Tickets) != "" {
@@ -283,11 +287,11 @@ func deriveStages(dir string, c cursor.Cursor) ([]StageRow, []string) {
 		case "prd":
 			// prd's evidence is a single path, not an anchored ticket-id
 			// set, so no ids/tickets value to name on a miss.
-			verdict, detail = judgeSet(s.State, prdPresent, nil, "", "PRD file "+dash(c.PRD))
+			verdict, detail = judgeSet(s.State, prdPresent, nil, "", false, "PRD file "+dash(c.PRD))
 		case "issues":
-			verdict, detail = judgeSet(s.State, issuesPresent, ids, c.Tickets, "ticket file(s)")
+			verdict, detail = judgeSet(s.State, issuesPresent, ids, c.Tickets, false, "ticket file(s)")
 		case "implement":
-			verdict, detail = judgeSet(s.State, implPresent, ids, c.Tickets, "ledger implement evidence")
+			verdict, detail = judgeSet(s.State, implPresent, ids, c.Tickets, implAnchored, "ledger implement evidence")
 		default:
 			verdict, detail = VerdictNotJudged, "no derivation rule for stage \""+s.Name+"\""
 		}
@@ -317,7 +321,13 @@ func dash(s string) string {
 // all-missing set is exactly the shape a resolvable-but-wrong tickets:
 // value (a typo'd range/prefix) produces, so the reader is pointed at the
 // likely cause rather than left with a bare count.
-func judgeSet(state cursor.State, present []bool, ids []string, ticketsRaw string, label string) (Verdict, string) {
+//
+// anchoredNoEvidence narrows that hint (I117): true means at least one
+// ledger line starts with an anchored id even though no id has evidence —
+// the ids demonstrably resolved, so the miss is the done-word requirement,
+// not a typo, and the detail names that rule instead. Only the implement
+// caller can pass true.
+func judgeSet(state cursor.State, present []bool, ids []string, ticketsRaw string, anchoredNoEvidence bool, label string) (Verdict, string) {
 	if len(present) == 0 {
 		return VerdictNotJudged, "no evidence to derive (n/a)"
 	}
@@ -339,7 +349,10 @@ func judgeSet(state cursor.State, present []bool, ids []string, ticketsRaw strin
 			if missing := missingIDs(present, ids); len(missing) > 0 {
 				detail += ": " + namedIDs(missing)
 			}
-			if existing == 0 && ticketsRaw != "" {
+			switch {
+			case existing == 0 && anchoredNoEvidence:
+				detail += " — ledger lines for the id(s) exist but none contains done/complete/completed as a whole word"
+			case existing == 0 && ticketsRaw != "":
 				detail += fmt.Sprintf(" — tickets: %q resolved but every id is missing; check it for a typo", ticketsRaw)
 			}
 			return VerdictTickedMissing, detail
@@ -480,6 +493,24 @@ func implementEvidence(ledgerRaw string, ids []string) map[string]bool {
 		}
 	}
 	return evidenced
+}
+
+// implementAnchoredLines reports, per id, whether ANY ledger line starts
+// with "<id>:" — regardless of a done-word. Used only to pick the right
+// zero-evidence message (I117): an anchored line proves the tickets value
+// resolved to real ledger entries, so the miss is the done-word wording,
+// not a typo. It never contributes evidence.
+func implementAnchoredLines(ledgerRaw string, ids []string) map[string]bool {
+	anchored := map[string]bool{}
+	for _, line := range strings.Split(ledgerRaw, "\n") {
+		trimmed := strings.TrimLeft(strings.TrimSpace(line), "-* ")
+		for _, id := range ids {
+			if !anchored[id] && strings.HasPrefix(trimmed, id+":") {
+				anchored[id] = true
+			}
+		}
+	}
+	return anchored
 }
 
 // issueIDs returns the set of docs/issues ticket ids present on disk (files

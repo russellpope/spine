@@ -612,6 +612,85 @@ func TestTickedMissingAllMissingMentionsTicketsValue(t *testing.T) {
 	}
 }
 
+// I117: when implement is ticked with zero evidence but ledger lines for
+// the anchored ids DO exist, the miss is the done-word requirement, not a
+// tickets: typo — the detail must name the rule and suppress the typo hint.
+func TestImplementAllMissingWithAnchoredLinesNamesDoneWordRule(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement, functional-test]\n")
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I001\nstages: grill[x] prd[x] issues[x] implement[x] functional-test[<]\n"+
+		"<!-- /spine:cursor -->\n\n- I001: shipped and declared\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	impl := rowByName(t, rep.Stages, "implement")
+	if impl.Verdict != stages.VerdictTickedMissing {
+		t.Fatalf("implement verdict = %s (%s), want ticked-missing", impl.Verdict, impl.Detail)
+	}
+	if !strings.Contains(impl.Detail, "done/complete/completed") || !strings.Contains(impl.Detail, "as a whole word") {
+		t.Errorf("Detail = %q, want the done-word whole-word requirement named", impl.Detail)
+	}
+	if strings.Contains(impl.Detail, "typo") {
+		t.Errorf("Detail = %q, want the typo hint suppressed — the ids demonstrably resolved", impl.Detail)
+	}
+}
+
+// I117 negative control: with no ledger line for the id at all, the I032
+// typo hint stands verbatim — proving the anchored/absent split is
+// load-bearing.
+func TestImplementAllMissingNoAnchoredLinesKeepsTypoHint(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement, functional-test]\n")
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I001\nstages: grill[x] prd[x] issues[x] implement[x] functional-test[<]\n"+
+		"<!-- /spine:cursor -->\n\n- unrelated ledger prose\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	impl := rowByName(t, rep.Stages, "implement")
+	if impl.Verdict != stages.VerdictTickedMissing {
+		t.Fatalf("implement verdict = %s (%s), want ticked-missing", impl.Verdict, impl.Detail)
+	}
+	if !strings.Contains(impl.Detail, "typo") {
+		t.Errorf("Detail = %q, want the typo hint for a fully-absent id", impl.Detail)
+	}
+	if strings.Contains(impl.Detail, "as a whole word") {
+		t.Errorf("Detail = %q, want no done-word message when no line anchors the id", impl.Detail)
+	}
+}
+
+// I117 mixed case: one id anchored without a done-word, one absent
+// entirely. Any anchored line proves the tickets value is not a typo, so
+// the wording message wins — while the missing-ids list still names both.
+func TestImplementMixedAnchoredAndAbsentGetsWordingMessage(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement, functional-test]\n")
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
+	writeFile(t, dir, "docs/issues/I002-b.md", "---\nid: I002\n---\nx\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I001,I002\nstages: grill[x] prd[x] issues[x] implement[x] functional-test[<]\n"+
+		"<!-- /spine:cursor -->\n\n- I001: work declared\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	impl := rowByName(t, rep.Stages, "implement")
+	if impl.Verdict != stages.VerdictTickedMissing {
+		t.Fatalf("implement verdict = %s (%s), want ticked-missing", impl.Verdict, impl.Detail)
+	}
+	if !strings.Contains(impl.Detail, "as a whole word") || strings.Contains(impl.Detail, "typo") {
+		t.Errorf("Detail = %q, want the wording message to win the mixed case", impl.Detail)
+	}
+	if !strings.Contains(impl.Detail, "I001") || !strings.Contains(impl.Detail, "I002") {
+		t.Errorf("Detail = %q, want the missing-ids list still naming both ids", impl.Detail)
+	}
+}
+
 // FromResult must accept an already-loaded cursor.Result (cmd/spine's
 // cursor command has one already; it must not need to re-read the repo).
 func TestFromResultMatchesDerive(t *testing.T) {
