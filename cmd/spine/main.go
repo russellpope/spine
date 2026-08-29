@@ -41,7 +41,7 @@ commands:
   eval       manage docs/evals (new, add-run, list)
   doctor     read-only workflow health checks
   audit      verify declared model routing (routing) or stage cursor derivation (stages) against on-disk artifacts
-  gate       run a gate-pack check class (gate <pack>[@<v>] <check> [--dir D])
+  gate       run a gate-pack check class (gate [--dir D] <pack>[@<v>] <check>)
   checkpoint write or replay a session checkpoint (new, latest, list)
   cursor     print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
   model      resolve the model table for a (flavor, tier) pair (read-only)
@@ -99,12 +99,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func cmdInit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	profile := fs.String("profile", "", "profile: "+strings.Join(tmpl.Profiles(), " | "))
 	dir := fs.String("dir", ".", "repo root")
 	name := fs.String("name", "", "project name (default: basename of dir)")
 	owner := fs.String("owner", "", "owner for maikanban.repositorySlug (default: parsed from origin)")
-	if err := fs.Parse(args); err != nil {
+	if _, ok := parseArgs(fs, args, "init", `usage: spine init [--profile P] [--dir D] [--name N] [--owner O]`, 0, stderr); !ok {
 		return 2
 	}
 	p := *profile
@@ -146,11 +145,10 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 
 func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	write := fs.Bool("write", false, "apply changes (default: dry-run diff)")
 	force := fs.Bool("force", false, "regenerate files with unrecognized local edits (diff shows what gets dropped)")
-	if err := fs.Parse(args); err != nil {
+	if _, ok := parseArgs(fs, args, "update", `usage: spine update [--dir D] [--write] [--force]`, 0, stderr); !ok {
 		return 2
 	}
 	if *write {
@@ -275,17 +273,13 @@ func cmdADR(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "new":
 		fs := flag.NewFlagSet("adr new", flag.ContinueOnError)
-		fs.SetOutput(stderr)
 		dir := fs.String("dir", ".", "repo root")
 		supersedes := fs.Int("supersedes", 0, "ADR number this decision supersedes")
-		if err := fs.Parse(args[1:]); err != nil {
+		pos, ok := parseArgs(fs, args[1:], "adr new", `usage: spine adr new [--dir D] [--supersedes N] "Title" (flags before title)`, 1, stderr)
+		if !ok {
 			return 2
 		}
-		if fs.NArg() != 1 {
-			fmt.Fprintln(stderr, `usage: spine adr new [--dir D] [--supersedes N] "Title" (flags before title)`)
-			return 2
-		}
-		path, err := adr.New(*dir, fs.Arg(0), *supersedes)
+		path, err := adr.New(*dir, pos[0], *supersedes)
 		if err != nil {
 			fmt.Fprintln(stderr, "adr new:", err)
 			return 2
@@ -294,10 +288,9 @@ func cmdADR(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "list":
 		fs := flag.NewFlagSet("adr list", flag.ContinueOnError)
-		fs.SetOutput(stderr)
 		dir := fs.String("dir", ".", "repo root")
 		asJSON := fs.Bool("json", false, "machine-readable output")
-		if err := fs.Parse(args[1:]); err != nil {
+		if _, ok := parseArgs(fs, args[1:], "adr list", `usage: spine adr list [--dir D] [--json]`, 0, stderr); !ok {
 			return 2
 		}
 		entries, err := adr.List(*dir)
@@ -352,17 +345,15 @@ func cmdHandoff(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "new":
 		fs := flag.NewFlagSet("handoff new", flag.ContinueOnError)
-		fs.SetOutput(stderr)
 		dir := fs.String("dir", ".", "repo root")
-		if err := fs.Parse(args[1:]); err != nil {
+		pos, ok := parseArgs(fs, args[1:], "handoff new",
+			`usage: spine handoff new [--dir D] "Topic" (flags before topic)`+"\n"+
+				`  embeds the cursor block, then the newest checkpoint: facts region verbatim, model region under "Prior narrative (model-authored, not evidence)"`,
+			1, stderr)
+		if !ok {
 			return 2
 		}
-		if fs.NArg() != 1 {
-			fmt.Fprintln(stderr, `usage: spine handoff new [--dir D] "Topic" (flags before topic)`+"\n"+
-				`  embeds the cursor block, then the newest checkpoint: facts region verbatim, model region under "Prior narrative (model-authored, not evidence)"`)
-			return 2
-		}
-		path, embeddedCursor, err := handoff.NewWithCursor(*dir, fs.Arg(0))
+		path, embeddedCursor, err := handoff.NewWithCursor(*dir, pos[0])
 		if err != nil {
 			fmt.Fprintln(stderr, "handoff new:", err)
 			return 2
@@ -374,10 +365,9 @@ func cmdHandoff(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "list":
 		fs := flag.NewFlagSet("handoff list", flag.ContinueOnError)
-		fs.SetOutput(stderr)
 		dir := fs.String("dir", ".", "repo root")
 		asJSON := fs.Bool("json", false, "machine-readable output")
-		if err := fs.Parse(args[1:]); err != nil {
+		if _, ok := parseArgs(fs, args[1:], "handoff list", `usage: spine handoff list [--dir D] [--json]`, 0, stderr); !ok {
 			return 2
 		}
 		entries, err := handoff.List(*dir)
@@ -417,11 +407,10 @@ func cmdHandoff(args []string, stdout, stderr io.Writer) int {
 
 func cmdHandoffLatest(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("handoff latest", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	fleet := fs.String("fleet", "", "scan every child repo of DIR instead of one repo")
-	if err := fs.Parse(args); err != nil {
+	if _, ok := parseArgs(fs, args, "handoff latest", `usage: spine handoff latest [--dir D] [--json] [--fleet DIR]`, 0, stderr); !ok {
 		return 2
 	}
 	for _, f := range []struct{ name, value string }{{"fleet", *fleet}, {"dir", *dir}} {
@@ -502,10 +491,9 @@ func ageDays(d time.Time) int {
 
 func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	asJSON := fs.Bool("json", false, "machine-readable output")
-	if err := fs.Parse(args); err != nil {
+	if _, ok := parseArgs(fs, args, "doctor", `usage: spine doctor [--dir D] [--json]`, 0, stderr); !ok {
 		return 2
 	}
 	findings, err := doctor.Run(*dir)
@@ -545,16 +533,12 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "new":
 		fs := flag.NewFlagSet("eval new", flag.ContinueOnError)
-		fs.SetOutput(stderr)
 		dir := fs.String("dir", ".", "repo root")
-		if err := fs.Parse(args[1:]); err != nil {
+		pos, ok := parseArgs(fs, args[1:], "eval new", `usage: spine eval new [--dir D] "Title" (flags before title)`, 1, stderr)
+		if !ok {
 			return 2
 		}
-		if fs.NArg() != 1 {
-			fmt.Fprintln(stderr, `usage: spine eval new [--dir D] "Title" (flags before title)`)
-			return 2
-		}
-		path, err := eval.New(*dir, fs.Arg(0))
+		path, err := eval.New(*dir, pos[0])
 		if err != nil {
 			fmt.Fprintln(stderr, "eval new:", err)
 			return 2
@@ -563,11 +547,10 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "add-run":
 		fs := flag.NewFlagSet("eval add-run", flag.ContinueOnError)
-		fs.SetOutput(stderr)
 		dir := fs.String("dir", ".", "repo root")
 		evalRef := fs.String("eval", "", "eval dir name (date prefix optional)")
 		name := fs.String("name", "", "run name (becomes runs/<name>.md)")
-		if err := fs.Parse(args[1:]); err != nil {
+		if _, ok := parseArgs(fs, args[1:], "eval add-run", `usage: spine eval add-run [--dir D] --eval E --name N`, 0, stderr); !ok {
 			return 2
 		}
 		if *evalRef == "" || *name == "" {
@@ -583,10 +566,9 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "list":
 		fs := flag.NewFlagSet("eval list", flag.ContinueOnError)
-		fs.SetOutput(stderr)
 		dir := fs.String("dir", ".", "repo root")
 		asJSON := fs.Bool("json", false, "machine-readable output")
-		if err := fs.Parse(args[1:]); err != nil {
+		if _, ok := parseArgs(fs, args[1:], "eval list", `usage: spine eval list [--dir D] [--json]`, 0, stderr); !ok {
 			return 2
 		}
 		evals, problems, err := eval.List(*dir)
@@ -639,29 +621,27 @@ func cmdEval(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// cmdGate is a thin dispatcher over gate.Run: `spine gate <pack>[@<v>] <check>
-// [--dir D]`. The pack owns the exit-code contract (0 pass, 1 findings,
-// 2 misconfiguration), the results-contract emitter and the human table, so
-// nothing but flag parsing lives here.
+// cmdGate is a thin dispatcher over gate.Run: `spine gate [--dir D]
+// <pack>[@<v>] <check>`. Flags precede the positionals like every other
+// subcommand (I119 — the pre-parse positional read this replaced made
+// `gate --dir X pack check` mis-read the pack as "--dir"). The pack owns
+// the exit-code contract (0 pass, 1 findings, 2 misconfiguration), the
+// results-contract emitter and the human table, so nothing but flag
+// parsing lives here.
 func cmdGate(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 2 {
-		fmt.Fprint(stderr, gateUsage)
-		return 2
-	}
-	pack, check := args[0], args[1]
-	fs := flag.NewFlagSet("gate "+pack+" "+check, flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := flag.NewFlagSet("gate", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "repo root to check")
-	if err := fs.Parse(args[2:]); err != nil {
+	pos, ok := parseArgs(fs, args, "gate", gateUsage, 2, stderr)
+	if !ok {
 		return 2
 	}
-	return gate.Run(pack, check, *dir, stdout, stderr, gate.EnvConfig())
+	return gate.Run(pos[0], pos[1], *dir, stdout, stderr, gate.EnvConfig())
 }
 
 // gateUsage documents the gate pack in CONTEXT.md vocabulary: a gate pack
 // is a versioned battery of check classes; one invocation runs one check
 // class and every finding is attributable to <pack>@<version>/<check>.
-var gateUsage = `usage: spine gate <pack>[@<v>] <check> [--dir D]
+var gateUsage = `usage: spine gate [--dir D] <pack>[@<v>] <check>
 
 pack:    ` + gate.PackName + ` (version ` + gate.PackID() + `)
 checks:  ` + strings.Join(gate.CheckNames(), ", ") + `
@@ -813,13 +793,12 @@ func cmdAudit(args []string, stdout, stderr io.Writer) int {
 // warnings to stderr, exit 1 only on a blocking (silent-descent) verdict.
 func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("audit routing", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	transcripts := fs.String("transcripts", "", "harness transcript dir (default: repo, git-worktree, and matching project dirs under ~/.claude/projects)")
 	codexSessions := fs.String("codex-sessions", "", "codex session dir (default: $CODEX_HOME/sessions, else ~/.codex/sessions)")
 	since := fs.String("since", "", "scope to sessions at/after this cutoff (RFC3339, or YYYY-MM-DD for local midnight); operator escape hatch, default: unscoped")
 	session := fs.String("session", "", "scope to one session id (claude: the session's file/dir base name; codex: session_meta's root session_id); default: unscoped")
-	if err := fs.Parse(args); err != nil {
+	if _, ok := parseArgs(fs, args, "audit routing", `usage: spine audit routing [--dir D] [--transcripts DIR] [--codex-sessions DIR] [--since TIME] [--session ID]`, 0, stderr); !ok {
 		return 2
 	}
 	auditOpts := audit.Options{RepoDir: *dir, Since: *since, Session: *session}
@@ -933,9 +912,8 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 // doc for the three quiet cases this collapses.
 func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("audit stages", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
-	if err := fs.Parse(args); err != nil {
+	if _, ok := parseArgs(fs, args, "audit stages", `usage: spine audit stages [--dir D]`, 0, stderr); !ok {
 		return 2
 	}
 	rep, err := stages.Derive(*dir)
@@ -1032,7 +1010,6 @@ func cmdCheckpoint(args []string, stdout, stderr io.Writer) int {
 
 func cmdCheckpointNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("checkpoint new", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	from := fs.String("from", "", "narrative file becoming the model region")
 	touched := fs.String("touched", "", "comma-separated files touched (order preserved)")
@@ -1040,7 +1017,7 @@ func cmdCheckpointNew(args []string, stdout, stderr io.Writer) int {
 	effort := fs.String("effort", "", "recommended per-leg effort")
 	slug := fs.String("slug", "", "filename slug (default: derived from the ## Task line)")
 	factsOnly := fs.Bool("facts-only", false, "write facts with narrative: missing and an empty model region")
-	if err := fs.Parse(args); err != nil {
+	if _, ok := parseArgs(fs, args, "checkpoint new", `usage: spine checkpoint new [--dir D] --from <narrative.md> --touched <csv> --gate <pass|fail|none> --effort <level> [--slug s] [--facts-only]`, 0, stderr); !ok {
 		return 2
 	}
 	path, err := checkpoint.New(checkpoint.Options{
@@ -1074,9 +1051,8 @@ func splitTouched(csv string) []string {
 
 func cmdCheckpointLatest(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("checkpoint latest", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
-	if err := fs.Parse(args); err != nil {
+	if _, pok := parseArgs(fs, args, "checkpoint latest", `usage: spine checkpoint latest [--dir D]`, 0, stderr); !pok {
 		return 2
 	}
 	e, ok, err := checkpoint.Latest(*dir)
@@ -1105,9 +1081,8 @@ func cmdCheckpointLatest(args []string, stdout, stderr io.Writer) int {
 
 func cmdCheckpointList(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("checkpoint list", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
-	if err := fs.Parse(args); err != nil {
+	if _, ok := parseArgs(fs, args, "checkpoint list", `usage: spine checkpoint list [--dir D]`, 0, stderr); !ok {
 		return 2
 	}
 	entries, err := checkpoint.List(*dir)
@@ -1123,13 +1098,16 @@ func cmdCheckpointList(args []string, stdout, stderr io.Writer) int {
 
 // cmdCursor is a thin, read-only printer over cursor.Load: it prints the
 // parsed stage cursor plus the live derivation verdict (internal/stages,
-// I019). It always exits 0: a cursor mismatch or parse finding is
-// surfaced, never gated, here — spine audit stages is where that becomes a
-// blocking check. --quiet is for hook use: it silences the "nothing to
-// report" case (no spine repo, no ledger, no cursor block) but never
-// silences a cursor that was actually found, malformed or not — the
-// SessionStart hook (I021) needs real output precisely when a cursor
-// exists.
+// I019). Flag-only invocations always exit 0: a cursor mismatch or parse
+// finding is surfaced, never gated, here — spine audit stages is where
+// that becomes a blocking check. Positionals are a usage error (I119):
+// hooks never pass them, and the old behavior — an unknown sub-subcommand
+// like `show` silently swallowed, its trailing flags dropped, and the CWD
+// repo answered for with exit 0 — was a clean exit over wrong data.
+// --quiet is for hook use: it silences the "nothing to report" case (no
+// spine repo, no ledger, no cursor block) but never silences a cursor that
+// was actually found, malformed or not — the SessionStart hook (I021)
+// needs real output precisely when a cursor exists.
 //
 // The derivation line is one of three: "clean" (no contradictions), "n/a
 // (cursor malformed)" (I024 — grammar findings on the cursor block itself,
@@ -1150,13 +1128,20 @@ func cmdCursor(args []string, stdout, stderr io.Writer) int {
 			return cmdCursorHere(args[1:], stdout, stderr)
 		case "set":
 			return cmdCursorSet(args[1:], stdout, stderr)
+		default:
+			// A non-flag first token is an unknown sub-subcommand, reported
+			// like the other dispatchers (I119) — never silently swallowed
+			// into the bare printer.
+			if !strings.HasPrefix(args[0], "-") {
+				fmt.Fprintf(stderr, "unknown cursor subcommand %q\n%s\n", args[0], cursorUsage)
+				return 2
+			}
 		}
 	}
 	fs := flag.NewFlagSet("cursor", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	quiet := fs.Bool("quiet", false, "print nothing and exit 0 when there is no spine cursor (hook-friendly)")
-	if err := fs.Parse(args); err != nil {
+	if _, ok := parseArgs(fs, args, "cursor", cursorUsage, 0, stderr); !ok {
 		return 2
 	}
 	res, err := cursor.Load(*dir)
@@ -1231,6 +1216,10 @@ func cmdCursor(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// cursorUsage names the read form and the write verbs; the unknown-
+// subcommand error above leans on it to list the real verbs.
+const cursorUsage = `usage: spine cursor [--dir D] [--quiet]  (or: spine cursor <start|tick|here|set> [flags])`
+
 // cursorForWrite loads the working-home cursor and refuses mutations of a
 // malformed block. A writer must never turn a diagnostic parse into a
 // partially informed rewrite; `set` can normalize formatting once the block
@@ -1277,16 +1266,16 @@ func takeForce(args []string) ([]string, bool) {
 func cmdCursorStart(args []string, stdout, stderr io.Writer) int {
 	args, force := takeForce(args)
 	fs := flag.NewFlagSet("cursor start", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	effort := fs.String("effort", "", "effort name")
 	prd := fs.String("prd", "", "PRD path")
 	tickets := fs.String("tickets", "", "ticket range")
-	if err := fs.Parse(args); err != nil {
+	const startUsage = "usage: spine cursor start --effort <name> [--prd <path>] [--tickets <range>] [--force] [--dir D]"
+	if _, ok := parseArgs(fs, args, "cursor start", startUsage, 0, stderr); !ok {
 		return 2
 	}
-	if fs.NArg() != 0 || strings.TrimSpace(*effort) == "" {
-		fmt.Fprintln(stderr, "usage: spine cursor start --effort <name> [--prd <path>] [--tickets <range>] [--force] [--dir D]")
+	if strings.TrimSpace(*effort) == "" {
+		fmt.Fprintln(stderr, startUsage)
 		return 2
 	}
 	res, err := cursor.Load(*dir)
@@ -1322,13 +1311,9 @@ func cmdCursorStart(args []string, stdout, stderr io.Writer) int {
 func cmdCursorTick(args []string, stdout, stderr io.Writer) int {
 	args, force := takeForce(args)
 	fs := flag.NewFlagSet("cursor tick", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "usage: spine cursor tick [--dir D] <stage> [--force]")
+	pos, pok := parseArgs(fs, args, "cursor tick", "usage: spine cursor tick [--dir D] <stage> [--force]", 1, stderr)
+	if !pok {
 		return 2
 	}
 	c, err := cursorForWrite(*dir)
@@ -1336,9 +1321,9 @@ func cmdCursorTick(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "cursor tick:", err)
 		return 1
 	}
-	idx := cursorStageIndex(c, fs.Arg(0))
+	idx := cursorStageIndex(c, pos[0])
 	if idx < 0 {
-		fmt.Fprintf(stderr, "cursor tick: stage %q is not in the cursor\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "cursor tick: stage %q is not in the cursor\n", pos[0])
 		return 2
 	}
 	candidate := c
@@ -1370,19 +1355,15 @@ func cmdCursorTick(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "cursor tick:", err)
 		return 2
 	}
-	fmt.Fprintf(stdout, "cursor ticked: %s\n", fs.Arg(0))
+	fmt.Fprintf(stdout, "cursor ticked: %s\n", pos[0])
 	return 0
 }
 
 func cmdCursorHere(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("cursor here", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "usage: spine cursor here [--dir D] <stage>")
+	pos, pok := parseArgs(fs, args, "cursor here", "usage: spine cursor here [--dir D] <stage>", 1, stderr)
+	if !pok {
 		return 2
 	}
 	c, err := cursorForWrite(*dir)
@@ -1390,9 +1371,9 @@ func cmdCursorHere(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "cursor here:", err)
 		return 1
 	}
-	idx := cursorStageIndex(c, fs.Arg(0))
+	idx := cursorStageIndex(c, pos[0])
 	if idx < 0 {
-		fmt.Fprintf(stderr, "cursor here: stage %q is not in the cursor\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "cursor here: stage %q is not in the cursor\n", pos[0])
 		return 2
 	}
 	for i := range c.Stages {
@@ -1407,21 +1388,16 @@ func cmdCursorHere(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "cursor here:", err)
 		return 2
 	}
-	fmt.Fprintf(stdout, "cursor here: %s\n", fs.Arg(0))
+	fmt.Fprintf(stdout, "cursor here: %s\n", pos[0])
 	return 0
 }
 
 func cmdCursorSet(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("cursor set", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	prd := fs.String("prd", "", "PRD path")
 	tickets := fs.String("tickets", "", "ticket range")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: spine cursor set [--prd <path>] [--tickets <range>] [--dir D]")
+	if _, ok := parseArgs(fs, args, "cursor set", "usage: spine cursor set [--prd <path>] [--tickets <range>] [--dir D]", 0, stderr); !ok {
 		return 2
 	}
 	c, err := cursorForWrite(*dir)
@@ -1486,6 +1462,37 @@ func buildLine(bi *debug.BuildInfo) string {
 	return "build: " + strings.Join(parts, " ")
 }
 
+// parseArgs is the shared strict parse for every subcommand (I119,
+// generalizing I116): it wires the FlagSet to stderr, parses, then rejects
+// a flag-like token among the positionals (the ordering rule) and any
+// positional count other than wantN — a stray positional is discarded
+// input, the same defect as a dropped flag. wantN < 0 skips the arity
+// check. On violation the command-prefixed rule plus usage goes to stderr
+// and the caller returns 2. Ordering is judged before arity so the
+// correct-arity shape (I116's `model claude --json`) still names the rule.
+// Callers that pre-strip args (takeForce) pass the stripped slice, keeping
+// the guard on what the FlagSet actually saw.
+func parseArgs(fs *flag.FlagSet, args []string, name, usage string, wantN int, stderr io.Writer) ([]string, bool) {
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return nil, false
+	}
+	pos := fs.Args()
+	if tok, prev := flagAmongPositionals(pos); tok != "" {
+		fmt.Fprintf(stderr, "%s: flags must precede positionals (saw %q after %q)\n%s\n", name, tok, prev, strings.TrimRight(usage, "\n"))
+		return nil, false
+	}
+	if wantN >= 0 && len(pos) > wantN {
+		fmt.Fprintf(stderr, "%s: unexpected argument %q\n%s\n", name, pos[wantN], strings.TrimRight(usage, "\n"))
+		return nil, false
+	}
+	if wantN >= 0 && len(pos) < wantN {
+		fmt.Fprintln(stderr, strings.TrimRight(usage, "\n"))
+		return nil, false
+	}
+	return pos, true
+}
+
 // flagAmongPositionals returns the first flag-like token (leading "-")
 // left among the positionals after a successful parse, and the positional
 // preceding it. A first-position hit is only reachable via an explicit
@@ -1508,28 +1515,19 @@ func flagAmongPositionals(args []string) (tok, prev string) {
 // second validation path here.
 func cmdModel(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("model", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	effort := fs.Bool("effort", false, "print the resolved effort instead of the bare id")
 	asJSON := fs.Bool("json", false, "print the whole resolved entry as JSON")
 	alternate := fs.Bool("alternate", false, "print the cell's alternate instead of its primary id/effort")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
+	// I116's ordering guard now lives in parseArgs (I119 generalized it to
+	// every subcommand); this command's error text is the shape the helper
+	// standardizes on.
 	const modelUsage = `usage: spine model [--dir D] [--alternate] [--effort|--json] <flavor> <tier>`
-	// I116: stdlib parsing stops at the first positional, so a flag placed
-	// after one is left among the positionals — historically a bare usage
-	// error (or an unknown-tier error) that read as the flavor being
-	// broken. Name the ordering rule next to the offending token instead.
-	if tok, prev := flagAmongPositionals(fs.Args()); tok != "" {
-		fmt.Fprintf(stderr, "model: flags must precede positionals (saw %q after %q)\n%s\n", tok, prev, modelUsage)
+	pos, ok := parseArgs(fs, args, "model", modelUsage, 2, stderr)
+	if !ok {
 		return 2
 	}
-	if fs.NArg() != 2 {
-		fmt.Fprintln(stderr, modelUsage)
-		return 2
-	}
-	entry, err := model.Resolve(*dir, fs.Arg(0), fs.Arg(1))
+	entry, err := model.Resolve(*dir, pos[0], pos[1])
 	if err != nil {
 		fmt.Fprintln(stderr, "model:", err)
 		return 2
@@ -1585,14 +1583,13 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 
 func cmdAdopt(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("adopt", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repo root")
 	profile := fs.String("profile", "", "override profile detection")
 	name := fs.String("name", "", "project name (default: basename of dir)")
 	write := fs.Bool("write", false, "apply the plan (default: dry-run)")
 	force := fs.Bool("force", false, "regenerate files with unrecognized local edits")
 	asJSON := fs.Bool("json", false, "machine-readable plan output")
-	if err := fs.Parse(args); err != nil {
+	if _, ok := parseArgs(fs, args, "adopt", `usage: spine adopt [--dir D] [--profile P] [--name N] [--write] [--force] [--json]`, 0, stderr); !ok {
 		return 2
 	}
 	if *write {

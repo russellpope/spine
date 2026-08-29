@@ -457,7 +457,7 @@ func TestGatePositiveControls(t *testing.T) {
 		t.Run(tc.check+"/good", func(t *testing.T) {
 			setGateEnv(t)
 			dir := gateRepo(t, tc.good)
-			code, out, errs := runCmd(t, "gate", "go", tc.check, "--dir", dir)
+			code, out, errs := runCmd(t, "gate", "--dir", dir, "go", tc.check)
 			if code != 0 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 			}
@@ -473,7 +473,7 @@ func TestGatePositiveControls(t *testing.T) {
 			dir := gateRepo(t, tc.seeded)
 			results := filepath.Join(t.TempDir(), "results.json")
 			t.Setenv("MAIPIPE_RESULTS", results)
-			code, out, errs := runCmd(t, "gate", "go", tc.check, "--dir", dir)
+			code, out, errs := runCmd(t, "gate", "--dir", dir, "go", tc.check)
 			if code != 1 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 			}
@@ -547,7 +547,7 @@ func TestGateResultsFileOnlyWhenEnvSet(t *testing.T) {
 	dir := gateRepo(t, seeded)
 	results := filepath.Join(t.TempDir(), "results.json")
 
-	code, out, _ := runCmd(t, "gate", "go", "tskip", "--dir", dir)
+	code, out, _ := runCmd(t, "gate", "--dir", dir, "go", "tskip")
 	if code != 1 {
 		t.Fatalf("code=%d", code)
 	}
@@ -559,7 +559,7 @@ func TestGateResultsFileOnlyWhenEnvSet(t *testing.T) {
 	}
 
 	t.Setenv("MAIPIPE_RESULTS", results)
-	code, out, _ = runCmd(t, "gate", "go", "tskip", "--dir", dir)
+	code, out, _ = runCmd(t, "gate", "--dir", dir, "go", "tskip")
 	if code != 1 {
 		t.Fatalf("code=%d", code)
 	}
@@ -579,7 +579,7 @@ func TestGateVersionedPinIsAuthoritative(t *testing.T) {
 	_, seeded := tskipFixtures()
 	dir := gateRepo(t, seeded)
 
-	code, out, errs := runCmd(t, "gate", "go@1", "tskip", "--dir", dir)
+	code, out, errs := runCmd(t, "gate", "--dir", dir, "go@1", "tskip")
 	if code != 1 {
 		t.Fatalf("pinned gate exit = %d, want findings exit 1; stdout=%q stderr=%q", code, out, errs)
 	}
@@ -587,14 +587,14 @@ func TestGateVersionedPinIsAuthoritative(t *testing.T) {
 		t.Errorf("pinned finding code missing from output: %q", out)
 	}
 
-	code, out, errs = runCmd(t, "gate", "go", "tskip", "--dir", dir)
+	code, out, errs = runCmd(t, "gate", "--dir", dir, "go", "tskip")
 	if code != 1 || !strings.Contains(out, gate.PackID()+"/tskip") {
 		t.Errorf("bare go behavior changed: exit=%d stdout=%q stderr=%q", code, out, errs)
 	}
 
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
-	code, out, errs = runCmd(t, "gate", "go@9", "tskip", "--dir", dir)
+	code, out, errs = runCmd(t, "gate", "--dir", dir, "go@9", "tskip")
 	if code != 2 {
 		t.Errorf("unshipped pin exit = %d, want 2; stdout=%q stderr=%q", code, out, errs)
 	}
@@ -615,7 +615,7 @@ func TestGateResultsDeterministic(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		results := filepath.Join(t.TempDir(), "results.json")
 		t.Setenv("MAIPIPE_RESULTS", results)
-		if code, _, errs := runCmd(t, "gate", "go", "binary-hygiene", "--dir", dir); code != 1 {
+		if code, _, errs := runCmd(t, "gate", "--dir", dir, "go", "binary-hygiene"); code != 1 {
 			t.Fatalf("code=%d stderr=%q", code, errs)
 		}
 		b, err := os.ReadFile(results)
@@ -637,19 +637,19 @@ func TestGateTskipAllowlist(t *testing.T) {
 	dir := gateRepo(t, seeded)
 	for _, allow := range []string{"pkg/skipped_test.go", "pkg/skipped_test.go:10,pkg/skipped_test.go:14,pkg/skipped_test.go:19", " , pkg/skipped_test.go "} {
 		t.Setenv("SPINE_GATE_TSKIP_ALLOW", allow)
-		code, out, errs := runCmd(t, "gate", "go", "tskip", "--dir", dir)
+		code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "tskip")
 		if code != 0 {
 			t.Errorf("allow=%q: code=%d stdout=%q stderr=%q", allow, code, out, errs)
 		}
 	}
 	// A non-matching line number still fails: the allowlist is per call.
 	t.Setenv("SPINE_GATE_TSKIP_ALLOW", "pkg/skipped_test.go:999")
-	if code, _, _ := runCmd(t, "gate", "go", "tskip", "--dir", dir); code != 1 {
+	if code, _, _ := runCmd(t, "gate", "--dir", dir, "go", "tskip"); code != 1 {
 		t.Errorf("stale line allowlist should not suppress: code=%d", code)
 	}
 	// A malformed entry is misconfiguration and names the variable.
 	t.Setenv("SPINE_GATE_TSKIP_ALLOW", "pkg/skipped_test.go:notaline")
-	code, _, errs := runCmd(t, "gate", "go", "tskip", "--dir", dir)
+	code, _, errs := runCmd(t, "gate", "--dir", dir, "go", "tskip")
 	if code != 2 || !strings.Contains(errs, "SPINE_GATE_TSKIP_ALLOW") {
 		t.Errorf("code=%d stderr=%q", code, errs)
 	}
@@ -663,12 +663,12 @@ func TestGateMisconfiguration(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"unknown pack", []string{"gate", "rust", "tskip", "--dir", dir}, "unshipped pack"},
-		{"unknown check", []string{"gate", "go", "bogus", "--dir", dir}, "unknown check"},
+		{"unknown pack", []string{"gate", "--dir", dir, "rust", "tskip"}, "unshipped pack"},
+		{"unknown check", []string{"gate", "--dir", dir, "go", "bogus"}, "unknown check"},
 		{"missing args", []string{"gate", "go"}, "usage: spine gate"},
-		{"dir not a directory", []string{"gate", "go", "tskip", "--dir", filepath.Join(dir, "go.mod")}, "not a directory"},
-		{"dir missing", []string{"gate", "go", "tskip", "--dir", filepath.Join(dir, "nope")}, "--dir"},
-		{"not a git repo", []string{"gate", "go", "binary-hygiene", "--dir", t.TempDir()}, "git"},
+		{"dir not a directory", []string{"gate", "--dir", filepath.Join(dir, "go.mod"), "go", "tskip"}, "not a directory"},
+		{"dir missing", []string{"gate", "--dir", filepath.Join(dir, "nope"), "go", "tskip"}, "--dir"},
+		{"not a git repo", []string{"gate", "--dir", t.TempDir(), "go", "binary-hygiene"}, "git"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -713,7 +713,7 @@ func TestGateGitignoreControlArmsIndependent(t *testing.T) {
 	t.Setenv("SPINE_GATE_BUILD_OUTPUTS", "bin/spine")
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
-	code, out, errs := runCmd(t, "gate", "go", "gitignore-control", "--dir", dir)
+	code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "gitignore-control")
 	if code != 1 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 	}
@@ -754,7 +754,7 @@ func TestGateResultsOmitLineZero(t *testing.T) {
 	t.Setenv("SPINE_GATE_BUILD_OUTPUTS", "bin/spine")
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
-	code, out, errs := runCmd(t, "gate", "go", "gitignore-control", "--dir", dir)
+	code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "gitignore-control")
 	if code != 1 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 	}
@@ -781,7 +781,7 @@ func TestGateFixtureManifestMissing(t *testing.T) {
 	t.Setenv("SPINE_GATE_FIXTURE_MANIFEST", "testdata/manifest.md")
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
-	if code, _, errs := runCmd(t, "gate", "go", "fixture-manifest", "--dir", dir); code != 1 {
+	if code, _, errs := runCmd(t, "gate", "--dir", dir, "go", "fixture-manifest"); code != 1 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
 	r := readResults(t, results)
@@ -801,7 +801,7 @@ func TestGateDeadCodeRootRule(t *testing.T) {
 	dir := gateRepo(t, seeded)
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
-	code, out, errs := runCmd(t, "gate", "go", "dead-code-callgraph", "--dir", dir)
+	code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "dead-code-callgraph")
 	if code != 1 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 	}
@@ -847,7 +847,7 @@ func TestGateNPlusOneCallSites(t *testing.T) {
 	t.Setenv("SPINE_GATE_N_PLUS_ONE_CLIENTS", "Query")
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
-	if code, _, errs := runCmd(t, "gate", "go", "n-plus-one", "--dir", dir); code != 1 {
+	if code, _, errs := runCmd(t, "gate", "--dir", dir, "go", "n-plus-one"); code != 1 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
 	r := readResults(t, results)
@@ -914,7 +914,7 @@ func TestGateTypeCheckedClassesRejectNonCompilingRepo(t *testing.T) {
 		dir := gateRepo(t, tc.files)
 		for _, check := range []string{"deferred-cleanup-errcheck", "dead-code-callgraph"} {
 			t.Run(tc.name+"/"+check, func(t *testing.T) {
-				code, out, errs := runCmd(t, "gate", "go", check, "--dir", dir)
+				code, out, errs := runCmd(t, "gate", "--dir", dir, "go", check)
 				if code != 2 {
 					t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 				}
@@ -940,7 +940,7 @@ func TestGateDeadCodeInterfaceSatisfaction(t *testing.T) {
 	dir := gateRepo(t, good)
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
-	code, out, errs := runCmd(t, "gate", "go", "dead-code-callgraph", "--dir", dir)
+	code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "dead-code-callgraph")
 	if code != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 	}
@@ -969,13 +969,13 @@ func Serve(s server) {
 }
 `),
 	})
-	if code, _, errs := runCmd(t, "gate", "go", "deferred-cleanup-errcheck", "--dir", dir); code != 0 {
+	if code, _, errs := runCmd(t, "gate", "--dir", dir, "go", "deferred-cleanup-errcheck"); code != 0 {
 		t.Fatalf("Shutdown is not a default cleanup name: code=%d stderr=%q", code, errs)
 	}
 	t.Setenv("SPINE_GATE_CLEANUP_FUNCS", "Shutdown")
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
-	if code, _, errs := runCmd(t, "gate", "go", "deferred-cleanup-errcheck", "--dir", dir); code != 1 {
+	if code, _, errs := runCmd(t, "gate", "--dir", dir, "go", "deferred-cleanup-errcheck"); code != 1 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
 	r := readResults(t, results)
@@ -1013,7 +1013,7 @@ func TestGateConfigMisconfiguration(t *testing.T) {
 			for k, v := range tc.env {
 				t.Setenv(k, v)
 			}
-			code, out, errs := runCmd(t, "gate", "go", tc.check, "--dir", dir)
+			code, out, errs := runCmd(t, "gate", "--dir", dir, "go", tc.check)
 			if code != 2 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 			}
@@ -1080,7 +1080,7 @@ func TestGateMutatePositiveControl(t *testing.T) {
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
 
-	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir)
+	code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "mutate")
 	if code != 0 {
 		t.Fatalf("survivors must not fail the advisory lane: code=%d stdout=%q stderr=%q", code, out, errs)
 	}
@@ -1153,7 +1153,7 @@ func TestGateMutatePositiveControl(t *testing.T) {
 // for.
 func TestGateMutateHumanTable(t *testing.T) {
 	dir := mutateFixture(t, mutateSpec, mutateModuleTest)
-	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir)
+	code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "mutate")
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
@@ -1185,7 +1185,7 @@ func TestDouble(t *testing.T) {
 	dir := mutateFixture(t, mutateSpec, red)
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
-	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir)
+	code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "mutate")
 	if code != 1 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 	}
@@ -1266,7 +1266,7 @@ func TestDouble(t *testing.T) {
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
 	t.Setenv("SPINE_GATE_TSKIP_ALLOW", "x_test.go")
-	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir)
+	code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "mutate")
 	if code != 0 {
 		t.Fatalf("control must pass with the stage env scrubbed: code=%d stdout=%q stderr=%q", code, out, errs)
 	}
@@ -1282,7 +1282,7 @@ func TestGateMutateRemovesWorkingCopyOnSuccess(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
 	dir := mutateFixture(t, mutateSpec, mutateModuleTest)
-	if code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir); code != 0 {
+	if code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "mutate"); code != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 	}
 	entries, err := os.ReadDir(tmp)
@@ -1305,7 +1305,7 @@ func TestGateMutateSpecMisconfiguration(t *testing.T) {
 		"calc.go":      []byte(mutateModule),
 		"calc_test.go": []byte(mutateModuleTest),
 	})
-	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", bare)
+	code, out, errs := runCmd(t, "gate", "--dir", bare, "go", "mutate")
 	if code != 2 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 	}
@@ -1323,7 +1323,7 @@ func TestGateMutateSpecMisconfiguration(t *testing.T) {
 		"probes.json":  []byte("{not json"),
 	})
 	t.Setenv("SPINE_GATE_MUTATE_SPEC", "probes.json")
-	code, _, errs = runCmd(t, "gate", "go", "mutate", "--dir", broken)
+	code, _, errs = runCmd(t, "gate", "--dir", broken, "go", "mutate")
 	if code != 2 || !strings.Contains(errs, "probes.json") {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
@@ -1337,7 +1337,7 @@ func TestGateMutateCustomVerify(t *testing.T) {
 	t.Setenv("SPINE_GATE_MUTATE_VERIFY", `grep -q "n \* 2" calc.go`)
 	results := filepath.Join(t.TempDir(), "results.json")
 	t.Setenv("MAIPIPE_RESULTS", results)
-	code, out, errs := runCmd(t, "gate", "go", "mutate", "--dir", dir)
+	code, out, errs := runCmd(t, "gate", "--dir", dir, "go", "mutate")
 	if code != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 	}
@@ -1425,7 +1425,7 @@ func TestGateSyntacticClassesTolerateTestdata(t *testing.T) {
 					t.Setenv(k, v)
 				}
 				dir := gateRepo(t, withTestdata(arm.files))
-				code, out, errs := runCmd(t, "gate", "go", tc.check, "--dir", dir)
+				code, out, errs := runCmd(t, "gate", "--dir", dir, "go", tc.check)
 				if code != arm.want {
 					t.Fatalf("code=%d want %d stdout=%q stderr=%q", code, arm.want, out, errs)
 				}
