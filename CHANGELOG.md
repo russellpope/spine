@@ -6,6 +6,17 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ## Unreleased
 
+### Fixed
+
+- **`adr new --supersedes` no longer parses zero-padded ids as octal.** The
+  flag went through `flag.Int` (base-0), so the conventional zero-padded ids
+  misparsed — `--supersedes 0011` silently flipped ADR **0009** — and
+  `0x11`-style values parsed as hex. The id is now parsed base-10 with a
+  digits-only check; non-digit, explicitly empty, zero, and out-of-range
+  values error naming the rule, and a successful supersede prints
+  `superseded: NNNN` so a wrong target is visible immediately. The ADR-convention README's example is corrected to the
+  flags-first form in the same change. (I120)
+
 ### Changed
 
 - **No subcommand silently discards input.** The I116 ordering guard is

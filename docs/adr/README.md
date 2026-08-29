@@ -6,7 +6,7 @@ the next number). Front-matter fields: `id`, `title`, `status`, `date`, optional
 Statuses: `Accepted` (default) or `Superseded by NNNN`.
 
 The *decision* in an accepted ADR is immutable. Reversing or amending what was decided means a
-NEW ADR that supersedes the old one (`spine adr new "..." --supersedes NNNN`); the superseded
+NEW ADR that supersedes the old one (`spine adr new --supersedes NNNN "..."`); the superseded
 ADR's only decision-level edit is the status flip that supersede performs. Edits that do not
 change the decision — corrected citations and cross-references, typo fixes, a dated note
 pointing at the issue or ADR that refined a consequence — are permitted in place (practised by
