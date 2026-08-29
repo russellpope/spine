@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -110,6 +111,35 @@ func TestVersionCommand(t *testing.T) {
 	code, out, _ := runCmd(t, "version")
 	if code != 0 || !strings.Contains(out, "spine template generation 11") {
 		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
+
+// I118: a second line of build provenance lets two devices compare builds
+// with one command instead of sha256-ing binaries.
+func TestVersionPrintsBuildProvenanceLine(t *testing.T) {
+	code, out, _ := runCmd(t, "version")
+	if code != 0 {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 2 || !strings.HasPrefix(lines[1], "build: ") {
+		t.Fatalf("out=%q, want a second line starting with \"build: \"", out)
+	}
+}
+
+// I118: the formatter degrades gracefully without build info, truncates
+// the revision to 12, and carries the dirty flag.
+func TestBuildLineFormatting(t *testing.T) {
+	if got := buildLine(nil); got != "build: (no build info)" {
+		t.Fatalf("buildLine(nil) = %q", got)
+	}
+	bi := &debug.BuildInfo{Main: debug.Module{Version: "v1.2.3"}, Settings: []debug.BuildSetting{
+		{Key: "vcs.revision", Value: "abcdef1234567890abcdef"},
+		{Key: "vcs.time", Value: "2026-08-28T00:00:00Z"},
+		{Key: "vcs.modified", Value: "true"},
+	}}
+	if got := buildLine(bi); got != "build: v1.2.3 abcdef123456 2026-08-28T00:00:00Z dirty" {
+		t.Fatalf("buildLine = %q", got)
 	}
 }
 

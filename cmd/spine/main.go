@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -81,6 +82,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdModel(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "spine template generation %d\n", tmpl.Version())
+		bi, ok := debug.ReadBuildInfo()
+		if !ok {
+			bi = nil
+		}
+		fmt.Fprintln(stdout, buildLine(bi))
 		return 0
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
@@ -1437,6 +1443,47 @@ func cmdCursorSet(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "cursor updated")
 	return 0
+}
+
+// buildLine formats spine version's provenance line from
+// debug.ReadBuildInfo (I118): module version, vcs revision (12 chars),
+// vcs time, and a dirty flag — enough to compare two devices' builds with
+// one command. No ldflags: `go install` stamps the module version and
+// `go build` in a checkout stamps the vcs fields. Absent fields are
+// omitted; no build info at all degrades to a fixed placeholder rather
+// than an error.
+func buildLine(bi *debug.BuildInfo) string {
+	if bi == nil {
+		return "build: (no build info)"
+	}
+	var rev, vcsTime string
+	dirty := false
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.time":
+			vcsTime = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	var parts []string
+	for _, p := range []string{bi.Main.Version, rev, vcsTime} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	if dirty {
+		parts = append(parts, "dirty")
+	}
+	if len(parts) == 0 {
+		return "build: (no build info)"
+	}
+	return "build: " + strings.Join(parts, " ")
 }
 
 // flagAmongPositionals returns the first flag-like token (leading "-")

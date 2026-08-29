@@ -104,6 +104,17 @@ The coupling is thin by design. maikanban only needs the ledger file convention 
 - The workflow templates assume the superpowers plugin's `.superpowers/sdd/` layout for progress files and checkpoints.
 - Developed and used on macOS; the code is portable Go with no cgo, but other platforms get little testing.
 
+## Install
+
+```sh
+go install github.com/russellpope/spine/cmd/spine@latest
+```
+
+The binary is self-contained — templates are embedded at compile time, and
+nothing else needs to be on the machine. On a second device, `spine version`
+prints the template generation plus build provenance (module version, vcs
+revision, dirty flag), so comparing installs is one command per machine.
+
 ## Development
 
 ```sh
