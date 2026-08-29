@@ -1909,6 +1909,44 @@ func TestModelUnknownTierExitsNonZeroWithMessage(t *testing.T) {
 	}
 }
 
+// I116: stdlib parsing stops at the first positional, so a trailing flag
+// used to print bare usage — reading as the flavor being broken. The error
+// must name the ordering rule and the offending token.
+func TestModelTrailingFlagNamesOrderingRule(t *testing.T) {
+	code, _, errs := runCmd(t, "model", "--dir", t.TempDir(), "claude", "primary", "--effort")
+	if code != 2 {
+		t.Fatalf("code=%d, want 2; stderr=%q", code, errs)
+	}
+	if !strings.Contains(errs, "flags must precede positionals") || !strings.Contains(errs, `"--effort"`) {
+		t.Fatalf("stderr=%q, want the ordering rule and the offending token", errs)
+	}
+	if !strings.Contains(errs, "usage: spine model") {
+		t.Fatalf("stderr=%q, want the usage line to follow the rule", errs)
+	}
+}
+
+// I116: a flag-like token can also slip in with correct arity ("claude
+// --json" is two positionals); it is never a valid tier, so it gets the
+// ordering message rather than an unknown-tier error.
+func TestModelFlagAsPositionalWithCorrectArityNamesOrderingRule(t *testing.T) {
+	code, _, errs := runCmd(t, "model", "--dir", t.TempDir(), "claude", "--json")
+	if code != 2 {
+		t.Fatalf("code=%d, want 2; stderr=%q", code, errs)
+	}
+	if !strings.Contains(errs, "flags must precede positionals") || !strings.Contains(errs, `"--json"`) {
+		t.Fatalf("stderr=%q, want the ordering rule and the offending token", errs)
+	}
+}
+
+// I116 negative control: detection keys on the leading dash, not on
+// resolution failure — a plain unknown flavor keeps model.Resolve's error.
+func TestModelUnknownFlavorDoesNotClaimOrderingProblem(t *testing.T) {
+	code, _, errs := runCmd(t, "model", "--dir", t.TempDir(), "bogus", "primary")
+	if code == 0 || strings.Contains(errs, "flags must precede positionals") {
+		t.Fatalf("code=%d stderr=%q, want resolve error without the ordering message", code, errs)
+	}
+}
+
 func TestModelMissingArgsExitsNonZero(t *testing.T) {
 	for _, args := range [][]string{{"model"}, {"model", "claude"}, {"model", "claude", "primary", "extra"}} {
 		code, _, errs := runCmd(t, args...)

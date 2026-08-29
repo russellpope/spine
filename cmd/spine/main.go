@@ -1439,6 +1439,20 @@ func cmdCursorSet(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// flagAmongPositionals returns the first flag-like token (leading "-")
+// left among the positionals after a successful parse, and the positional
+// preceding it. A first-position hit is only reachable via an explicit
+// "--" terminator — a deliberate positional, not an ordering mistake — so
+// it is not reported.
+func flagAmongPositionals(args []string) (tok, prev string) {
+	for i, a := range args {
+		if i > 0 && strings.HasPrefix(a, "-") {
+			return a, args[i-1]
+		}
+	}
+	return "", ""
+}
+
 // cmdModel is a thin printer over model.Resolve (design D12): the CLI does
 // no resolution of its own, just flag parsing and formatting. Flavor and
 // tier are both required positional arguments — never inferred or
@@ -1455,8 +1469,17 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	const modelUsage = `usage: spine model [--dir D] [--alternate] [--effort|--json] <flavor> <tier>`
+	// I116: stdlib parsing stops at the first positional, so a flag placed
+	// after one is left among the positionals — historically a bare usage
+	// error (or an unknown-tier error) that read as the flavor being
+	// broken. Name the ordering rule next to the offending token instead.
+	if tok, prev := flagAmongPositionals(fs.Args()); tok != "" {
+		fmt.Fprintf(stderr, "model: flags must precede positionals (saw %q after %q)\n%s\n", tok, prev, modelUsage)
+		return 2
+	}
 	if fs.NArg() != 2 {
-		fmt.Fprintln(stderr, `usage: spine model [--dir D] [--alternate] [--effort|--json] <flavor> <tier>`)
+		fmt.Fprintln(stderr, modelUsage)
 		return 2
 	}
 	entry, err := model.Resolve(*dir, fs.Arg(0), fs.Arg(1))
