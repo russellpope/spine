@@ -5,11 +5,11 @@ severity: low
 status: open
 affects: [I034]
 blocked-by: []
-execution-mode:
-tier:
+execution-mode: inline
+tier: primary
 effort:
 risk-triggers: []
-review-tier:
+review-tier: n/a
 ---
 
 ## Problem
