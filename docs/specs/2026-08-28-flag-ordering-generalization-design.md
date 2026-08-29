@@ -45,7 +45,12 @@ ratified on the recommended answers (Q1–Q11).
 - **Strict ordering everywhere, I116 error shape** (Q1): a flag-like token
   among the positionals errors
   `<cmd>: flags must precede positionals (saw %q after %q)` + usage,
-  exit 2. No permutation, no lenient re-parse.
+  exit 2. No permutation, no lenient re-parse. [Amended at spec-review,
+  C1: "everywhere" means every *parsing* subcommand — the ratified
+  carve-outs stand beside it: `--force` stays position-free on
+  `cursor start`/`cursor tick` (takeForce, documented), and
+  `version`/`help` stay lenient (Q11). The README's one-line rule is the
+  operator summary; this paragraph is the precise reading.]
 - **Every subcommand, via a shared parse helper** (Q2, Q6): a `parseArgs`
   helper in `cmd/spine/main.go` owns Parse + ordering guard + arity check +
   usage printing; every `cmd*` converts to it. Per-site wiring was rejected
@@ -68,8 +73,12 @@ ratified on the recommended answers (Q1–Q11).
   `spine gate go@1 <check>` form), so nothing breaks; the previously-working
   trailing-flag form now errors with the rule named instead of mis-reading.
 - **`handoff latest` keeps its bespoke diagnostic** (Q10): the
-  value-swallowed-a-flag check is a different shape; its message vocabulary
-  aligns with the I116 wording.
+  value-swallowed-a-flag check is a different shape. [Amended at
+  spec-review, C2: the Solution's "aligns with the I116 wording" and this
+  section's "reworded only as needed" conflicted; "as needed" governs.
+  Alignment was judged at implementation: the existing message already
+  names the flag and the mistake in the house style, so no rewording was
+  needed and none was made.]
 - **`version`/`help` stay lenient** (Q11): no silent wrong answer is
   possible there, and erroring on `spine version --help` would be hostile.
 - **Guidance sweep** (owner requirement at ratification): after the fix,
@@ -148,7 +157,12 @@ ratified on the recommended answers (Q1–Q11).
   guidance; fix any example that would now error; retire "silently
   ignores" warnings (the rule itself stays documented — it is now enforced
   with a helpful error, which is the point). Out-of-repo edits are listed
-  in the handoff, not committed here.
+  in the handoff, not committed here. [Amended at spec-review, C3: the
+  sweep's scope is the broad reading — every *living* repo doc whose
+  example would now error (the review caught
+  docs/mutation-battery-checklist.md, fixed). Historical records — shipped
+  specs/plans, handoffs, closed issues — are archives and are not
+  rewritten.]
 - **Routing** (solo inline): I119 `execution-mode: inline`,
   `tier: primary` (this session, fable-5), `review-tier: n/a`; the
   verify-stage gates and mandatory spec-review still apply. Never
@@ -177,7 +191,11 @@ External behavior only: exit codes and stderr/stdout text via the existing
   `gate go@1 <check> ` run in X (flags-first now valid);
   `gate go@1 <check> --dir X` ⇒ exit 2 naming the rule;
   bare `gate go@1 binary-hygiene` at repo root stays green (maipipe form —
-  green control).
+  green control). [Amended at spec-review: the repo-root control is
+  satisfied live by the maipipe full lane (which runs all six bare gate
+  stages against the real tree at each verified commit), not by a unit
+  test — a unit test's CWD is not the repo root, so the lane is the
+  honest observation point.]
 - **First-position exemption**: `adr new -- "-Title"` (and the model `--`
   form) still reaches the command's own logic, not the ordering error.
 - **Behavior contracts pinned**: the three I116 model tests pass

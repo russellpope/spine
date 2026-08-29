@@ -9,7 +9,7 @@ does not live in `templates/` — see ADR 0013.
 
 ## Superseded by `spine gate go mutate`
 
-The runner is now the spine binary: `spine gate go mutate --dir <tree>` reads the
+The runner is now the spine binary: `spine gate --dir <tree> go mutate` reads the
 per-tree spec (`docs/mutation-spec.json` by default, or the path in
 `SPINE_GATE_MUTATE_SPEC`), copies the tracked tree, applies each probe to the copy,
 and emits one results-contract row per probe (`code = go@1/mutate`) plus both kill

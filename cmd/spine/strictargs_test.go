@@ -145,6 +145,15 @@ func TestFirstPositionExemptionSurvivesGeneralization(t *testing.T) {
 	if code != 0 || !strings.Contains(out, ".md") {
 		t.Fatalf("adr new did not run: code=%d out=%q stderr=%q", code, out, errs)
 	}
+	// The model arm: a flag-like first positional behind "--" reaches
+	// model.Resolve's own unknown-flavor error, not the ordering message.
+	code, _, errs = runCmd(t, "model", "--dir", dir, "--", "-weird", "primary")
+	if strings.Contains(errs, "flags must precede positionals") {
+		t.Fatalf("model exemption lost: stderr=%q", errs)
+	}
+	if code != 2 || !strings.Contains(errs, "unknown flavor") {
+		t.Fatalf("model -- form did not reach Resolve: code=%d stderr=%q", code, errs)
+	}
 }
 
 // version stays lenient (Q11): informational output, no wrong answer
