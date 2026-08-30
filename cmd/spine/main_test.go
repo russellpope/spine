@@ -497,6 +497,41 @@ func TestUpdateForceFileCLIRejectsBadAuthorityWithoutWrites(t *testing.T) {
 	}
 }
 
+// I124: validation rejections must not inherit the dirty-tree warning from a
+// write plan. The production break this catches is warnDirty running before
+// update.Run rejects an authority value, which makes the exact stderr depend
+// on Git state.
+func TestCompiledUpdateDirtyRepoAuthorityRejectionHasExactDiagnosticAndNoWrites(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil {
+		t.Fatalf("initialize dirty Git fixture: %v\n%s", err, out)
+	}
+	workflowPath := filepath.Join(dir, "WORKFLOW.md")
+	before := readUpdateFile(t, workflowPath)
+
+	bin := filepath.Join(t.TempDir(), "spine")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build compiled CLI: %v\n%s", err, out)
+	}
+	code, out, errs := runCompiledSpine(t, bin, dir, "update", "--dir", ".", "--write", "--force-file", "README.md")
+	const wantErr = "update: --force-file \"README.md\" must name a managed file in this update plan\n"
+	if code != 2 || out != "" || errs != wantErr {
+		t.Fatalf("dirty compiled rejection: code=%d stdout=%q stderr=%q, want 2/empty/%q", code, out, errs, wantErr)
+	}
+	if got := readUpdateFile(t, workflowPath); got != before {
+		t.Fatal("dirty compiled authority rejection wrote WORKFLOW.md")
+	}
+
+	code, out, errs = runCompiledSpine(t, bin, dir, "update", "--dir", ".", "--write")
+	const dirtyWarning = "warning: repo has uncommitted changes — review the update with git diff afterwards\n"
+	if code != 0 || !strings.Contains(out, "up-to-date: WORKFLOW.md\n") || errs != dirtyWarning {
+		t.Fatalf("dirty compiled accepted write: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+}
+
 func TestUpdateForceFileSelectedDamagedReportRequiresManualRepair(t *testing.T) {
 	dir := t.TempDir()
 	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {

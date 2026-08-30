@@ -161,12 +161,10 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		writeUpdateDiagnostic(stderr, parseDiagnostic.String())
 		return 2
 	}
-	if *write {
-		warnDirty(*dir, stderr)
-	}
 	opts := update.Options{Dir: *dir, Write: *write, Force: *force, ForceFiles: forceFiles}
 	if *write {
 		opts.BeforeWrite = func(advisories []update.GateConfigAdvisory) {
+			warnDirty(*dir, stderr)
 			printGateConfigAdvisories(stdout, advisories)
 		}
 	}
