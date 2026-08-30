@@ -58,3 +58,25 @@ retains every prior prohibited-field case, and covers two available doctor
 harnesses in lexical order with parallel explicit-path seams. Required fresh
 primary requirements review, independent verification, both go@1 lanes, and
 exact-final-SHA maipipe evidence remain pending before this ticket can close.
+
+## Verifier correction 3 (2026-08-30)
+
+Status remains **open** pending a fresh primary re-review and independent
+verifier. `d684ef0` clarifies that executable lookup may consult `PATH`, while
+JSON never expands environment values or executes anything. `97a20ad` makes
+schema member spelling exact at every object depth, rejects present `null` for
+typed optional members, rejects malformed UTF-8 before JSON decoding, and
+keeps parser diagnostics free of raw host-config values. `fa41be9` removes the
+unrequested `model.ValidateHostConfig` export in favor of `hostconfig.Load`,
+preflights a present host config before default Claude/Codex discovery at the
+CLI boundary, adds the required command-level no-host/identical/divergent/
+forbidden-pin/post-identity-`--expect` matrix, and gives D16 a normalized
+repository path, harness/tier key, and requested pair. `518a73b` additionally
+redacts a forbidden host pin before launch-policy formatting can disclose it.
+
+The correction preserves alternate compatibility, host-blind mirrors and
+update behavior, existing audit verdict bytes after a valid preflight, and the
+I073/I074/I077 boundaries. Fresh full/race/static/source-built-audit/go@1/
+maipipe evidence is recorded in
+`.superpowers/sdd/I072-resume-correction-worker4-report.md`; the ticket is not
+closed by this implementation correction.
