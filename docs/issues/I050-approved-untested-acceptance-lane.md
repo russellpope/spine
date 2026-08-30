@@ -2,7 +2,7 @@
 id: I050
 title: "Verify convention: approved-untested as a first-class acceptance state"
 severity: med
-status: open
+status: fixed
 commits: [7e94222, 4850488, fae360f, 6950089, c55faf3, 3761f4f, 8f8db36, f741224, 0547817, fc20dba, a353f98]
 affects: [templates, doctor]
 blocked-by: []
@@ -59,10 +59,10 @@ silently skipped.
 
 ## Acceptance criteria (sharpened at PRD time)
 
-- [ ] Template generation ships the convention; `spine update` propagates it.
-- [ ] A well-formed waived item passes doctor; a reason-less one warns
+- [x] Template generation ships the convention; `spine update` propagates it.
+- [x] A well-formed waived item passes doctor; a reason-less one warns
       (negative control).
-- [ ] The grammar is documented next to the ESCALATION grammar it mirrors.
+- [x] The grammar is documented next to the ESCALATION grammar it mirrors.
 
 ## Prior implementation and reopening
 
@@ -139,3 +139,24 @@ package regression and doctor, audit, and compiled-CLI output regressions were
 observed red before the aggregation-only reorder and pass afterward. I050
 remains open and unchecked pending a fresh primary re-review, a different
 independent verifier, final maipipe, and ticket closure.
+
+## Resolution
+
+Generation 12 ships the ticket-local `APPROVED-UNTESTED` grammar and the
+additive, idempotent generation-11 migration. Doctor D15 scans every ticket and
+warns on malformed records while accepting complete records. `audit stages`
+scans cursor-resolved tickets, reports valid and invalid counts when present,
+and keeps acceptance warnings nonblocking. The generated workflow, issue
+template, and ledger documentation carry the convention, and `spine update`
+propagates it without overwriting local edits.
+
+The correction history above records the premature closure and the fixes for
+root handling, unbounded lines and read errors, failure aggregation, heading
+boundaries, hostile references, token whitespace, exact marker selection,
+identity scoping, per-file cleanup, and deterministic error order. The fresh
+primary re-review and different independent primary verifier both passed at
+exact SHA `42eba0a`. Both required go@1 gates reported no findings, and
+maipipe run HEAD #3 passed at `42eba0a`.
+
+This closes I050 only. Later batch commits still require the final batch
+exact-SHA lane. No push or binary install is claimed.
