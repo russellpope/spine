@@ -45,6 +45,16 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Added
 
+- **Ticket-local `APPROVED-UNTESTED` acceptance records.** An applicable
+  criterion may stay unchecked while recording a dated approver token,
+  repository-local Markdown reference, and reason. Doctor D15 warns on
+  malformed records or invalid provenance, while `spine audit stages` scans
+  only cursor-resolved tickets and prints a nonblocking valid/invalid summary.
+  Spine checks the referenced file but does not authenticate the approver or
+  resolve the fragment. Template generation 12 publishes the grammar and
+  migrates pristine generation-11 repositories without rewriting tickets.
+  (I050)
+
 - **`spine version` prints build provenance.** A second `build:` line carries
   the module version, 12-char vcs revision, vcs time, and a dirty flag from
   the binary's embedded build info (`build: (no build info)` when absent), so
