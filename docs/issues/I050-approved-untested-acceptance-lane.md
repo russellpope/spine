@@ -2,7 +2,8 @@
 id: I050
 title: "Verify convention: approved-untested as a first-class acceptance state"
 severity: med
-status: open
+status: fixed
+commits: [7e94222, 4850488, fae360f, 6950089, c55faf3]
 affects: [templates, doctor]
 blocked-by: []
 execution-mode: subagent-driven
@@ -58,7 +59,37 @@ silently skipped.
 
 ## Acceptance criteria (sharpened at PRD time)
 
-- [ ] Template generation ships the convention; `spine update` propagates it.
-- [ ] A well-formed waived item passes doctor; a reason-less one warns
+- [x] Template generation ships the convention; `spine update` propagates it.
+- [x] A well-formed waived item passes doctor; a reason-less one warns
       (negative control).
-- [ ] The grammar is documented next to the ESCALATION grammar it mirrors.
+- [x] The grammar is documented next to the ESCALATION grammar it mirrors.
+
+## Resolution
+
+Fixed 2026-08-29 in `7e94222`, `4850488`, `fae360f`, `6950089`, and
+`c55faf3`. The shared `internal/acceptance` scanner owns candidate detection,
+the exact single-line grammar, acceptance-section scope, dated Markdown
+reference validation, symlink containment, ticket discovery, and counts.
+References establish local provenance only: spine does not authenticate the
+approver or resolve the fragment.
+
+Doctor D15 scans tickets at every status and emits one `warn` per malformed
+candidate. `audit stages` scans only cursor-resolved ticket IDs, prints one
+warning per invalid record and an optional valid/invalid summary, and leaves
+`Report.Blocking()` unchanged. The no-marker audit path is byte-identical to
+the pre-I050 output.
+
+Template generation 12 adds the grammar to `WORKFLOW.md`, an empty acceptance
+section to new tickets, and a semantic pointer to the issue-ledger README.
+The captured generation-11 migration is additive and idempotent, preserves the
+knowledge profile's no-issue-ledger manifest, and refuses local edits in all
+five touched managed files without force.
+
+Strict TDD recorded intended red failures for the scanner, D15 adapter,
+stage-audit adapter, and generation migration, plus checked-state, severity,
+blocking, and local-edit negative controls. Focused packages, an uncached full
+`go test ./...`, `go vet ./...`, `git diff --check`, current-binary update,
+and compiled-CLI acceptance cases passed. The repository has no `make verify`
+target; current doctor/routing/stages commands retain their pre-existing
+repository advisories and blockers. Per the controller's dispatch, a separate
+fresh primary review follows this worker report.
