@@ -502,6 +502,33 @@ func TestUnbalancedMarkersSkipped(t *testing.T) {
 	}
 }
 
+// Scoped overwrite authority does not weaken the damaged-marker guard: a
+// selected file lacking a complete machine-owned region has no regenerable
+// content and must remain untouched.
+func TestForceFileDoesNotOverwriteBrokenClaudeMarkers(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "rust", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "CLAUDE.md")
+	raw := readFile(t, path)
+	broken := strings.Replace(raw, "<!-- spine:end -->", "", 1)
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reports, err := Run(Options{Dir: dir, Write: true, ForceFiles: []string{"CLAUDE.md"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report(t, reports, "CLAUDE.md"); got.State != SkippedUnrecognized {
+		t.Fatalf("selected broken CLAUDE.md state = %v, want SkippedUnrecognized", got.State)
+	}
+	if got := readFile(t, path); got != broken {
+		t.Fatal("selected broken CLAUDE.md changed under --force-file")
+	}
+}
+
 func TestMissingWorkflowIsHardError(t *testing.T) {
 	if _, err := Run(Options{Dir: t.TempDir()}); err == nil {
 		t.Fatal("want error when WORKFLOW.md missing")
