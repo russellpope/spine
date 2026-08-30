@@ -711,7 +711,9 @@ func ValidateLaunchForHost(req LaunchRequest, configPath string, lookup func(str
 	}
 	if resolution.Pin != nil {
 		if refusal := modelPolicyRefusal(defaults.ModelValidation, req.Flavor+"."+req.Tier, resolution.Pin.Model); refusal != nil {
-			return Resolution{}, refusal
+			// A pin is owner-managed host configuration. Do not forward the
+			// policy refusal because it would print its raw model value.
+			return Resolution{}, fmt.Errorf("%s host pin failed launch policy", req.Flavor+"."+req.Tier)
 		}
 		if err := ValidateHostPinForLaunch(req.Flavor+"."+req.Tier, requested.ID, resolution.Pin.Model); err != nil {
 			return Resolution{}, err

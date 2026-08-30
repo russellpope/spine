@@ -172,7 +172,7 @@ func TestModelValidateHostCommandMatrix(t *testing.T) {
   "schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:x","models":{"repository-safe":{"efforts":["high"]},"unsafe pin":{"efforts":["high"]}}}},
   "pins":{"codex.primary":{"model":"unsafe pin","effort":"high"}}}`)
 	code, out, errs = runModelWithHostPath(t, forbidden, "--dir", repo, "validate", "--expect", "repository-safe", "codex", "primary")
-	if code != 1 || out != "" || !strings.Contains(errs, "invalid-model-id") {
+	if code != 2 || out != "" || !strings.Contains(errs, "host pin failed launch policy") || strings.Contains(errs, "unsafe pin") {
 		t.Fatalf("forbidden pin: code=%d stdout=%q stderr=%q", code, out, errs)
 	}
 }
