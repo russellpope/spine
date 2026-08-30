@@ -40,6 +40,10 @@ expressions, POSIX shell regression tests, Markdown skill sources.
   compatible.
 - Validation accepts only the active requested ID. Audit keeps aliases and
   history as evidence.
+- I119's flags-first contract applies at both parser layers. Outer `model`
+  flags, including `--dir`, precede the `validate` positional. Nested
+  `--expect` follows `validate` and precedes flavor/tier. Never accept an outer
+  `--dir` passed to the nested parser as a compatibility exception.
 - No bypass flag, environment variable, allow file, ledger exception, retry
   through plain resolution, or model-argument omission is permitted.
 - I075 owns dispatch effort. I051 retains resolver effort-vocabulary errors
@@ -347,11 +351,14 @@ and audit tasks.
 0/1/2 exit mapping.
 
 - [ ] **Step 1: Write failing success and grammar tests.** Assert these
-  commands through `run`: no-expect success, exact `--expect` success,
-  `--dir` success, `--expect=ID`, missing flavor/tier, explicit empty expect,
-  validate after an outer model flag, flags after positionals, and rejected
-  `--alternate`, `--effort`, `--json`, and `--force`. Success must be exact ID
-  plus newline on stdout and empty stderr.
+  positive commands through `run`: `model validate codex primary`,
+  `model --dir D validate codex primary`, `model --dir=D validate
+  --expect=ID codex primary`, and the split-value `--expect ID` form. Assert
+  usage failure when outer `--dir` appears in the nested parser's arguments,
+  for outer `--expect`, and for nested `--expect` after flavor/tier. Also cover
+  missing flavor/tier, explicit empty expect, and rejected `--alternate`,
+  `--effort`, `--json`, and `--force`. Success must be exact ID plus newline on
+  stdout and empty stderr.
 
 - [ ] **Step 2: Write failing refusal and configuration tests.** Table-drive
   all five stable exit-1 reasons. Assert one stderr line, `%q` escaping, named
@@ -363,6 +370,8 @@ and audit tasks.
 - [ ] **Step 3: Pin old CLI compatibility.** Re-run existing tests and add one
   byte comparison fixture for each of plain ID, `--json`, `--effort`, and
   `--alternate`. The nested verb must not reinterpret any old flag sequence.
+  Compatibility preserves the old resolver forms; it does not exempt
+  after-positional `--dir` from I119.
 
 - [ ] **Step 4: Run CLI tests red.**
 
@@ -372,10 +381,12 @@ and audit tasks.
 
   Expected: FAIL because current `cmdModel` treats `validate` as a flavor.
 
-- [ ] **Step 5: Implement `cmdModelValidate`.** In `cmdModel`, dispatch only
-  a leading literal `validate` to the new function. Parse `--dir` and
-  `--expect` with a dedicated flag set and usage string. Pass
-  `tmpl.Version()` in `LaunchRequest`. Use `errors.As` for
+- [ ] **Step 5: Implement `cmdModelValidate`.** Make the outer `model` parser
+  consume `--dir` before its positionals, then dispatch when its first
+  positional is the literal `validate`. The nested validate parser owns only
+  `--expect` and the flavor/tier positionals. Do not forward or reinterpret an
+  after-`validate` `--dir`, and do not let old resolver flags select validate
+  mode. Pass `tmpl.Version()` in `LaunchRequest`. Use `errors.As` for
   `*model.LaunchRefusal`, return 1 for it, and return 2 for every other error.
   Print only after full success.
 
@@ -396,8 +407,8 @@ and audit tasks.
 
   ```sh
   go build -o bin/spine ./cmd/spine
-  bin/spine model validate --dir . codex primary
-  bin/spine model validate --dir . --expect gpt-5.6-sol codex primary
+  bin/spine model --dir . validate codex primary
+  bin/spine model --dir . validate --expect gpt-5.6-sol codex primary
   ```
 
   Expected: both exit 0, print exactly `gpt-5.6-sol`, and print no stderr.
@@ -408,8 +419,9 @@ and audit tasks.
 - [ ] **Step 9: Run CLI negative controls.** Temporarily print the ID before
   checking the error; the zero-stdout refusal test must fail. Temporarily map
   `LaunchRefusal` to exit 2; all reason-table tests must fail. Temporarily
-  accept `--force`; the grammar test must fail. Restore and rerun Steps 7 and
-  8 green.
+  accept `--force`; the grammar test must fail. Temporarily let the nested
+  parser accept outer `--dir`; the I119 compatibility test must fail. Restore
+  and rerun Steps 7 and 8 green.
 
 - [ ] **Step 10: Commit the CLI unit.**
 
@@ -503,11 +515,14 @@ requirements.
 **Produces:** a reviewed, verified, shipped, and installed Spine binary. This
 is a necessary but insufficient I051 outcome.
 
-- [ ] **Step 1: Update consumer documentation.** Add the exact new grammar to
-  `README.md`; define active launch ID versus audit evidence and the I075
-  effort boundary in `CONTEXT.md`; add an I051 entry to `CHANGELOG.md` that
-  states fail-closed behavior, no bypass, unchanged old modes, and binary-first
-  rollout. Do not add template prose.
+- [ ] **Step 1: Update consumer documentation.** Add the exact grammar
+  `spine model [--dir D] validate [--expect MODEL_ID] <flavor> <tier>` to
+  `README.md`, state that outer `--dir` precedes `validate`, and state that
+  passing outer `--dir` to the nested parser is a usage failure, not a
+  compatibility form. Define active launch ID versus audit evidence and the
+  I075 effort boundary in `CONTEXT.md`; add an I051 entry to `CHANGELOG.md`
+  that states fail-closed behavior, no bypass, unchanged old modes, and
+  binary-first rollout. Do not add template prose.
 
 - [ ] **Step 2: Commit documentation separately.**
 
@@ -537,7 +552,9 @@ is a necessary but insufficient I051 outcome.
   dotted row, historical bare row, every deny class, unsafe syntax, another
   active tier, unknown safe candidate, malformed requested row, unreadable
   present file, and newer generation. Include the `automatic-model` and
-  changed-effort controls. Expected codes and reasons must match the PRD.
+  changed-effort controls. Include positive outer-`--dir` and nested-`--expect`
+  cases plus negative after-`validate` `--dir`, outer-`--expect`, and trailing
+  nested-flag cases. Expected codes and reasons must match the PRD.
 
 - [ ] **Step 5: Run repository workflow checks.**
 
@@ -583,8 +600,8 @@ is a necessary but insufficient I051 outcome.
   ```sh
   make install
   cp /Users/ldh/bin/spine /Users/ldh/.local/bin/spine
-  /Users/ldh/bin/spine model validate --dir /Users/ldh/Projects/github.com/spine codex primary
-  /Users/ldh/.local/bin/spine model validate --dir /Users/ldh/Projects/github.com/spine codex primary
+  /Users/ldh/bin/spine model --dir /Users/ldh/Projects/github.com/spine validate codex primary
+  /Users/ldh/.local/bin/spine model --dir /Users/ldh/Projects/github.com/spine validate codex primary
   /Users/ldh/bin/spine version
   /Users/ldh/.local/bin/spine version
   ```
@@ -644,11 +661,11 @@ reasons before any skill edit.
 - [ ] **Step 2: Implement the site extractor and structural assertions.** The
   new POSIX shell test requires exactly one begin/end block for each of the
   eight names. Inside each block it requires a guarded assignment from
-  `spine model validate --dir`, a nonempty check, and the corresponding
+  `spine model --dir "$REPO" validate`, a nonempty check, and the corresponding
   launcher model argument using only the declared captured variable. It
-  rejects a nested validator substitution in an outer launch command, plain
-  `spine model` in a model assignment, literal current/historical IDs, missing
-  quotes, and an unguarded launcher.
+  rejects an after-`validate` `--dir`, a nested validator substitution in an
+  outer launch command, plain `spine model` in a model assignment, literal
+  current/historical IDs, missing quotes, and an unguarded launcher.
 
 - [ ] **Step 3: Add executable fake-command cases.** The test prepends a temp
   `bin` directory containing fake `spine`, `cmux`, `herdr`, `claude`, and
@@ -659,15 +676,17 @@ reasons before any skill edit.
   The old-binary case must select the skill's install/rebuild refusal text.
 
 - [ ] **Step 4: Add the mutation suite.** Copy the skill sources to a temp
-  root, then mutate one marked site at a time: replace `model validate` with
-  `model`, remove the guard, replace the launch variable with a literal, use a
-  different variable, delete the nonempty check, and move validation inside
-  the launcher substitution. Each mutation must make the structural or fake
-  execution test fail. The test exits nonzero if any mutant survives.
+  root, then mutate one marked site at a time: move `--dir D` from its outer
+  parser position into the nested parser's arguments, remove `validate`, remove
+  the guard, replace the launch variable with a literal, use a different
+  variable, delete the nonempty check, and move validation inside the launcher
+  substitution. Each mutation must make the structural or fake execution test
+  fail. The test exits nonzero if any mutant survives.
 
 - [ ] **Step 5: Strengthen the existing hardcoded-model test.** Require all
-  three shared preflights to invoke `spine model validate` and retain the
-  install/rebuild hint. Keep its existing literal-ID exemptions visible.
+  three shared preflights to invoke `spine model --dir "$REPO" validate` and
+  retain the install/rebuild hint. Keep its existing literal-ID exemptions
+  visible.
 
 - [ ] **Step 6: Run both tests red before editing skills.**
 
@@ -696,7 +715,7 @@ reasons before any skill edit.
 capability preflights.
 
 - [ ] **Step 1: Update all shared preflights.** Probe
-  `spine model validate --dir "$REPO" <flavor> primary` after the repo path is
+  `spine model --dir "$REPO" validate <flavor> primary` after the repo path is
   known. On any failure, refuse with a message that says the binary may
   predate `model validate`, gives `make install`, and promises no spawn. Keep
   the per-launch checks; the preflight is capability feedback only.
@@ -758,10 +777,11 @@ capability preflights.
   a disposable stale-mirror fixture refuses with the named reason.
 
 - [ ] **Step 11: Run negative controls and restore.** Remove `validate` from
-  one site, launch a literal from another, remove one guard, make fake Spine
-  print an ID then exit 1, and switch Claude preflight to `plain`. Each
-  matching test must fail and the fake launcher log must stay empty for the
-  validator failure. Restore and rerun Step 9 green.
+  one site, move one site's `--dir` after `validate`, launch a literal from
+  another, remove one guard, make fake Spine print an ID then exit 1, and
+  switch Claude preflight to `plain`. Each matching test must fail and the fake
+  launcher log must stay empty for the validator failure. Restore and rerun
+  Step 9 green.
 
 ### Task 8: review, verify, and land the deepthought phase
 
@@ -921,8 +941,9 @@ both fresh review reports, and raw verification evidence.
   landed SHAs and fresh cross-repository verification.
 - [x] Every PRD acceptance criterion maps to a named task and command.
 - [x] The command grammar, five reasons, 0/1/2 exits, strict mirror states,
-  safe-ID policy, no bypass, audit invariant, effort/alternate exclusions,
-  and TOCTOU limit have explicit tests.
+  I119 outer/nested flags-first compatibility, positive and negative parser
+  cases, safe-ID policy, no bypass, audit invariant, effort/alternate
+  exclusions, and TOCTOU limit have explicit tests.
 - [x] All eight controlled launch sites have a stable name, local captured
   variable, source marker, mutation control, and fake-launch refusal case.
 - [x] Binary shipment and both installations precede every deepthought edit.

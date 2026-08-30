@@ -68,12 +68,25 @@ without proving that the checked value reaches the launcher.
 The new grammar is:
 
 ```text
-spine model validate [--dir D] [--expect MODEL_ID] <flavor> <tier>
+spine model [--dir D] validate [--expect MODEL_ID] <flavor> <tier>
 ```
 
-`validate` is the first token after `model`. Its flags must precede the two
-positionals, matching Spine's flags-first rule. The existing grammar remains
-byte-compatible:
+This is a two-layer flags-first grammar, matching the binding I119 contract.
+`--dir` is an outer `model` flag and must precede the `validate` positional.
+`--expect` belongs only to the nested validate parser and must follow
+`validate` but precede the `<flavor>` and `<tier>` positionals. These forms are
+valid:
+
+```text
+spine model validate codex primary
+spine model --dir D validate codex primary
+spine model --dir D validate --expect MODEL_ID codex primary
+```
+
+Passing the outer `--dir` flag to the nested validate parser is a usage
+failure. It must not be accepted as a compatibility exception. An `--expect`
+before `validate` or after the flavor/tier positionals is also a usage failure.
+The existing resolver grammar remains byte-compatible:
 
 ```text
 spine model [--dir D] [--alternate] [--effort|--json] <flavor> <tier>
@@ -338,7 +351,7 @@ controlled launch sites:
 Every site uses a separate guarded assignment immediately before launch:
 
 ```sh
-if ! WORKER_MODEL=$(spine model validate --dir "$SDD_CWD" codex "$TIER"); then
+if ! WORKER_MODEL=$(spine model --dir "$SDD_CWD" validate codex "$TIER"); then
   echo "codex-team: model preflight refused codex.$TIER; no worker spawned" >&2
   return 1
 fi
@@ -480,12 +493,16 @@ and a historical bare value refuses.
 | Validation can race a mirror edit before audit. | The guarantee is explicitly limited to unchanged policy. Receipts and digests are future work. |
 | Spine can ship the CLI and silently edit deepthought because the skills are symlinked. | The symlink makes the authority and rollout risk stronger, not weaker. Deepthought requires a separate authorization after binary installation. |
 | Closing I051 after Spine ships would treat the consumer integration as optional. | The ticket remains open until the deepthought tests and eight controlled sites pass and a final cross-repository review verifies both SHAs. |
+| The original I051 draft assigned `--dir` to the nested parser, which conflicts with I119's flags-first command contract. | `--dir` belongs to the outer `model` parser and precedes the `validate` positional. Only `--expect` belongs to the nested parser. Supplying an outer flag to the nested parser remains a usage failure. |
 
 ## Acceptance criteria
 
-1. `spine model validate [--dir D] [--expect MODEL_ID] <flavor> <tier>`
-   obeys flags-first parsing, leaves the existing model command unchanged,
-   and prints exactly one validated ID only on exit 0.
+1. `spine model [--dir D] validate [--expect MODEL_ID] <flavor> <tier>`
+   obeys flags-first parsing at both parser layers, leaves the existing model
+   command unchanged, and prints exactly one validated ID only on exit 0.
+   `spine model --dir D validate ...` succeeds for valid input;
+   supplying outer `--dir` to the nested parser, an outer `--expect`, and a
+   nested flag after flavor/tier are usage failures.
 2. Validation reads one repository snapshot. Missing `WORKFLOW.md` selects
    embedded defaults; unreadable present input, duplicate relevant blocks or
    keys, malformed selected rows, malformed template versions, and newer
