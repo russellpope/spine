@@ -393,13 +393,17 @@ func Run(opts Options) (Report, error) {
 		rep.Warnings = append(rep.Warnings, fmt.Sprintf("--session %q matched no sessions", opts.Session))
 	}
 
-	evidence := map[string][]evidenceToken{} // ticket id -> flavor-tagged model tokens
-	briefSources := map[string][]string{}    // ticket id -> resolved recorded brief paths (I101 D35)
-	claimed := map[int]bool{}                // dispatch index -> matched a ticket
-	linked := map[string]bool{}              // toolUseID -> a subagent transcript carries models
+	evidence := map[string][]evidenceToken{}    // ticket id -> flavor-tagged model tokens
+	briefSources := map[string][]string{}       // ticket id -> resolved recorded brief paths (I101 D35)
+	claimed := map[int]bool{}                   // dispatch index -> matched a ticket
+	linked := map[string]bool{}                 // coarse-linkage disclosure only (I044)
+	linkedClaude := map[evidenceIdentity]bool{} // complete Claude dispatch identity -> a subagent transcript carries models
 	for _, a := range agents {
 		if a.toolUseID != "" && len(a.models) > 0 {
 			linked[a.toolUseID] = true
+		}
+		if a.source == "claude" && a.identity.usable() && len(a.models) > 0 {
+			linkedClaude[a.identity] = true
 		}
 	}
 	// codex ticket-token matching is case-insensitive (D20's "Flavor
@@ -458,7 +462,7 @@ func Run(opts Options) (Report, error) {
 				}
 				rootTickets[d.toolUseID][t.id] = true
 			}
-			if linked[d.toolUseID] {
+			if d.source == "claude" && linkedClaude[d.identity] {
 				continue // the subagent transcript below is the actual
 			}
 			if d.model != "" {
@@ -485,7 +489,11 @@ func Run(opts Options) (Report, error) {
 				if use {
 					break
 				}
-				use = d.toolUseID != "" && d.toolUseID == a.toolUseID && matches(d, t.id)
+				if d.source == "claude" && a.source == "claude" {
+					use = d.identity.usable() && d.identity == a.identity && matches(d, t.id)
+				} else {
+					use = d.toolUseID != "" && d.toolUseID == a.toolUseID && matches(d, t.id)
+				}
 			}
 			if use {
 				for _, m := range a.models {
@@ -1132,7 +1140,7 @@ func parseDiscarded(line string, lineNo int) (discardedRecord, bool) {
 	}
 	get := func(part, name string) (string, bool) {
 		value, ok := strings.CutPrefix(part, name)
-		return value, ok && value != "" && !strings.ContainsAny(value, " \t")
+		return value, ok && value != "" && !strings.ContainsAny(value, " \t\"")
 	}
 	source, ok := get(parts[1], "source:")
 	if !ok || (source != "claude" && source != "codex") {
