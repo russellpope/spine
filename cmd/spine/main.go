@@ -1872,7 +1872,7 @@ func writeModelValidateConfigurationDiagnostic(stderr io.Writer, flavor, tier st
 	detail := escapeModelValidateControlBytes(err.Error())
 	key, known := knownModelRouteKey(flavor, tier)
 	if !known {
-		fmt.Fprintf(stderr, "model validate: %s\n", detail)
+		fmt.Fprintf(stderr, "model validate: %q: %s\n", flavor+"."+tier, detail)
 		return
 	}
 

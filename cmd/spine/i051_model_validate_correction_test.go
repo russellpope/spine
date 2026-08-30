@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestModelValidateQuotesControlBytesInRepositoryPathOnOneLine(t *testing.T) {
@@ -160,7 +161,9 @@ func TestI051ModelValidateKnownKeyConfigurationDiagnostics(t *testing.T) {
 	}
 }
 
-func TestI051ModelValidateUnknownRouteDiagnosticsStayQuoted(t *testing.T) {
+// Regression for the missing-route-label diagnostic: removing the attempted
+// pair from the unknown-route branch must fail this command-boundary test.
+func TestI051ModelValidateUnknownRouteDiagnosticsNameAttemptedPairOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		flavor     string
@@ -169,17 +172,25 @@ func TestI051ModelValidateUnknownRouteDiagnosticsStayQuoted(t *testing.T) {
 	}{
 		{name: "unknown flavor", flavor: "bad\nflavor", tier: "primary", wantQuoted: `unknown flavor "bad\nflavor"`},
 		{name: "unknown tier", flavor: "codex", tier: "bad\ttier", wantQuoted: `unknown tier "bad\ttier"`},
+		{name: "invalid UTF-8 flavor", flavor: "bad\xffflavor", tier: "primary", wantQuoted: `unknown flavor "bad\xffflavor"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, out, errs := runCmd(t, "model", "validate", tc.flavor, tc.tier)
 			if code != 2 || out != "" || strings.Count(errs, "\n") != 1 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 			}
-			if !strings.HasPrefix(errs, "model validate: "+tc.wantQuoted) {
-				t.Fatalf("stderr=%q, want safely quoted compatible diagnostic %q", errs, tc.wantQuoted)
+			attemptedPair := strconv.Quote(tc.flavor + "." + tc.tier)
+			if !strings.HasPrefix(errs, "model validate: "+attemptedPair+": "+tc.wantQuoted) {
+				t.Fatalf("stderr=%q, want safely quoted attempted pair %q and diagnostic %q", errs, attemptedPair, tc.wantQuoted)
+			}
+			if strings.Count(errs, attemptedPair) != 1 {
+				t.Fatalf("stderr=%q, want attempted pair %q exactly once", errs, attemptedPair)
 			}
 			if strings.ContainsAny(strings.TrimSuffix(errs, "\n"), "\t\r") {
 				t.Fatalf("stderr contains a raw control byte: %q", errs)
+			}
+			if !utf8.ValidString(errs) {
+				t.Fatalf("stderr is not valid UTF-8: %q", errs)
 			}
 		})
 	}

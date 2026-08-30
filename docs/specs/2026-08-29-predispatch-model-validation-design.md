@@ -570,7 +570,9 @@ and a historical bare value refuses.
 9. Existing resolver errors, including Pi effort-vocabulary errors, remain
    blocking. I051 adds no effort equality, normalization, launch transport,
    or alternate validation claim, and old `--effort`, `--alternate`, and
-   `--json` outputs remain unchanged.
+   `--json` outputs remain byte-for-byte unchanged when host routing is
+   unconfigured. Configured host behavior is governed by I072 and criterion
+   10.
 10. Audit uses the shared exact active-ID matcher, keeps its public verdicts,
     aliases, history, shared-ID rules, escalation, and fallback behavior, and
     proves with same-file strict-parser fixtures that a validated default or
