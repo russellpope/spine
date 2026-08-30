@@ -1602,8 +1602,16 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 				}
 				a := subagent{source: source, description: openingLine}
 				more, models, cwd := scanJSONL(sub, warnings)
-				if len(models) == 0 && meta.Model != "" {
-					models = []string{meta.Model}
+				if len(models) == 0 {
+					workflowID := filepath.Base(filepath.Dir(sub))
+					agentID := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(sub), "agent-"), ".jsonl")
+					if agentID == "" {
+						*warnings = append(*warnings, sub+": workflow agent filename has no agent id — model fallback skipped")
+					} else if model, found := workflowRunModel(
+						filepath.Join(sf.dirPath, "workflows", workflowID+".json"), id, workflowID, agentID, warnings,
+					); found {
+						models = []string{model}
+					}
 				}
 				workflowSession := id + "/" + filepath.Base(filepath.Dir(sub)) + "/" + strings.TrimSuffix(filepath.Base(sub), ".jsonl")
 				for i := range more {
@@ -1624,7 +1632,6 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 type workflowMeta struct {
 	AgentType  string `json:"agentType"`
 	SpawnDepth int    `json:"spawnDepth"`
-	Model      string `json:"model"`
 }
 
 func loadWorkflowMeta(path string, warnings *[]string) (workflowMeta, bool) {
@@ -1639,6 +1646,78 @@ func loadWorkflowMeta(path string, warnings *[]string) (workflowMeta, bool) {
 		return workflowMeta{}, false
 	}
 	return meta, true
+}
+
+// Workflow run metadata is a separate, sibling artifact from the per-agent
+// sidecar. The sidecar admits only the precise workflow-subagent/depth shape;
+// when the transcript itself carries no model, workflowProgress is the only
+// accepted fallback source. In particular, defaultModel and entries for any
+// other worker must never become evidence for this worker.
+const workflowRunMetadataMaxBytes = 1 << 20
+
+type workflowRunProgress struct {
+	AgentID string `json:"agentId"`
+	Model   string `json:"model"`
+}
+
+func workflowRunModel(path, session, workflow, agentID string, warnings *[]string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata unavailable for session %q workflow %q — model fallback skipped", path, session, workflow))
+		return "", false
+	}
+	data, readErr := io.ReadAll(io.LimitReader(f, workflowRunMetadataMaxBytes+1))
+	closeErr := f.Close()
+	if readErr != nil || closeErr != nil {
+		*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata unavailable for session %q workflow %q — model fallback skipped", path, session, workflow))
+		return "", false
+	}
+	if len(data) > workflowRunMetadataMaxBytes {
+		*warnings = append(*warnings, path+": workflow run metadata exceeds 1048576 bytes — model fallback skipped")
+		return "", false
+	}
+
+	var envelope struct {
+		WorkflowProgress json.RawMessage `json:"workflowProgress"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		*warnings = append(*warnings, path+": malformed workflow run metadata — model fallback skipped")
+		return "", false
+	}
+	if len(envelope.WorkflowProgress) == 0 || string(envelope.WorkflowProgress) == "null" {
+		*warnings = append(*warnings, path+": workflow run metadata has no workflowProgress — model fallback skipped")
+		return "", false
+	}
+
+	var progress []workflowRunProgress
+	if err := json.Unmarshal(envelope.WorkflowProgress, &progress); err != nil {
+		*warnings = append(*warnings, path+": malformed workflow run metadata — model fallback skipped")
+		return "", false
+	}
+	var matches []workflowRunProgress
+	for _, entry := range progress {
+		if entry.AgentID == "" {
+			*warnings = append(*warnings, path+": malformed workflow run metadata — model fallback skipped")
+			return "", false
+		}
+		if entry.AgentID == agentID {
+			matches = append(matches, entry)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata has no exact entry for agent %q — model fallback skipped", path, agentID))
+		return "", false
+	case 1:
+		if matches[0].Model == "" {
+			*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata entry for agent %q has no model — model fallback skipped", path, agentID))
+			return "", false
+		}
+		return matches[0].Model, true
+	default:
+		*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata has multiple entries for agent %q — model fallback skipped", path, agentID))
+		return "", false
+	}
 }
 
 func workflowOpeningUserLine(path string) string {
