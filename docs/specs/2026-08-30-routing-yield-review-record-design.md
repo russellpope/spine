@@ -155,10 +155,13 @@ repository-scoped diagnostic and leaves that child out of aggregate counts;
 other repositories still report. An unreadable `--fleet` parent, an invalid
 explicit `--dir`, or invalid flags are command errors and stop before a report.
 
-Within fleet aggregation, record identity is `(repo, ticket-id, round)`, not
-the ticket ID alone. Fleet output sorts aggregate cells by harness, model ID,
-then tier, and repository status rows by repository name. Sorting and
-conflict-exclusion happen before formatting in both text and JSON.
+Within fleet aggregation, task and attributable-final identity is
+`(repo, scope, ticket-id, round)`; unattributable-final identity is
+`(repo, scope, condition-id, round)`. That keeps same-number tickets in
+different repositories and separate final conditions from colliding. Fleet
+output sorts aggregate cells by harness, model ID, then tier, and repository
+status rows by repository name. Sorting and conflict-exclusion happen before
+formatting in both text and JSON.
 
 ## Counts, confidence, output, and exits
 
