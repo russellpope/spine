@@ -21,3 +21,12 @@ lightweight link from evidence to pin — an eval reference recorded alongside a
 pin at ratification time? a doctor advisory when a pinned model has no eval
 record or a failing battery? — without turning pin ratification into a gate
 the owner didn't ask for?
+
+## Decision brief
+
+Owner requested options before implementation on 2026-08-30. See
+[`docs/research/2026-08-30-eval-informed-pin-decision-brief.md`](../research/2026-08-30-eval-informed-pin-decision-brief.md)
+for the ratification-reference, doctor-advisory, and combined choices across
+eligible evidence, stale or missing behavior, allowed read scope, and the
+binding rule that no advisory de-ratifies a pin. No I077 implementation is
+authorized until the owner selects an option.
