@@ -2,7 +2,8 @@
 id: I072
 title: Host config schema and the preference/constraint precedence story
 severity: med
-status: open
+status: fixed
+commits: [06f0628, f14e927, 4fbf72b, 2d5843d, 04f9ea4, 97a20ad, fa41be9, 518a73b, 4ba395f, 50a6a6d]
 affects: [model, workflow, fleet, cli]
 blocked-by: [I070, I071]
 labels: [wayfinder:grilling]
@@ -105,3 +106,17 @@ because the locked design and plan both name the only status vocabulary as
 Fresh primary re-review, a different independent verifier, and exact-final-SHA
 verification evidence remain required before closure. This correction does not
 expand into I073, I074, or I077.
+
+## Resolution
+
+Fixed 2026-08-30 at final I072 product SHA `50a6a6d`. The implementation adds
+the closed, owner-local host capability/pin schema; exact estate → repository
+→ host precedence; safe final-route output and controlled-launch refusal;
+host-blind alternate/mirror/update behavior; D16 doctor diagnostics; and
+preference-only audit preflight. Four adversarial correction rounds closed
+schema, redaction, CLI ordering, executable-path, metadata, status, private
+seam, and required regression-matrix gaps. A fresh primary review and a
+different independent primary verifier passed focused/full/race/vet/build,
+compiled CLI, mutation, and source-built audit checks at `50a6a6d`. The
+superseded ticket-level maipipe attempt is non-evidence; the batch-final exact
+SHA lane remains the ship gate. I073 and I077 are now unblocked.

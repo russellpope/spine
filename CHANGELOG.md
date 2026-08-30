@@ -45,6 +45,14 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Added
 
+- **Host-scoped routing capability and equivalence pins.** An owner-local,
+  closed JSON file can constrain repository preferences to available harnesses
+  or select an exact model-effort pin without leaking host state into
+  templates, mirrors, or updates. `spine model` exposes the requested/final
+  trail, controlled validation remains fail-closed for divergent pins until
+  heterogeneous audit support lands, doctor D16 diagnoses bad or unreachable
+  routes, and routing audit performs structural preflight only. (I072)
+
 - **`spine update` now advises before rendering enabled gate checks with
   missing required configuration.** The deterministic stdout lines name the
   class, missing `gate_pack_config` key, and both remedies without implicitly
