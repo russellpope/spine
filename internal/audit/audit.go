@@ -462,7 +462,7 @@ func Run(opts Options) (Report, error) {
 				}
 				rootTickets[d.toolUseID][t.id] = true
 			}
-			if d.source == "claude" && linkedClaude[d.identity] {
+			if (d.source == "claude" && linkedClaude[d.identity]) || (d.source != "claude" && linked[d.toolUseID]) {
 				continue // the subagent transcript below is the actual
 			}
 			if d.model != "" {
