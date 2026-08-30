@@ -398,12 +398,16 @@ func Run(opts Options) (Report, error) {
 	claimed := map[int]bool{}                   // dispatch index -> matched a ticket
 	linked := map[string]bool{}                 // coarse-linkage disclosure only (I044)
 	linkedClaude := map[evidenceIdentity]bool{} // complete Claude dispatch identity -> a subagent transcript carries models
+	linkedCodex := map[string]bool{}            // Codex root-thread linkage is source-local (D20)
 	for _, a := range agents {
 		if a.toolUseID != "" && len(a.models) > 0 {
 			linked[a.toolUseID] = true
 		}
 		if a.source == "claude" && a.identity.usable() && len(a.models) > 0 {
 			linkedClaude[a.identity] = true
+		}
+		if a.source == "codex" && a.toolUseID != "" && len(a.models) > 0 {
+			linkedCodex[a.toolUseID] = true
 		}
 	}
 	// codex ticket-token matching is case-insensitive (D20's "Flavor
@@ -462,7 +466,7 @@ func Run(opts Options) (Report, error) {
 				}
 				rootTickets[d.toolUseID][t.id] = true
 			}
-			if (d.source == "claude" && linkedClaude[d.identity]) || (d.source != "claude" && linked[d.toolUseID]) {
+			if (d.source == "claude" && linkedClaude[d.identity]) || (d.source == "codex" && linkedCodex[d.toolUseID]) {
 				continue // the subagent transcript below is the actual
 			}
 			if d.model != "" {
@@ -491,6 +495,8 @@ func Run(opts Options) (Report, error) {
 				}
 				if d.source == "claude" {
 					use = a.source == "claude" && d.identity.usable() && d.identity == a.identity && matches(d, t.id)
+				} else if d.source == "codex" {
+					use = a.source == "codex" && d.toolUseID != "" && d.toolUseID == a.toolUseID && matches(d, t.id)
 				} else {
 					use = d.toolUseID != "" && d.toolUseID == a.toolUseID && matches(d, t.id)
 				}
