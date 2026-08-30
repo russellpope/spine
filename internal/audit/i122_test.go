@@ -90,6 +90,9 @@ func TestWorkflowUsesOnlyFirstUserMessageAndRejectsMultiTicketOpening(t *testing
 	}{
 		{name: "later ticket is not opening evidence", first: "General task with no ticket", later: "Implement I052"},
 		{name: "multi-ticket opening is ambiguous", first: "Implement I052 and I053", wantWarning: true},
+		{name: "comma-adjacent tickets are ambiguous", first: "Implement I052,I053", wantWarning: true},
+		{name: "space-adjacent tickets are ambiguous", first: "Implement I052 I053", wantWarning: true},
+		{name: "non-audited explicit ticket is ambiguous", first: "Implement I052 and I999", wantWarning: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := t.TempDir()

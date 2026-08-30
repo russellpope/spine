@@ -85,3 +85,44 @@ func TestCodexWorkerRangeIsOneOpeningLineReference(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexWorkerRangeWithInteriorOnlyAuditedTicketContributes(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I500": "routine"})
+	claudeDir := t.TempDir()
+	codexDir := t.TempDir()
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker", "worker", "", repo, "user", topLevelSource),
+		codexUserMessageLine("Implement tickets I001-I999"),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: claudeDir, CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I500"]
+	if row.Verdict != VerdictMatch {
+		t.Fatalf("I500 verdict = %s (%s), want match from interior-only range", row.Verdict, row.Detail)
+	}
+}
+
+func TestCodexWorkerHugeRangeWithInteriorOnlyAuditedTicketStaysBounded(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I500000000": "routine"})
+	codexDir := t.TempDir()
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker", "worker", "", repo, "user", topLevelSource),
+		codexUserMessageLine("Implement tickets I000000000-I999999999"),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I500000000"]
+	if row.Verdict != VerdictMatch {
+		t.Fatalf("I500000000 verdict = %s (%s), want match from huge interior range", row.Verdict, row.Detail)
+	}
+}

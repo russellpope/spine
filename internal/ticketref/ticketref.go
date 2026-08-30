@@ -10,7 +10,7 @@ import (
 
 var idRe = regexp.MustCompile(`^I\d+$`)
 var rangeRe = regexp.MustCompile(`^I(\d+)-I(\d+)$`)
-var referenceInTextRe = regexp.MustCompile(`(^|[^A-Za-z0-9_-])(I\d+(?:-I\d+)?)([^A-Za-z0-9_-]|$)`)
+var referenceInTextRe = regexp.MustCompile(`(^|[^A-Za-z0-9_-])(I\d+(?:-I\d+)?)`)
 
 // IsID reports whether raw is one canonical I-prefixed ticket id.
 func IsID(raw string) bool { return idRe.MatchString(raw) }
@@ -76,8 +76,12 @@ func ContainsStandalone(text, id string) bool {
 func References(text string) []string {
 	seen := map[string]bool{}
 	var references []string
-	for _, match := range referenceInTextRe.FindAllStringSubmatch(text, -1) {
-		reference := match[2]
+	for _, match := range referenceInTextRe.FindAllStringSubmatchIndex(text, -1) {
+		referenceStart, referenceEnd := match[4], match[5]
+		if referenceEnd < len(text) && isReferenceWordChar(text[referenceEnd]) {
+			continue
+		}
+		reference := text[referenceStart:referenceEnd]
 		_, _, _, isRange := Range(reference)
 		if !IsID(reference) && !isRange || seen[reference] {
 			continue
@@ -88,29 +92,12 @@ func References(text string) []string {
 	return references
 }
 
-// ReferenceCount returns the number of distinct standalone reference groups
-// that claim at least one audited ticket ID. One range is one group even when
-// it expands to several IDs.
+// ReferenceCount returns the number of distinct standalone explicit reference
+// groups. One range is one group even when it covers several IDs. auditedIDs
+// is retained for call-site compatibility; an explicit non-audited reference
+// still makes an opening ambiguous.
 func ReferenceCount(text string, auditedIDs []string) int {
-	count := 0
-	for _, reference := range References(text) {
-		for _, id := range auditedIDs {
-			if reference == id {
-				count++
-				break
-			}
-			start, end, width, ok := Range(reference)
-			if !ok || !IsID(id) || len(id)-1 != width {
-				continue
-			}
-			want, err := strconv.Atoi(strings.TrimPrefix(id, "I"))
-			if err == nil && want >= start && want <= end {
-				count++
-				break
-			}
-		}
-	}
-	return count
+	return len(References(text))
 }
 
 func containsToken(text, token string) bool {
@@ -132,4 +119,8 @@ func containsToken(text, token string) bool {
 
 func isAlnum(value byte) bool {
 	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
+}
+
+func isReferenceWordChar(value byte) bool {
+	return isAlnum(value) || value == '_' || value == '-'
 }

@@ -58,3 +58,29 @@ func TestReferenceCountTreatsOneRangeAsOneGroup(t *testing.T) {
 		}
 	}
 }
+
+func TestReferencesRecognizesSeparatorAdjacentGroups(t *testing.T) {
+	for _, text := range []string{
+		"I051,I052",
+		"I051 I052",
+	} {
+		t.Run(text, func(t *testing.T) {
+			got := References(text)
+			want := []string{"I051", "I052"}
+			if len(got) != len(want) {
+				t.Fatalf("References(%q) = %q, want %q", text, got, want)
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("References(%q) = %q, want %q", text, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestReferenceCountIncludesNonAuditedExplicitGroups(t *testing.T) {
+	if got := ReferenceCount("I052 and I999", []string{"I052"}); got != 2 {
+		t.Fatalf("ReferenceCount(I052 and I999) = %d, want 2", got)
+	}
+}

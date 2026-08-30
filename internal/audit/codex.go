@@ -701,7 +701,9 @@ func (p *gitCommitProber) knows(hash string) bool {
 //     evidence path except clause 1 above: spawn_agent task_name, a
 //     team-spawn command's text (which carries the token via a
 //     dispatch-task file path, I009), and the opening-user-message carrier
-//     (D21) all place the token in the file's own bytes.
+//     (D21) all place the token in the file's own bytes. A valid range
+//     carrier is also retained when it contains an audited ID; membership is
+//     arithmetic and never materializes the range.
 //
 // Both checks are over-inclusive by construction (a false "yes" only costs
 // a wasted full parse); under-inclusion is what would break soundness, so
@@ -720,6 +722,15 @@ func codexMayContribute(data []byte, tokens []string) bool {
 		upper := strings.ToUpper(tok)
 		lower := strings.ToLower(tok)
 		if bytes.Contains(data, []byte(upper)) || bytes.Contains(data, []byte(lower)) {
+			return true
+		}
+	}
+	if !bytes.Contains(data, []byte("-I")) && !bytes.Contains(data, []byte("-i")) {
+		return false
+	}
+	text := strings.ToUpper(string(data))
+	for _, tok := range tokens {
+		if ticketref.Contains(text, strings.ToUpper(tok)) {
 			return true
 		}
 	}
