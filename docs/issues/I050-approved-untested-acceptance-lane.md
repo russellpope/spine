@@ -2,7 +2,7 @@
 id: I050
 title: "Verify convention: approved-untested as a first-class acceptance state"
 severity: med
-status: fixed
+status: open
 commits: [7e94222, 4850488, fae360f, 6950089, c55faf3]
 affects: [templates, doctor]
 blocked-by: []
@@ -59,15 +59,16 @@ silently skipped.
 
 ## Acceptance criteria (sharpened at PRD time)
 
-- [x] Template generation ships the convention; `spine update` propagates it.
-- [x] A well-formed waived item passes doctor; a reason-less one warns
+- [ ] Template generation ships the convention; `spine update` propagates it.
+- [ ] A well-formed waived item passes doctor; a reason-less one warns
       (negative control).
-- [x] The grammar is documented next to the ESCALATION grammar it mirrors.
+- [ ] The grammar is documented next to the ESCALATION grammar it mirrors.
 
-## Resolution
+## Prior implementation and reopening
 
-Fixed 2026-08-29 in `7e94222`, `4850488`, `fae360f`, `6950089`, and
-`c55faf3`. The shared `internal/acceptance` scanner owns candidate detection,
+The first implementation landed 2026-08-29 in `7e94222`, `4850488`,
+`fae360f`, `6950089`, and `c55faf3`. The shared `internal/acceptance` scanner
+owns candidate detection,
 the exact single-line grammar, acceptance-section scope, dated Markdown
 reference validation, symlink containment, ticket discovery, and counts.
 References establish local provenance only: spine does not authenticate the
@@ -85,11 +86,13 @@ The captured generation-11 migration is additive and idempotent, preserves the
 knowledge profile's no-issue-ledger manifest, and refuses local edits in all
 five touched managed files without force.
 
-Strict TDD recorded intended red failures for the scanner, D15 adapter,
-stage-audit adapter, and generation migration, plus checked-state, severity,
-blocking, and local-edit negative controls. Focused packages, an uncached full
-`go test ./...`, `go vet ./...`, `git diff --check`, current-binary update,
-and compiled-CLI acceptance cases passed. The repository has no `make verify`
-target; current doctor/routing/stages commands retain their pre-existing
-repository advisories and blockers. Per the controller's dispatch, a separate
-fresh primary review follows this worker report.
+The ticket was prematurely closed by `4b04184` before its required fresh
+primary review and independent verification. The fresh primary review failed
+with five findings: relative roots suppress scanning, the default Scanner
+limit hides long and later lines without surfacing read errors, failures are
+not fully aggregated, valid bare/tab-delimited H1/H2 headings do not end the
+acceptance section, and the ledger/gate state was advanced too early. I050 is
+therefore open again, and every acceptance criterion remains unchecked until
+a later fresh primary re-review and a different independent verifier approve
+the corrected exact SHA. Correction commit SHAs will be added here without
+closing the ticket.

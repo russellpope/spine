@@ -32,6 +32,10 @@ scaffold/update machinery, and existing CLI test harness.
   command before implementation and record the expected failure. A test that
   starts green does not prove the change and must be corrected before work
   continues.
+- The correction round normalizes relative roots once, imposes no new physical
+  line limit, surfaces every read error, aggregates every safely applicable
+  grammar/reference failure in deterministic order, and recognizes every
+  column-0 bare/space/tab ATX H1/H2 boundary while retaining H3 in section.
 - The canonical grammar is copied exactly from the PRD. Do not add aliases,
   multiline forms, `WAIVED`, fragment resolution, follow-up-ticket parsing, or
   authentication.
@@ -81,9 +85,15 @@ scaffold/update machinery, and existing CLI test harness.
 
   func (p Problem) Message() string
 
+  type ScanError struct {
+      Path string
+      Err  error
+  }
+
   type Summary struct {
-      Records  []Record
-      Problems []Problem
+      Records    []Record
+      Problems   []Problem
+      ScanErrors []ScanError
   }
 
   func (s Summary) ValidCount() int
@@ -94,13 +104,15 @@ scaffold/update machinery, and existing CLI test harness.
   func ScanTicketIDs(repoRoot string, ids []string) Summary
   ```
 
+  `ScanError` carries the slash-form ticket path and underlying read cause.
   `ScanTicket` accepts an absolute or repository-relative ticket path but
   reports `Record.Path` and `Problem.Path` as slash-form paths relative to
   `repoRoot`. `ScanAllTickets` scans eligible `docs/issues/I*.md` files at all
   statuses. `ScanTicketIDs` discovers the same eligible files, reads their
   leading frontmatter `id`, and includes only exact IDs in the supplied set.
   All three call one unexported line parser and one unexported approval-path
-  validator.
+  validator. Their line reader adds no fixed maximum; read failures populate
+  `Summary.ScanErrors` rather than returning a clean empty result.
 
 - Create `internal/acceptance/acceptance_test.go` for the grammar, scope,
   path-security, discovery, and count matrix.
@@ -109,7 +121,9 @@ scaffold/update machinery, and existing CLI test harness.
 
 - Create `internal/doctor/acceptance.go` with
   `func acceptanceCheck(dir string) []Finding`. It maps every
-  `acceptance.Problem` to exactly one `Finding{"D15", "warn", ...}`.
+  `acceptance.Problem` and explicit scan error to exactly one
+  `Finding{"D15", "warn", ...}` without counting scan errors as invalid
+  candidates.
 - Create `internal/doctor/acceptance_test.go` for package-level D15 behavior.
 - Modify `internal/doctor/doctor.go`: change the package comment to D1-D15 and
   append `acceptanceCheck(dir)` in `Run` after `ticketCheck(dir)`. Keep D14's
@@ -127,7 +141,7 @@ scaffold/update machinery, and existing CLI test harness.
 - Modify `internal/stages/stages_test.go` for scoped summaries and blocking
   isolation.
 - Modify `cmd/spine/main.go` in `cmdAuditStages`: print one `warning:` per
-  `rep.Acceptance.Problems`; print the exact summary only when
+  `rep.Acceptance.Problems` and scan error; print the exact summary only when
   `CandidateCount() > 0`, after stage rows and before the handoff line.
 - Modify `cmd/spine/main_test.go` for exact stdout, stderr, and exits.
 
@@ -570,17 +584,23 @@ generation-11 migration, and no issue ledger for knowledge profiles.
 - [ ] **Step 4: Run repository gates before review.** Run:
 
   ```bash
-  make verify
+  go test ./internal/acceptance ./internal/doctor ./internal/stages ./cmd/spine -count=1
+  go test ./... -count=1
+  go vet ./...
+  go build -o bin/spine ./cmd/spine
   go run ./cmd/spine update --dir .
-  spine doctor --dir .
-  spine audit routing --dir .
-  spine audit stages --dir .
+  ./bin/spine doctor --dir .
+  ./bin/spine audit routing --dir .
+  ./bin/spine audit stages --dir .
+  git diff --check
   ```
 
-  Expected: `make verify` and update pass. Record and separate pre-existing or
-  concurrent doctor findings. Routing has no I050 silent descent. Audit stages
-  may show ADR 0014's expected stale-handoff block; it must not show an I050
-  block or scan tickets outside the active cursor.
+  Expected: the focused/full Go, vet, build, update, and diff checks pass.
+  Record and separate pre-existing or concurrent doctor findings. Routing has
+  no I050 silent descent. Audit stages may show ADR 0014's expected
+  stale-handoff block; it must not show an I050 block or scan tickets outside
+  the active cursor. The final exact-SHA verifier runs
+  `maipipe run full --wait` after all commits that belong to that SHA.
 
 - [ ] **Step 5: Commit the CHANGELOG independently.** Run:
 
@@ -591,6 +611,87 @@ generation-11 migration, and no issue ledger for knowledge profiles.
 
   Stage no concurrent CHANGELOG hunk. If the file has overlapping edits, stop
   and coordinate or use a patch-based partial stage that contains only I050.
+
+## Correction round after failed fresh review
+
+The first fresh primary review failed. This correction round owns every
+finding in `.superpowers/sdd/I050-review-worker1-report.md`; none is narrowed
+to the review's smallest reproducer.
+
+- [ ] **Step 1: Reopen and amend before product edits.** In one docs-only
+  commit, set I050 to `status: open`, leave all three ticket criteria
+  unchecked, clarify that references split once at the first `#` and preserve
+  all later fragment bytes, replace the false “15 acceptance criteria” review
+  instruction, and replace every nonexistent `make verify` step with the
+  focused/full Go, vet, build, update, doctor/audit, diff, and final maipipe
+  sequence. The blind report is the red evidence for the premature fixed
+  state; direct assertions against the old docs must fail before the edit.
+
+- [ ] **Step 2: Relative-root slice.** Add failing package regressions for
+  both `ScanAllTickets` and `ScanTicketIDs` from a named relative repository
+  root. Add compiled-binary CLI regressions that run `doctor --dir .`,
+  `doctor --dir <named-relative>`, and `audit stages --dir .` from their
+  parent/current directories and pin D15, acceptance summary, stderr, and
+  exit behavior. Observe red because discovery passes an already root-prefixed
+  relative ticket path back through root joining. Normalize the repository
+  root once with `filepath.Abs`, pass internally consistent absolute paths,
+  and rerun focused green.
+
+- [ ] **Step 3: Arbitrary-line and read-error slice.** Add one failing test
+  for a candidate line longer than 64 KiB and another for a long noncandidate
+  followed by both valid and invalid candidates. Add a failing injected-reader
+  test proving a non-EOF read error is surfaced explicitly, plus doctor and
+  stage-adapter assertions that the error is visible and never becomes a
+  candidate count or stage blocker. Observe the default-Scanner/ignored-error
+  red, then use a `bufio.Reader` loop with no new fixed maximum and explicit
+  error propagation. Rerun focused green.
+
+- [ ] **Step 4: Deterministic aggregation slice.** Add failing tables that
+  combine independent grammar failures and reference failures. Pin the exact
+  ordered `Problem.Failed` sequence and exact D15/audit message. The reference
+  `outside/approval.txt#x` must report every applicable prefix, suffix, dated
+  basename, and existence failure. Parse recoverable fields independently;
+  evaluate every safe lexical check and every filesystem check whose
+  prerequisites are valid; skip only unsafe dependent checks. One candidate
+  still produces exactly one problem. Rerun the table repeatedly to prove
+  deterministic green.
+
+- [ ] **Step 5: ATX boundary slice.** Add a failing table for all column-0
+  bare, space-delimited, and tab-delimited H1/H2 boundaries (`#`, `##`,
+  `# Title`, `## Title`, `#\tTitle`, `##\tTitle`) and H3 controls in the same
+  forms that remain inside the acceptance section. Implement one boundary
+  helper accepting one or two `#` bytes followed only by end of line, ASCII
+  space, or tab. Rerun focused green.
+
+- [ ] **Step 6: Preserve passing behavior and commit coherent units.** Rerun
+  the existing canonical grammar, path containment/symlink, D15 text/JSON,
+  scoped nonblocking audit, zero-marker byte-compatibility, and generation-12
+  migration suites cited as passing by the blind report. Commit explicit
+  paths in coherent correction units. Append every correction SHA to I050,
+  but keep `status: open`, keep affected criteria unchecked, and do not add a
+  closure resolution in this dispatch.
+
+- [ ] **Step 7: Correction verification before handoff to fresh gates.** Run:
+
+  ```bash
+  go test ./internal/acceptance -run 'Test.*(Relative|Long|Read|Aggregate|Heading|Fragment)' -count=1
+  go test ./internal/doctor ./internal/stages ./cmd/spine -run 'Test.*(D15|Acceptance|Relative)' -count=1
+  go test ./... -count=1
+  go vet ./...
+  go build -o bin/spine ./cmd/spine
+  ./bin/spine update --dir .
+  ./bin/spine doctor --dir .
+  ./bin/spine audit routing --dir .
+  ./bin/spine audit stages --dir .
+  git diff --check
+  maipipe run full --wait
+  ```
+
+  Also run compiled-CLI relative-root and hostile-reference fixtures directly,
+  recording raw stdout, stderr, and exit codes. Known unrelated repository
+  advisories or stale-handoff state are recorded separately and never
+  misreported as I050 success. A different fresh primary reviewer and then a
+  different independent primary verifier own the later closure gates.
 
 ## Task 6: fresh spec review, verification, ticket closure, and final commits
 
@@ -604,7 +705,8 @@ generation-11 migration, and no issue ledger for knowledge profiles.
 - [ ] **Step 1: Run the mandatory fresh spec review.** Dispatch a fresh
   primary-tier reviewer with I050 in the prompt and an explicit routed model
   and effort. The reviewer first attacks this PRD for contradictions, then
-  compares every finished diff hunk with all 15 acceptance criteria. It must
+  compares every finished diff hunk with every binding PRD requirement and
+  all ticket acceptance criteria. It must
   explicitly inspect D15 allocation, candidate breadth, exact heading scope,
   aggregated one-line failures, symlink containment, provenance versus
   authentication wording, doctor/audit exit asymmetry, scoped ID resolution,
@@ -621,10 +723,12 @@ generation-11 migration, and no issue ledger for knowledge profiles.
 - [ ] **Step 3: Run independent verification.** Dispatch a different fresh
   primary-tier verifier with I050 in the prompt and an explicit routed model
   and effort. The verifier reruns parser, doctor, audit, migration, full suite,
-  vet, diff check, functional probes, `make verify`, `spine doctor`,
-  `spine audit routing`, and `spine audit stages`; checks raw exit codes and
-  output; verifies all prior negative controls were observed red; and checks
-  the staged/committed path set excludes concurrent files.
+  focused and full Go tests, vet, `go build -o bin/spine ./cmd/spine`, diff
+  check, compiled-CLI relative-root and hostile-reference probes, update dry
+  run, `spine doctor`, `spine audit routing`, and `spine audit stages`, then
+  runs `maipipe run full --wait`; checks raw exit codes and output; verifies
+  all prior negative controls were observed red; and checks the
+  staged/committed path set excludes concurrent files.
 
 - [ ] **Step 4: Close I050 only after both gates approve.** Set `status: fixed`,
   add `commits: [...]` with the actual implementation, template, CHANGELOG, and
@@ -645,7 +749,11 @@ generation-11 migration, and no issue ledger for knowledge profiles.
   ```bash
   go test ./... -count=1
   go vet ./...
-  make verify
+  go build -o bin/spine ./cmd/spine
+  ./bin/spine update --dir .
+  ./bin/spine doctor --dir .
+  ./bin/spine audit routing --dir .
+  ./bin/spine audit stages --dir .
   git diff --check
   git status --short
   maipipe run full --wait

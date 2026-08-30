@@ -96,15 +96,19 @@ Every byte-level rule below is binding:
    `by `, ` ref: `, and ` reason: ` as shown above.
 7. `<approver>` is one nonempty, whitespace-free token. It records the name
    supplied by the author; spine does not interpret or authenticate it.
-8. The reference is one nonempty, whitespace-free token with exactly one
-   base-path/fragment split at its first `#`. Both parts are nonempty.
+8. The reference is one nonempty, whitespace-free token split once at its
+   first `#`. Both parts are nonempty; later `#` bytes belong to the fragment
+   and are preserved verbatim.
 9. `<one-line reason>` is the trimmed remainder of the physical line and is
    nonempty. It may contain spaces, punctuation, additional colons, and ticket
    IDs. It cannot continue onto another line.
 10. The line appears after an exact column-0 heading
     `## Acceptance criteria` and before the next column-0 level-one or
-    level-two Markdown heading. A level-three or deeper heading does not end
-    the section. A marker under any other heading is invalid.
+    level-two ATX Markdown heading. A boundary is one or two leading `#` bytes
+    followed by end of line, one ASCII space, or one tab. Bare,
+    space-delimited, and tab-delimited H1/H2 headings end the section; a
+    level-three or deeper heading does not. A marker under any other heading
+    is invalid.
 11. More than one canonical record may appear on a ticket. Each line is a
     separate record and contributes one to the count.
 
@@ -125,6 +129,12 @@ line never fans out into several D15 findings or several audit warnings.
 Plain prose, fenced examples that are not checklist-shaped, lowercase
 `approved-untested`, and unchecked checklist items with no uppercase sentinel
 are not candidates and produce no output.
+
+Physical lines have no I050-specific length limit. A candidate may be
+arbitrarily long, and an arbitrarily long noncandidate line must not hide any
+later candidate. Ticket open/read failures and failures encountered while
+reading a ticket are surfaced explicitly; they must never be returned as a
+clean empty summary.
 
 ## Approval-reference and path validation
 
@@ -177,9 +187,13 @@ results; neither command implements a second parser.
 
 The package exposes records with ticket path, line, criterion, date, approver,
 reference, and reason; problems with ticket path, line, and aggregated failed
-requirements; and a summary containing valid records and problems. Candidate,
-valid, and invalid counts derive from that summary rather than being maintained
-independently.
+requirements; explicit scan errors with ticket path and cause; and a summary
+containing valid records, problems, and scan errors. Candidate, valid, and
+invalid counts derive only from records and candidate problems rather than
+being maintained independently. Grammar and reference validation evaluate
+every applicable independent requirement in deterministic contract order;
+unsafe dependent filesystem checks are skipped only when their prerequisites
+are invalid.
 
 ## Doctor behavior
 
@@ -199,6 +213,8 @@ I050 adds D15, `approved-untested acceptance records`.
 - `--json` emits the existing `Finding` fields without schema changes:
   `id`, `severity`, `path`, and the line-bearing `message`.
 - No candidate marker means no D15 finding and no exit-code change.
+- A ticket scan error also produces a D15 `warn` that names the ticket and
+  underlying read failure; it is not counted as an invalid candidate.
 
 "A valid record passes doctor" means it adds no D15 finding. It does not
 promise that unrelated checks produce no finding.
@@ -227,6 +243,9 @@ For the concrete ticket IDs resolved from the active cursor:
   noncanonical cursor checks, stage contradictions, and handoff checks remain
   the only blockers.
 - An existing blocker remains blocking regardless of acceptance counts.
+- Each ticket scan error prints one deterministic `warning:` line to stderr,
+  is excluded from candidate counts, and remains advisory like an invalid
+  candidate.
 
 The command asymmetry is intentional. Doctor is the estate-wide hygiene
 command and its longstanding warn contract yields exit 1. `audit stages` is a
@@ -329,11 +348,14 @@ part of the contract.
    produce exactly one aggregated invalid problem for the candidate line.
 3. Absolute, traversal, backslash, non-`docs/`, non-Markdown, undated,
    missing, directory, broken-link, and outside-root-symlink approval targets
-   are invalid. A valid fragment is recorded but not resolved.
+   are invalid. A valid fragment is recorded but not resolved; the reference
+   splits once at the first `#` and preserves every later fragment byte.
 4. Plain prose, lowercase prose, README, `_template.md`, and unchecked items
    without the uppercase sentinel produce no record, problem, or count.
 5. Multiple records preserve file and line attribution and yield exact valid,
-   invalid, and candidate counts.
+   invalid, and candidate counts. Arbitrarily long candidate and noncandidate
+   lines are processed without hiding later candidates, and ticket read errors
+   are surfaced explicitly without becoming candidate counts.
 6. Doctor assigns I050 the source-verified ID D15. A valid record adds no D15;
    a reason-less record, missing artifact, and malformed record on a closed
    ticket each add exactly one D15 warn. D15 makes the CLI exit 1 under the
@@ -362,10 +384,15 @@ part of the contract.
 14. Existing package and CLI tests stay green, including doctor severity,
     cursor resolution, stage blocking, handoff blocking, historical
     generation fixtures, and zero-marker output controls.
-15. The finished implementation passes a fresh primary-tier spec review
-    against this PRD, independent verification, `go test ./... -count=1`,
-    `go vet ./...`, `make verify`, `git diff --check`, applicable spine audits,
-    and the final exact-SHA maipipe lane before shipment.
+15. The finished implementation passes focused I050 package and compiled-CLI
+    tests, a fresh primary-tier spec review against every binding PRD
+    requirement plus all ticket acceptance criteria, and a different
+    independent verifier. Verification runs `go test ./... -count=1`,
+    `go vet ./...`, `go build -o bin/spine ./cmd/spine`, compiled-binary
+    relative-root and hostile-reference probes, `git diff --check`, the
+    update dry run, `spine doctor`, `spine audit routing`, and
+    `spine audit stages`, followed by `maipipe run full --wait` at the final
+    exact SHA before shipment.
 
 ## Delivery boundaries
 
