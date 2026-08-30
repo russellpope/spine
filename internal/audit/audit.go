@@ -838,9 +838,9 @@ func deriveFlavor(token, sourceFlavor string, mappings map[string]map[string]res
 }
 
 // resolvedTier is the audit's view of one (flavor, tier) row, obtained
-// through the shared resolver (design D13) so the audit judges exactly what
-// dispatch-time resolution returns — the audit owns no WORKFLOW.md routing
-// parser of its own.
+// through the strict launch validator so the audit's active leg judges exactly
+// what controlled dispatch-time validation returns. The audit owns no
+// WORKFLOW.md routing parser of its own.
 type resolvedTier struct {
 	id      string   // resolved model id: the repo's mirror value if present, else the embedded default
 	aliases []string // the table entry's explicitly declared aliases
@@ -865,17 +865,16 @@ func (rt resolvedTier) matches(token string) bool {
 }
 
 // resolveFlavorTiers builds one flavor's tier -> resolvedTier table for
-// repoDir via model.Resolve. An error is a broken embedded table or an
-// unknown flavor — never a repo state — and refuses the audit outright:
-// judging a fleet against a half-resolved table is exactly the confident
-// misparse D13/D14 exist to prevent. (Unreachable today: the embedded table
-// is load-time validated and transcriptFlavor only names shipped flavors.)
+// repoDir via model.ResolveStrictActive. Strict repository configuration errors
+// refuse the audit rather than letting compatibility resolution select a
+// different active ID. Audit-only aliases and history are layered below after
+// the shared active result.
 func resolveFlavorTiers(repoDir, flavor string) (map[string]resolvedTier, error) {
 	mapping := map[string]resolvedTier{}
 	for _, tier := range model.Tiers {
-		e, err := model.Resolve(repoDir, flavor, tier)
+		e, err := model.ResolveStrictActive(repoDir, flavor, tier)
 		if err != nil {
-			return nil, fmt.Errorf("model table resolution failed for %s.%s: %w", flavor, tier, err)
+			return nil, fmt.Errorf("model launch policy resolution failed for %s.%s: %w", flavor, tier, err)
 		}
 		rt := resolvedTier{id: e.ID, aliases: e.Aliases}
 		// Provenance-scoped matching (I037 fix round 1): a deliberate

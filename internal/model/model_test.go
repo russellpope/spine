@@ -864,6 +864,116 @@ func TestValidateLaunchRequestedKeyIsolationAndClaudePrecedence(t *testing.T) {
 	}
 }
 
+func TestValidateLaunchPreservesStrictRoutingSyntax(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, flavor, tier string
+	}{
+		{
+			name:    "malformed routing header",
+			content: "model_routing: bogus\n  codex.primary: bespoke-safe\n",
+			flavor:  "codex",
+			tier:    "primary",
+		},
+		{
+			name:    "whitespace before requested key colon",
+			content: "model_routing:\n  codex.primary : bespoke-safe\n",
+			flavor:  "codex",
+			tier:    "primary",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validateWorkflow(t, tc.content, tc.flavor, tc.tier, "")
+			requireConfigurationError(t, err)
+		})
+	}
+
+	for _, tc := range []struct {
+		name, content, wantID string
+	}{
+		{
+			name:    "commented header and row",
+			content: "model_routing: # routes\n  codex.primary: comment-safe # selected\n",
+			wantID:  "comment-safe",
+		},
+		{
+			name:    "dotted wins duplicate shadowed bare",
+			content: "model_routing:\n  claude.primary: dotted-safe\n  primary: first-bare\n  primary: second-bare\n",
+			wantID:  "dotted-safe",
+		},
+		{
+			name:    "dotted wins malformed shadowed bare",
+			content: "model_routing:\n  claude.primary: dotted-safe\n  primary malformed-bare\n",
+			wantID:  "dotted-safe",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			flavor := "codex"
+			if strings.HasPrefix(tc.wantID, "dotted") {
+				flavor = "claude"
+			}
+			entry, err := validateWorkflow(t, tc.content, flavor, "primary", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.ID != tc.wantID {
+				t.Fatalf("entry.ID = %q, want %q", entry.ID, tc.wantID)
+			}
+		})
+	}
+}
+
+func TestValidateLaunchUsesOnlyExactAlternateDelimiter(t *testing.T) {
+	for _, id := range []string{"salt:model", "vault:autoencoder"} {
+		t.Run(id, func(t *testing.T) {
+			entry, err := validateWorkflow(t, "model_routing:\n  codex.primary: "+id+"\n", "codex", "primary", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.ID != id {
+				t.Fatalf("entry.ID = %q, want %q", entry.ID, id)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name, value string
+	}{
+		{"repeated delimiter", "one alt: two alt: three"},
+		{"empty alternate", "one alt:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validateWorkflow(t, "model_routing:\n  codex.primary: "+tc.value+"\n", "codex", "primary", "")
+			requireConfigurationError(t, err)
+		})
+	}
+}
+
+func TestValidateLaunchClassifiesFlavorHistoryCurrentFirst(t *testing.T) {
+	t.Run("cross-cell history is retired", func(t *testing.T) {
+		_, err := validateWorkflow(t, "model_routing:\n  claude.primary: claude-sonnet-5\n", "claude", "primary", "")
+		requireLaunchRefusal(t, err, ReasonRetiredModel, "claude.primary", "claude-sonnet-5", "")
+	})
+
+	t.Run("current ID wins over history elsewhere", func(t *testing.T) {
+		tbl := cloneDefaultTable(t)
+		primary := tbl.Flavors["claude"]["primary"]
+		primary.History = append(primary.History, historyEntry{ID: "claude-opus-5"})
+		tbl.Flavors["claude"]["primary"] = primary
+		validateTable(tbl)
+		snap, err := parseLaunchRouting("model_routing:\n  claude.primary: claude-opus-5\n", testMaxTemplateVersion)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry, err := validateLaunchFrom(tbl, snap, "claude", "primary", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if entry.ID != "claude-opus-5" {
+			t.Fatalf("entry.ID = %q, want current flavor ID", entry.ID)
+		}
+	})
+}
+
 func TestValidateLaunchRefusesSelectedPolicyViolations(t *testing.T) {
 	for _, tc := range []struct {
 		name, content, flavor, tier, value string

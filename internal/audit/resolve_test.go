@@ -169,6 +169,89 @@ func TestValidatedLaunchIDsRemainMappedInAudit(t *testing.T) {
 	}
 }
 
+func TestValidationAndAuditShareStrictActiveRouteFromSameFile(t *testing.T) {
+	for _, tc := range []struct {
+		name, workflow, flavor, tier, id string
+		configError                      bool
+	}{
+		{
+			name:        "malformed header",
+			workflow:    "template_version: 12\nmodel_routing: bogus\n  codex.primary: bespoke-safe\n",
+			flavor:      "codex",
+			tier:        "primary",
+			configError: true,
+		},
+		{
+			name:        "raw key whitespace",
+			workflow:    "template_version: 12\nmodel_routing:\n  codex.primary : bespoke-safe\n",
+			flavor:      "codex",
+			tier:        "primary",
+			configError: true,
+		},
+		{
+			name:        "duplicate requested key",
+			workflow:    "template_version: 12\nmodel_routing:\n  codex.primary: first-safe\n  codex.primary: second-safe\n",
+			flavor:      "codex",
+			tier:        "primary",
+			configError: true,
+		},
+		{
+			name:     "commented safe override",
+			workflow: "template_version: 12\nmodel_routing: # routes\n  codex.primary: comment-safe # selected\n",
+			flavor:   "codex",
+			tier:     "primary",
+			id:       "comment-safe",
+		},
+		{
+			name:     "selected legacy bare row",
+			workflow: "template_version: 12\nmodel_routing:\n  primary: claude-bare-safe\n",
+			flavor:   "claude",
+			tier:     "primary",
+			id:       "claude-bare-safe",
+		},
+		{
+			name:     "dotted shadows duplicate bare rows",
+			workflow: "template_version: 12\nmodel_routing:\n  claude.primary: claude-dotted-safe\n  primary: first-bare\n  primary: second-bare\n",
+			flavor:   "claude",
+			tier:     "primary",
+			id:       "claude-dotted-safe",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeAuditRepo(t, dir, tc.workflow, map[string]string{"I954": tc.tier})
+			validated, validationErr := model.ValidateLaunch(model.LaunchRequest{
+				RepoDir: dir, Flavor: tc.flavor, Tier: tc.tier, MaxTemplateVersion: 12,
+			})
+			transcripts := t.TempDir()
+			if tc.configError {
+				if validationErr == nil {
+					t.Fatal("validation succeeded, want strict configuration error")
+				}
+				if _, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: transcripts}); err == nil {
+					t.Fatal("audit succeeded, want the same strict configuration error")
+				}
+				return
+			}
+			if validationErr != nil {
+				t.Fatal(validationErr)
+			}
+			if validated.ID != tc.id {
+				t.Fatalf("validated ID = %q, want %q", validated.ID, tc.id)
+			}
+			writeDispatchTranscript(t, dir, transcripts, map[string]string{"I954": validated.ID})
+			report, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := rowsByID(t, report)["I954"]
+			if row.Verdict == VerdictUnmappedDispatch {
+				t.Fatalf("validated ID %q became unmapped under the same file: %s", validated.ID, row.Detail)
+			}
+		})
+	}
+}
+
 func TestAliasAndHistoryRemainAuditEvidenceButNotLaunchIDs(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, "template_version: 12\n", map[string]string{
