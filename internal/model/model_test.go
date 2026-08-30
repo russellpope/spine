@@ -2,8 +2,10 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -708,6 +710,249 @@ func TestValidateTableModelValidationRejectsUnknownJSONMembers(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Fatalf("decodeTable unknown policy member error = %v, want strict rejection", err)
 	}
+}
+
+const testMaxTemplateVersion = 12
+
+func validateWorkflow(t *testing.T, content, flavor, tier, expected string) (Entry, error) {
+	t.Helper()
+	return ValidateLaunch(LaunchRequest{
+		RepoDir:            writeWorkflow(t, content),
+		Flavor:             flavor,
+		Tier:               tier,
+		Expected:           expected,
+		MaxTemplateVersion: testMaxTemplateVersion,
+	})
+}
+
+func requireLaunchRefusal(t *testing.T, err error, reason LaunchReason, key, value, rule string) *LaunchRefusal {
+	t.Helper()
+	var refusal *LaunchRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("error = %T %v, want *LaunchRefusal", err, err)
+	}
+	if refusal.Reason != reason || refusal.Key != key || refusal.Value != value || refusal.Rule != rule {
+		t.Fatalf("refusal = %#v, want reason=%q key=%q value=%q rule=%q", refusal, reason, key, value, rule)
+	}
+	if strings.Contains(refusal.Error(), "\n") || !strings.Contains(refusal.Error(), strconv.Quote(value)) {
+		t.Fatalf("refusal Error() = %q, want one-line quoted value", refusal.Error())
+	}
+	return refusal
+}
+
+func requireConfigurationError(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("validation succeeded, want configuration error")
+	}
+	var refusal *LaunchRefusal
+	if errors.As(err, &refusal) {
+		t.Fatalf("error = %#v, want ordinary configuration error", refusal)
+	}
+}
+
+func TestValidateLaunchPositiveRoutes(t *testing.T) {
+	t.Run("embedded default without repo", func(t *testing.T) {
+		entry, err := ValidateLaunch(LaunchRequest{Flavor: "codex", Tier: "primary", MaxTemplateVersion: testMaxTemplateVersion})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if entry.ID != "gpt-5.6-sol" || entry.Provenance != Default {
+			t.Fatalf("entry = %#v, want embedded default", entry)
+		}
+	})
+
+	t.Run("absent workflow", func(t *testing.T) {
+		entry, err := ValidateLaunch(LaunchRequest{RepoDir: t.TempDir(), Flavor: "codex", Tier: "routine", MaxTemplateVersion: testMaxTemplateVersion})
+		if err != nil || entry.ID != "gpt-5.6-terra" || entry.Provenance != Default {
+			t.Fatalf("entry=%#v err=%v", entry, err)
+		}
+	})
+
+	cases := []struct {
+		name, content, flavor, tier, wantID string
+		wantProvenance                      Provenance
+	}{
+		{"current dotted", "template_version: 12\nmodel_routing:\n  codex.primary: gpt-5.6-sol @ xhigh\n", "codex", "primary", "gpt-5.6-sol", Inherited},
+		{"current legacy bare", "model_routing:\n  routine: claude-opus-5 @ low\n", "claude", "routine", "claude-opus-5", Inherited},
+		{"current id changed effort", "model_routing:\n  claude.routine: claude-opus-5 @ xhigh\n", "claude", "routine", "claude-opus-5", Override},
+		{"custom dotted override", "model_routing:\n  codex.primary: bespoke-safe\n", "codex", "primary", "bespoke-safe", Override},
+		{"custom legacy bare override", "model_routing:\n  primary: claude-bespoke-safe\n", "claude", "primary", "claude-bespoke-safe", Override},
+		{"auto substring negative control", "model_routing:\n  codex.primary: automatic-model\n", "codex", "primary", "automatic-model", Override},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entry, err := validateWorkflow(t, tc.content, tc.flavor, tc.tier, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.ID != tc.wantID || entry.Provenance != tc.wantProvenance {
+				t.Fatalf("entry = %#v, want id=%q provenance=%q", entry, tc.wantID, tc.wantProvenance)
+			}
+		})
+	}
+}
+
+func TestActiveIDMatchesUsesByteEquality(t *testing.T) {
+	if !ActiveIDMatches("gpt-5.6-sol", "gpt-5.6-sol") {
+		t.Fatal("exact active id did not match")
+	}
+	for _, candidate := range []string{" gpt-5.6-sol", "gpt-5.6-sol ", "GPT-5.6-SOL", "sol"} {
+		if ActiveIDMatches("gpt-5.6-sol", candidate) {
+			t.Errorf("candidate %q matched exact active id", candidate)
+		}
+	}
+}
+
+func TestParseLaunchRoutingRejectsGlobalAmbiguity(t *testing.T) {
+	cases := []struct {
+		name, content string
+	}{
+		{"empty template version", "template_version:\n"},
+		{"duplicate template version", "template_version: 11\ntemplate_version: 12\n"},
+		{"malformed template version", "template_version: twelve\n"},
+		{"non decimal template version", "template_version: +12\n"},
+		{"newer template version", "template_version: 13\n"},
+		{"duplicate routing blocks", "model_routing:\n  codex.primary: first\nmodel_routing:\n  codex.primary: second\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseLaunchRouting(tc.content, testMaxTemplateVersion)
+			requireConfigurationError(t, err)
+		})
+	}
+}
+
+func TestValidateLaunchRejectsStrictRequestedInput(t *testing.T) {
+	cases := []struct {
+		name, content, flavor, tier string
+	}{
+		{"duplicate requested dotted key", "model_routing:\n  codex.primary: one\n  codex.primary: two\n", "codex", "primary"},
+		{"duplicate selected bare key", "model_routing:\n  primary: one\n  primary: two\n", "claude", "primary"},
+		{"missing colon", "model_routing:\n  codex.primary gpt-5.6-sol\n", "codex", "primary"},
+		{"empty id", "model_routing:\n  codex.primary:\n", "codex", "primary"},
+		{"multiple model ids", "model_routing:\n  codex.primary: one two\n", "codex", "primary"},
+		{"repeated effort separator", "model_routing:\n  codex.primary: one @ high @ low\n", "codex", "primary"},
+		{"malformed alternate", "model_routing:\n  codex.primary: one alt:\n", "codex", "primary"},
+		{"invalid pi effort vocabulary", "model_routing:\n  pi.routine: qwen3.8-27b-q8_0 @ high\n", "pi", "routine"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validateWorkflow(t, tc.content, tc.flavor, tc.tier, "")
+			requireConfigurationError(t, err)
+		})
+	}
+
+	t.Run("unreadable present input", func(t *testing.T) {
+		repoFile := filepath.Join(t.TempDir(), "not-a-directory")
+		if err := os.WriteFile(repoFile, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ValidateLaunch(LaunchRequest{RepoDir: repoFile, Flavor: "codex", Tier: "primary", MaxTemplateVersion: testMaxTemplateVersion})
+		requireConfigurationError(t, err)
+	})
+}
+
+func TestValidateLaunchRequestedKeyIsolationAndClaudePrecedence(t *testing.T) {
+	content := "model_routing:\n  claude.primary: claude-dotted-safe\n  primary: claude-bare-safe\n  codex.routine broken unrelated row\n"
+	entry, err := validateWorkflow(t, content, "claude", "primary", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.ID != "claude-dotted-safe" {
+		t.Fatalf("entry.ID = %q, want dotted row to win", entry.ID)
+	}
+}
+
+func TestValidateLaunchRefusesSelectedPolicyViolations(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, flavor, tier, value string
+		reason                             LaunchReason
+		rule                               string
+	}{
+		{"historical dotted", "model_routing:\n  claude.routine: claude-sonnet-5\n", "claude", "routine", "claude-sonnet-5", ReasonRetiredModel, ""},
+		{"historical changed effort", "model_routing:\n  claude.routine: claude-sonnet-5 @ xhigh\n", "claude", "routine", "claude-sonnet-5", ReasonRetiredModel, ""},
+		{"historical bare", "model_routing:\n  fallback: claude-opus-4-8\n", "claude", "fallback", "claude-opus-4-8", ReasonRetiredModel, ""},
+		{"unsafe custom", "model_routing:\n  codex.primary: bad;id\n", "codex", "primary", "bad;id", ReasonInvalidModelID, ""},
+		{"generic selector pattern", "model_routing:\n  codex.primary: AUTO\n", "codex", "primary", "AUTO", ReasonForbiddenModel, "generic-selector"},
+		{"bare family pattern", "model_routing:\n  codex.primary: OPUS\n", "codex", "primary", "OPUS", ReasonForbiddenModel, "bare-family"},
+		{"vendor auto pattern", "model_routing:\n  codex.primary: vendor-AUTO-model\n", "codex", "primary", "vendor-AUTO-model", ReasonForbiddenModel, "vendor-auto"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validateWorkflow(t, tc.content, tc.flavor, tc.tier, "")
+			requireLaunchRefusal(t, err, tc.reason, tc.flavor+"."+tc.tier, tc.value, tc.rule)
+		})
+	}
+
+	for _, token := range defaults.ModelValidation.ForbiddenTokens {
+		t.Run("exact token "+token, func(t *testing.T) {
+			_, err := validateWorkflow(t, "model_routing:\n  codex.primary: "+token+"\n", "codex", "primary", "")
+			requireLaunchRefusal(t, err, ReasonForbiddenModel, "codex.primary", token, "token:"+token)
+		})
+	}
+}
+
+func TestValidateLaunchExpectedCandidateClassification(t *testing.T) {
+	cases := []struct {
+		name, flavor, tier, candidate string
+		reason                        LaunchReason
+		rule, detail                  string
+	}{
+		{"syntax before deny", "codex", "primary", "auto ", ReasonInvalidModelID, "", ""},
+		{"shorthand alias", "claude", "routine", "opus", ReasonForbiddenModel, "token:opus", ""},
+		{"case difference", "codex", "primary", "GPT-5.6-SOL", ReasonUnmappedDispatch, "", ""},
+		{"other active tier", "codex", "primary", "gpt-5.6-terra", ReasonRouteMismatch, "", "codex.routine"},
+		{"historical", "claude", "primary", "claude-sonnet-5", ReasonRetiredModel, "", ""},
+		{"safe unknown", "codex", "primary", "bespoke-safe", ReasonUnmappedDispatch, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ValidateLaunch(LaunchRequest{Flavor: tc.flavor, Tier: tc.tier, Expected: tc.candidate, MaxTemplateVersion: testMaxTemplateVersion})
+			refusal := requireLaunchRefusal(t, err, tc.reason, tc.flavor+"."+tc.tier, tc.candidate, tc.rule)
+			if refusal.Detail != tc.detail {
+				t.Fatalf("Detail = %q, want %q", refusal.Detail, tc.detail)
+			}
+		})
+	}
+
+	entry, err := ValidateLaunch(LaunchRequest{Flavor: "codex", Tier: "primary", Expected: "gpt-5.6-sol", MaxTemplateVersion: testMaxTemplateVersion})
+	if err != nil || entry.ID != "gpt-5.6-sol" {
+		t.Fatalf("exact expected entry=%#v err=%v", entry, err)
+	}
+
+	for _, tier := range Tiers {
+		entry, err := ValidateLaunch(LaunchRequest{Flavor: "pi", Tier: tier, Expected: "qwen3.8-27b-q8_0", MaxTemplateVersion: testMaxTemplateVersion})
+		if err != nil || entry.ID != "qwen3.8-27b-q8_0" {
+			t.Errorf("shared pi id for tier %s: entry=%#v err=%v", tier, entry, err)
+		}
+	}
+}
+
+func TestValidateLaunchExpectedRejectsUnsafeIDSyntax(t *testing.T) {
+	for _, candidate := range []string{
+		strings.Repeat("a", 129),
+		" leading", "trailing ", "two words", "line\nbreak", "tab\tbyte",
+		`quoted"id`, "back`tick", "$dollar", "$(subshell)", "semi;colon",
+		`back\slash`, "pipe|id", "amp&id", "left<id", "right>id", "(group)",
+	} {
+		t.Run(strconv.Quote(candidate), func(t *testing.T) {
+			_, err := ValidateLaunch(LaunchRequest{Flavor: "codex", Tier: "primary", Expected: candidate, MaxTemplateVersion: testMaxTemplateVersion})
+			requireLaunchRefusal(t, err, ReasonInvalidModelID, "codex.primary", candidate, "")
+		})
+	}
+}
+
+func TestValidateLaunchExpectedUsesSameSnapshotForOtherTiers(t *testing.T) {
+	content := "model_routing:\n  codex.primary: requested-active\n  codex.routine: other-active\n"
+	_, err := validateWorkflow(t, content, "codex", "primary", "other-active")
+	refusal := requireLaunchRefusal(t, err, ReasonRouteMismatch, "codex.primary", "other-active", "")
+	if refusal.Detail != "codex.routine" {
+		t.Fatalf("Detail = %q, want codex.routine", refusal.Detail)
+	}
+
+	content = "model_routing:\n  codex.primary: requested-active\n  codex.routine: malformed @ high @ low\n"
+	_, err = validateWorkflow(t, content, "codex", "primary", "malformed")
+	requireLaunchRefusal(t, err, ReasonUnmappedDispatch, "codex.primary", "malformed", "")
 }
 
 // I036 (D9): a mirror value parses in every emitted shape — bare id (neither

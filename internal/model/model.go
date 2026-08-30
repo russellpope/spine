@@ -67,6 +67,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/russellpope/spine/models"
@@ -413,6 +414,335 @@ func isKnownTier(tier string) bool {
 // current-directory lookup, no mutation of package state.
 func Resolve(repoDir, flavor, tier string) (Entry, error) {
 	return resolveFrom(defaults, repoDir, flavor, tier)
+}
+
+// LaunchReason is a stable policy-refusal token returned by ValidateLaunch.
+// Repository configuration and invocation errors are ordinary errors instead.
+type LaunchReason string
+
+const (
+	ReasonForbiddenModel   LaunchReason = "forbidden-model"
+	ReasonInvalidModelID   LaunchReason = "invalid-model-id"
+	ReasonRetiredModel     LaunchReason = "retired-model"
+	ReasonRouteMismatch    LaunchReason = "route-mismatch"
+	ReasonUnmappedDispatch LaunchReason = "unmapped-dispatch"
+)
+
+// LaunchRequest identifies one active route and, optionally, the exact model
+// ID a caller intends to pass to a launcher.
+type LaunchRequest struct {
+	RepoDir            string
+	Flavor             string
+	Tier               string
+	Expected           string
+	MaxTemplateVersion int
+}
+
+// LaunchRefusal is a well-formed request refused by model launch policy.
+// Detail carries the other active route key for route-mismatch.
+type LaunchRefusal struct {
+	Reason LaunchReason
+	Key    string
+	Value  string
+	Rule   string
+	Detail string
+}
+
+func (e *LaunchRefusal) Error() string {
+	if e == nil {
+		return ""
+	}
+	message := fmt.Sprintf("%s: %s %q", e.Reason, e.Key, e.Value)
+	if e.Rule != "" {
+		message += fmt.Sprintf(" (rule: %s)", e.Rule)
+	}
+	if e.Detail != "" {
+		message += fmt.Sprintf(" (%s)", e.Detail)
+	}
+	return message
+}
+
+// ActiveIDMatches is the single launch-safe active-ID predicate. It is
+// intentionally byte-exact: aliases and history belong only to audit
+// evidence, and callers may not normalize an ID into an active route.
+func ActiveIDMatches(activeID, candidate string) bool {
+	return activeID == candidate
+}
+
+type launchSnapshot struct {
+	rows          map[string][]string
+	malformedRows []string
+}
+
+// ValidateLaunch resolves and validates one route from one WORKFLOW.md read.
+func ValidateLaunch(req LaunchRequest) (Entry, error) {
+	if _, ok := defaults.Flavors[req.Flavor]; !ok {
+		return Entry{}, fmt.Errorf("unknown flavor %q (known: %s)", req.Flavor, strings.Join(flavorsOf(defaults), ", "))
+	}
+	if !isKnownTier(req.Tier) {
+		return Entry{}, fmt.Errorf("unknown tier %q (known: %s)", req.Tier, strings.Join(Tiers, ", "))
+	}
+	snap, err := readLaunchSnapshot(req.RepoDir, req.MaxTemplateVersion)
+	if err != nil {
+		return Entry{}, err
+	}
+	return validateLaunchFrom(defaults, snap, req.Flavor, req.Tier, req.Expected)
+}
+
+func readLaunchSnapshot(repoDir string, maxTemplateVersion int) (launchSnapshot, error) {
+	if repoDir == "" {
+		return launchSnapshot{rows: map[string][]string{}}, nil
+	}
+	raw, err := os.ReadFile(filepath.Join(repoDir, "WORKFLOW.md"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return launchSnapshot{rows: map[string][]string{}}, nil
+		}
+		return launchSnapshot{}, fmt.Errorf("read WORKFLOW.md: %w", err)
+	}
+	return parseLaunchRouting(string(raw), maxTemplateVersion)
+}
+
+func parseLaunchRouting(content string, maxTemplateVersion int) (launchSnapshot, error) {
+	snap := launchSnapshot{rows: map[string][]string{}}
+	lines := strings.Split(content, "\n")
+	versionCount := 0
+	routingCount := 0
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if strings.HasPrefix(line, "template_version:") {
+			versionCount++
+			if versionCount > 1 {
+				return launchSnapshot{}, fmt.Errorf("WORKFLOW.md has duplicate template_version")
+			}
+			value := strings.TrimSpace(strings.TrimPrefix(line, "template_version:"))
+			if comment := CommentIndex(value); comment >= 0 {
+				value = strings.TrimSpace(value[:comment])
+			}
+			if value == "" || !regexp.MustCompile(`^[0-9]+$`).MatchString(value) {
+				return launchSnapshot{}, fmt.Errorf("WORKFLOW.md template_version %q is not one decimal integer", value)
+			}
+			version, err := strconv.Atoi(value)
+			if err != nil {
+				return launchSnapshot{}, fmt.Errorf("WORKFLOW.md template_version %q: %w", value, err)
+			}
+			if version > maxTemplateVersion {
+				return launchSnapshot{}, fmt.Errorf("WORKFLOW.md template_version %d is newer than supported generation %d", version, maxTemplateVersion)
+			}
+		}
+
+		if !launchRoutingHeader(line) {
+			continue
+		}
+		routingCount++
+		if routingCount > 1 {
+			return launchSnapshot{}, fmt.Errorf("WORKFLOW.md has multiple model_routing blocks")
+		}
+		for i++; i < len(lines); i++ {
+			row := lines[i]
+			if !strings.HasPrefix(row, "  ") || strings.TrimSpace(row) == "" {
+				i--
+				break
+			}
+			trimmed := strings.TrimSpace(row)
+			key, value, ok := strings.Cut(trimmed, ":")
+			if !ok {
+				snap.malformedRows = append(snap.malformedRows, trimmed)
+				continue
+			}
+			key = strings.TrimSpace(key)
+			snap.rows[key] = append(snap.rows[key], value)
+		}
+	}
+	return snap, nil
+}
+
+func launchRoutingHeader(line string) bool {
+	if !strings.HasPrefix(line, "model_routing:") {
+		return false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(line, "model_routing:"))
+	return rest == "" || strings.HasPrefix(rest, "#")
+}
+
+func parseLaunchValue(value string) (override, error) {
+	if comment := CommentIndex(value); comment >= 0 {
+		value = value[:comment]
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return override{}, fmt.Errorf("empty model id")
+	}
+	if strings.Contains(value, "alt:") && strings.Count(value, " alt:") != 1 {
+		return override{}, fmt.Errorf("malformed alternate syntax")
+	}
+	if strings.Count(value, " alt:") > 1 {
+		return override{}, fmt.Errorf("repeated alternate clause")
+	}
+	head, alt, hasAlt := strings.Cut(value, " alt:")
+	id, effort, err := parseLaunchPair(head)
+	if err != nil {
+		return override{}, err
+	}
+	ov := override{id: id, effort: effort}
+	if hasAlt {
+		altID, altEffort, err := parseLaunchPair(alt)
+		if err != nil {
+			return override{}, fmt.Errorf("alternate: %w", err)
+		}
+		ov.alternate = &Alternate{ID: altID, Effort: altEffort}
+	}
+	return ov, nil
+}
+
+func parseLaunchPair(value string) (string, string, error) {
+	if strings.Count(value, "@") > 1 {
+		return "", "", fmt.Errorf("repeated effort separator")
+	}
+	id, effort, hasEffort := strings.Cut(value, "@")
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", "", fmt.Errorf("empty model id")
+	}
+	if len(strings.Fields(id)) != 1 {
+		return "", "", fmt.Errorf("multiple model ids in %q", id)
+	}
+	if hasEffort {
+		effort = strings.TrimSpace(effort)
+		if effort == "" || len(strings.Fields(effort)) != 1 {
+			return "", "", fmt.Errorf("malformed effort %q", effort)
+		}
+	}
+	return id, effort, nil
+}
+
+func validateLaunchFrom(t table, snap launchSnapshot, flavor, tier, expected string) (Entry, error) {
+	entry, err := resolveLaunchCell(t, snap, flavor, tier, true)
+	if err != nil {
+		return Entry{}, err
+	}
+	if expected == "" || ActiveIDMatches(entry.ID, expected) {
+		return entry, nil
+	}
+	key := flavor + "." + tier
+	if refusal := modelPolicyRefusal(t.ModelValidation, key, expected); refusal != nil {
+		return Entry{}, refusal
+	}
+	for _, otherTier := range Tiers {
+		if otherTier == tier {
+			continue
+		}
+		other, err := resolveLaunchCell(t, snap, flavor, otherTier, false)
+		if err == nil && ActiveIDMatches(other.ID, expected) {
+			return Entry{}, &LaunchRefusal{Reason: ReasonRouteMismatch, Key: key, Value: expected, Detail: flavor + "." + otherTier}
+		}
+	}
+	for _, candidateTier := range Tiers {
+		for _, historical := range t.Flavors[flavor][candidateTier].History {
+			if historical.ID == expected {
+				return Entry{}, &LaunchRefusal{Reason: ReasonRetiredModel, Key: key, Value: expected}
+			}
+		}
+	}
+	return Entry{}, &LaunchRefusal{Reason: ReasonUnmappedDispatch, Key: key, Value: expected}
+}
+
+func resolveLaunchCell(t table, snap launchSnapshot, flavor, tier string, strict bool) (Entry, error) {
+	tiers, ok := t.Flavors[flavor]
+	if !ok {
+		return Entry{}, fmt.Errorf("unknown flavor %q (known: %s)", flavor, strings.Join(flavorsOf(t), ", "))
+	}
+	if !isKnownTier(tier) {
+		return Entry{}, fmt.Errorf("unknown tier %q (known: %s)", tier, strings.Join(Tiers, ", "))
+	}
+	def := tiers[tier]
+	key := flavor + "." + tier
+	value, found, err := selectedLaunchValue(snap, flavor, tier)
+	if err != nil {
+		return Entry{}, err
+	}
+	entry := Entry{
+		Flavor: flavor, Tier: tier, ID: def.ID, Effort: def.Effort,
+		Aliases: def.Aliases, Alternate: def.Alternate, Provenance: Default,
+	}
+	if found {
+		ov, err := parseLaunchValue(value)
+		if err != nil {
+			return Entry{}, fmt.Errorf("%s: %w", key, err)
+		}
+		for _, history := range def.History {
+			if ov.id == history.ID {
+				return Entry{}, &LaunchRefusal{Reason: ReasonRetiredModel, Key: key, Value: ov.id}
+			}
+		}
+		entry.ID = ov.id
+		entry.Effort = ov.effort
+		entry.Alternate = ov.alternate
+		if everShipped(def, tierDefaultEffortOf(t, flavor, tier), ov) {
+			entry.Provenance = Inherited
+		} else {
+			entry.Provenance = Override
+			entry.Aliases = nil
+		}
+	}
+	if entry.Effort == "" {
+		entry.Effort = tierDefaultEffortOf(t, flavor, tier)
+	}
+	if entry.Alternate != nil && entry.Alternate.Effort == "" {
+		entry.Alternate = &Alternate{ID: entry.Alternate.ID, Effort: entry.Effort}
+	}
+	if err := checkEffort(t, flavor, entry.Effort); err != nil {
+		return Entry{}, fmt.Errorf("%s: %w", key, err)
+	}
+	if entry.Alternate != nil {
+		if err := checkEffort(t, flavor, entry.Alternate.Effort); err != nil {
+			return Entry{}, fmt.Errorf("%s alternate: %w", key, err)
+		}
+	}
+	if refusal := modelPolicyRefusal(t.ModelValidation, key, entry.ID); refusal != nil {
+		return Entry{}, refusal
+	}
+	_ = strict // strictness is encoded by requested-key selection; relaxed callers discard errors.
+	return entry, nil
+}
+
+func selectedLaunchValue(snap launchSnapshot, flavor, tier string) (string, bool, error) {
+	dotted := flavor + "." + tier
+	for _, malformed := range snap.malformedRows {
+		if malformed == dotted || strings.HasPrefix(malformed, dotted+" ") || strings.HasPrefix(malformed, dotted+"\t") {
+			return "", false, fmt.Errorf("%s row is missing ':'", dotted)
+		}
+	}
+	if len(snap.rows[dotted]) > 1 {
+		return "", false, fmt.Errorf("duplicate model_routing key %q", dotted)
+	}
+	if flavor == "claude" {
+		for _, malformed := range snap.malformedRows {
+			if malformed == tier || strings.HasPrefix(malformed, tier+" ") || strings.HasPrefix(malformed, tier+"\t") {
+				return "", false, fmt.Errorf("legacy %s row is missing ':'", tier)
+			}
+		}
+		if len(snap.rows[tier]) > 1 {
+			return "", false, fmt.Errorf("duplicate legacy model_routing key %q", tier)
+		}
+	}
+	if len(snap.rows[dotted]) == 1 {
+		return snap.rows[dotted][0], true, nil
+	}
+	if flavor == "claude" && len(snap.rows[tier]) == 1 {
+		return snap.rows[tier][0], true, nil
+	}
+	return "", false, nil
+}
+
+func modelPolicyRefusal(policy *modelValidationPolicy, key, value string) *LaunchRefusal {
+	if !policy.idPattern.MatchString(value) {
+		return &LaunchRefusal{Reason: ReasonInvalidModelID, Key: key, Value: value}
+	}
+	if rule := deniedModelRule(policy, value); rule != "" {
+		return &LaunchRefusal{Reason: ReasonForbiddenModel, Key: key, Value: value, Rule: rule}
+	}
+	return nil
 }
 
 // resolveFrom is Resolve against an explicit table rather than the package's
