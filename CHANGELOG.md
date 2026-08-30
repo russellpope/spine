@@ -45,6 +45,12 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Added
 
+- **`spine update` now advises before rendering enabled gate checks with
+  missing required configuration.** The deterministic stdout lines name the
+  class, missing `gate_pack_config` key, and both remedies without implicitly
+  disabling a stage or changing update exits, diffs, or configured writes.
+  Optional `tskip_allow` and config-free checks remain quiet. (I123)
+
 - **Identity-scoped discarded dispatch records.** `spine audit routing` now
   recognizes `DISCARDED` ledger records for one exact Claude or direct Codex
   dispatch event and reports the event as advisory `discarded-with-reason`.
