@@ -131,10 +131,52 @@ func TestDiscardedClaudeLinkedDispatchIdentityIncludesSession(t *testing.T) {
 	}
 }
 
+// A Claude dispatch cannot be linked to a Codex worker by a colliding coarse
+// tool id. The source is part of the immutable identity as well as session
+// and dispatch event.
+func TestDiscardedClaudeLinkedDispatchIdentityIncludesSource(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+	if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(
+		"DISCARDED I078 source:claude session:prototype dispatch:codex:root-1 tier:routine reason: prototype was discarded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transcripts := t.TempDir()
+	prototype := filepath.Join(transcripts, "prototype.jsonl")
+	writeSingleDispatch(t, prototype, repo, "I078", "I078 prototype", "claude-sonnet-5")
+	raw, err := os.ReadFile(prototype)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prototype, []byte(strings.Replace(string(raw), "toolu_1", "codex:root-1", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codexDir := t.TempDir()
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker", "root-1", "root-1", repo, "subagent", threadSpawnSource("root-1")),
+		codexUserMessageLine("I078 unrelated Codex worker"),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts, CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I078"]
+	if row.Verdict != VerdictDiscardedWithReason || rep.Blocking() {
+		t.Fatalf("I078 = %s (%s), blocking=%v; cross-source same coarse id must not link", row.Verdict, row.Detail, rep.Blocking())
+	}
+}
+
 func TestDiscardedQuotedIdentityFieldsAreMalformed(t *testing.T) {
 	for _, record := range []string{
 		`DISCARDED I078 source:claude session:"prototype" dispatch:toolu_1 tier:routine reason: quoted session`,
 		`DISCARDED I078 source:claude session:prototype dispatch:"toolu_1" tier:routine reason: quoted dispatch`,
+		`DISCARDED I078 source:claude session:'prototype' dispatch:toolu_1 tier:routine reason: single-quoted session`,
+		`DISCARDED I078 source:claude session:prototype dispatch:'toolu_1' tier:routine reason: single-quoted dispatch`,
 	} {
 		t.Run(record, func(t *testing.T) {
 			repo := t.TempDir()
