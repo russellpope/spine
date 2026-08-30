@@ -2326,6 +2326,7 @@ func TestModelValidateSuccessAndGrammar(t *testing.T) {
 		{"no expect", []string{"model", "--dir", dir, "validate", "codex", "primary"}},
 		{"exact expect", []string{"model", "--dir", dir, "validate", "--expect", "gpt-5.6-sol", "codex", "primary"}},
 		{"equals expect", []string{"model", "--dir", dir, "validate", "--expect=gpt-5.6-sol", "codex", "primary"}},
+		{"equals dir and expect", []string{"model", "--dir=" + dir, "validate", "--expect=gpt-5.6-sol", "codex", "primary"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, out, errs := runCmd(t, tc.args...)
@@ -2349,6 +2350,7 @@ func TestModelValidateSuccessAndGrammar(t *testing.T) {
 		{"missing tier", []string{"model", "validate", "codex"}},
 		{"explicit empty expect", []string{"model", "validate", "--expect=", "codex", "primary"}},
 		{"dir after validate positional", []string{"model", "validate", "--dir", dir, "codex", "primary"}},
+		{"expect before validate positional", []string{"model", "--expect", "gpt-5.6-sol", "validate", "codex", "primary"}},
 		{"unsupported outer flag", []string{"model", "--effort", "validate", "codex", "primary"}},
 		{"flag after positionals", []string{"model", "validate", "codex", "primary", "--expect", "gpt-5.6-sol"}},
 		{"alternate rejected", []string{"model", "validate", "--alternate", "codex", "primary"}},
