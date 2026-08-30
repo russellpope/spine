@@ -134,8 +134,8 @@ func TestGen8To9MigrationCarriesNewGrammarLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	gotStr := string(got)
-	if !strings.Contains(gotStr, "template_version: 12") {
-		t.Errorf("migrated WORKFLOW.md missing template_version: 12")
+	if !strings.Contains(gotStr, "template_version: 13") {
+		t.Errorf("migrated WORKFLOW.md missing template_version: 13")
 	}
 	if !strings.Contains(gotStr, currentTicketsGrammar) {
 		t.Errorf("migrated WORKFLOW.md missing current tickets grammar line")

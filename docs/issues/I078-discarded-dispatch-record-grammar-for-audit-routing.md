@@ -3,10 +3,11 @@ id: I078
 title: Discarded-dispatch record grammar so audit routing stops reading abandoned prototypes as silent descent
 severity: med
 status: open
+commits: [29fbfe0, 48022aa]
 affects: [audit]
 blocked-by: []
-execution-mode:
-tier:
+execution-mode: subagent-driven
+tier: routine
 effort:
 risk-triggers: []
 review-tier:

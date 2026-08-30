@@ -45,6 +45,14 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Added
 
+- **Identity-scoped discarded dispatch records.** `spine audit routing` now
+  recognizes `DISCARDED` ledger records for one exact Claude or direct Codex
+  dispatch event and reports the event as advisory `discarded-with-reason`.
+  Malformed, duplicate, zero-match, and multi-match records warn without
+  excusing work; identity-less Codex worker evidence remains fail-closed, and
+  a separate lower-tier event still blocks as `silent-descent`. Template
+  generation 13 publishes the workflow grammar. (I078)
+
 - **Fail-closed active model validation.** `spine model [--dir D] validate
   [--expect MODEL_ID] <flavor> <tier>` reads one repository snapshot and emits
   only the exact active ID. It refuses forbidden, unsafe, retired,

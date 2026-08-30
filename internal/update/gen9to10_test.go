@@ -286,8 +286,8 @@ func TestGen9To10MigrationWritesFlavorMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 	gotStr := string(got)
-	if !strings.Contains(gotStr, "template_version: 12") {
-		t.Error("migrated WORKFLOW.md missing template_version: 12")
+	if !strings.Contains(gotStr, "template_version: 13") {
+		t.Error("migrated WORKFLOW.md missing template_version: 13")
 	}
 	for _, row := range model.MirrorRows() {
 		if !containsLine(gotStr, row) {

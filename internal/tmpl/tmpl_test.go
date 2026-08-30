@@ -9,17 +9,33 @@ import (
 )
 
 func TestVersionMatchesCurrentGeneration(t *testing.T) {
-	if got := tmpl.Version(); got != 12 {
-		t.Fatalf("Version() = %d, want 12", got)
+	if got := tmpl.Version(); got != 13 {
+		t.Fatalf("Version() = %d, want 13", got)
 	}
 }
 
 func TestCurrentWorkflowDocumentsAcceptanceExceptions(t *testing.T) {
-	got, err := tmpl.Render("current", "WORKFLOW.md.tmpl", tmpl.Values{Project: "demo", Profile: "rust", Version: 12})
+	got, err := tmpl.Render("current", "WORKFLOW.md.tmpl", tmpl.Values{Project: "demo", Profile: "rust", Version: 13})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"## Acceptance exceptions", "APPROVED-UNTESTED <YYYY-MM-DD>", "acceptance: approved-untested=<valid-count> invalid=<invalid-count>", "does not authenticate"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("WORKFLOW template missing %q", want)
+		}
+	}
+}
+
+func TestCurrentWorkflowDocumentsDiscardedDispatchRecords(t *testing.T) {
+	got, err := tmpl.Render("current", "WORKFLOW.md.tmpl", tmpl.Values{Project: "demo", Profile: "rust", Version: 13})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"DISCARDED <ticket-id> source:<claude|codex> session:<session-id> dispatch:<event-id> tier:<mechanical|routine|primary|fallback> reason: <one line>",
+		"A discarded record covers one identified event only",
+		"discarded-with-reason",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("WORKFLOW template missing %q", want)
 		}

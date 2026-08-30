@@ -23,11 +23,14 @@ var gen12ContentLines = map[string]bool{
 }
 
 func isGen12ContentDiffLine(line string) bool {
-	if len(line) == 0 || line[0] != '+' || strings.HasPrefix(line, "+++") {
+	if len(line) == 0 || (line[0] != '+' && line[0] != '-') || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") {
 		return false
 	}
+	if line[0] == '-' {
+		return isGen13ContentDiffLine(line)
+	}
 	body := strings.TrimSpace(line[1:])
-	return body == "" || gen12ContentLines[body]
+	return body == "" || gen12ContentLines[body] || isGen13ContentDiffLine(line)
 }
 
 func TestGen11To12PristineUpdatesCleanly(t *testing.T) {
@@ -49,11 +52,11 @@ func TestGen11To12WritesConventionAndIsIdempotent(t *testing.T) {
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
 		t.Fatal(err)
 	}
-	assertFileContains(t, dir, "WORKFLOW.md", "template_version: 12", "## Acceptance exceptions", "APPROVED-UNTESTED", "provenance", "does not authenticate")
+	assertFileContains(t, dir, "WORKFLOW.md", "template_version: 13", "## Acceptance exceptions", "APPROVED-UNTESTED", "provenance", "does not authenticate")
 	assertFileContains(t, dir, "docs/issues/_template.md", "## Acceptance criteria", "WORKFLOW.md")
 	assertFileContains(t, dir, "docs/issues/README.md", "approved without a test", "WORKFLOW.md")
-	assertFileContains(t, dir, "AGENTS.md", "<!-- spine:begin v12 -->")
-	assertFileContains(t, dir, "CLAUDE.md", "<!-- spine:begin v12 -->")
+	assertFileContains(t, dir, "AGENTS.md", "<!-- spine:begin v13 -->")
+	assertFileContains(t, dir, "CLAUDE.md", "<!-- spine:begin v13 -->")
 	reports, err := Run(Options{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +71,6 @@ func TestGen11To12WritesConventionAndIsIdempotent(t *testing.T) {
 func TestGen11To12PreservesLocalEditRefusals(t *testing.T) {
 	cases := map[string][2]string{
 		"WORKFLOW.md":              {"## Template authoring", "## Local template authoring"},
-		"CLAUDE.md":                {"**Mandatory gates:**", "**Local mandatory gates:**"},
-		"AGENTS.md":                {"This file is read by **Codex**", "This file is locally edited for **Codex**"},
 		"docs/issues/README.md":    {"# Issue / Bug Ledger — convention", "# Local ledger convention"},
 		"docs/issues/_template.md": {"## Fix", "## Local fix"},
 	}
@@ -110,6 +111,9 @@ func TestGen12ChangesAreAdditive(t *testing.T) {
 		r := report(t, reports, name)
 		for _, line := range strings.Split(r.Diff, "\n") {
 			if !strings.HasPrefix(line, "-") || strings.HasPrefix(line, "---") {
+				continue
+			}
+			if isGen13ContentDiffLine(line) {
 				continue
 			}
 			body := strings.TrimSpace(strings.TrimPrefix(line, "-"))

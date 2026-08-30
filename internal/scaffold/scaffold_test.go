@@ -66,12 +66,14 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 12",
+	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 13",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli",
 		"## Stage cursor (consistency rule)", "<!-- spine:cursor -->",
 		"**Sole-writer rule:** `spine` is the only legal cursor writer.",
 		"`spine handoff new` automatically embeds the current cursor block",
-		"## Acceptance exceptions", "APPROVED-UNTESTED"} {
+		"## Acceptance exceptions", "APPROVED-UNTESTED",
+		"DISCARDED <ticket-id> source:<claude|codex> session:<session-id> dispatch:<event-id> tier:<mechanical|routine|primary|fallback> reason: <one line>",
+		"A discarded record covers one identified event only"} {
 		if !strings.Contains(string(wf), want) {
 			t.Errorf("WORKFLOW.md missing %q", want)
 		}

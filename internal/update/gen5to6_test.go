@@ -163,7 +163,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"template_version: 12",
+		"template_version: 13",
 		"spine audit routing",
 	} {
 		if !strings.Contains(string(wf), want) {
@@ -187,7 +187,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(cl), "<!-- spine:begin v12 -->") {
+	if !strings.HasPrefix(string(cl), "<!-- spine:begin v13 -->") {
 		t.Error("migrated CLAUDE.md missing v11 marker")
 	}
 	if !strings.Contains(string(cl), "primary / routine / mechanical / fallback") {

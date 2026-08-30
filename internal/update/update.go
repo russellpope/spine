@@ -573,6 +573,11 @@ func dropRetiredKeyLines(unrec []string) []string {
 // render verbatim, copied off the old template rather than retyped, with
 // on-disk indentation intact (unrecognizedLines only right-trims).
 var supersededLines = map[string]bool{
+	// gen 12's record-scope sentence is expanded in gen 13 by I078 to add the
+	// identity-scoped DISCARDED grammar. I050's Acceptance exceptions lines
+	// remain emitted unchanged and therefore are deliberately not listed.
+	"A record excuses exactly its to-tier, nothing else. Any record not matching the grammar exactly excuses nothing — spaced arrows, missing `reason:`, missing tokens, all of it.": true,
+
 	// gen0–4 WORKFLOW.md gates line, reworded in gen 5 (to-spec, spec-review).
 	"Mandatory gates: a PRD up front (grill-with-docs -> to-prd) and verification before completion.": true,
 	// gen5 WORKFLOW.md model_routing lines, rewritten in gen 6 as the full

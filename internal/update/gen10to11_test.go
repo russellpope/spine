@@ -129,8 +129,8 @@ func TestGen10To11MigrationAddsGatePackKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(raw)
-	if !strings.Contains(got, "template_version: 12") {
-		t.Error("migrated WORKFLOW.md missing template_version: 12")
+	if !strings.Contains(got, "template_version: 13") {
+		t.Error("migrated WORKFLOW.md missing template_version: 13")
 	}
 	keys := ExtractKeys(got)
 	if keys["gate_pack"] != "" {

@@ -55,8 +55,9 @@ Escalation: dispatch may exceed a ticket's annotated tier or effort freely, WITH
     ESCALATION <ticket-id> <from-tier>-><to-tier> reason: <one line>
     ESCALATION <ticket-id> effort <from>-><to> reason: <one line>
     FALLBACK <ticket-id> reason: <one line>
+    DISCARDED <ticket-id> source:<claude|codex> session:<session-id> dispatch:<event-id> tier:<mechanical|routine|primary|fallback> reason: <one line>
 
-A record excuses exactly its to-tier, nothing else. Any record not matching the grammar exactly excuses nothing — spaced arrows, missing `reason:`, missing tokens, all of it.
+A record excuses exactly its to-tier, nothing else. Any record not matching the grammar exactly excuses nothing — spaced arrows, missing `reason:`, missing tokens, all of it. A discarded record covers one identified event only: its source, session, dispatch event, and resolved tier must all match an otherwise lower-tier token. Malformed, duplicate, zero-match, or multi-match discarded records are warned and excuse nothing. `discarded-with-reason` remains visible and advisory; a separate lower-tier event still reports blocking `silent-descent`.
 
 ## Acceptance exceptions
 
