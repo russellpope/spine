@@ -214,6 +214,46 @@ func TestPinEvidenceRejectsSelectedComponentSwappedToOutsideSymlink(t *testing.T
 	}
 }
 
+func TestPinEvidenceRejectsSelectedComponentSwappedToSameObjectSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges not assumed by this test")
+	}
+	for _, rel := range []string{
+		"docs",
+		"docs/evals",
+		"docs/evals/" + pinEvidenceEval,
+		"docs/evals/" + pinEvidenceEval + "/runs",
+		"docs/evals/" + pinEvidenceEval + "/eval.md",
+		"docs/evals/" + pinEvidenceEval + "/runs/" + pinEvidenceRun + ".md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			dir := pinEvidenceRepo(t, "2026-06-01", pinEvidenceModel, fullPassingBattery())
+			target := filepath.Join(dir, filepath.FromSlash(rel))
+			parked := target + ".checked"
+			setPinEvidenceBeforeOpen(t, func(opened string) {
+				if opened != rel {
+					return
+				}
+				if err := os.Rename(target, parked); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Base(parked), target); err != nil {
+					t.Fatal(err)
+				}
+			})
+
+			got := CheckPinEvidence(dir, []PinEvidencePin{{Key: "codex.primary", Model: pinEvidenceModel, EvidenceRefs: []string{pinEvidenceRef}}}, pinEvidenceToday)
+			wantPath := "docs/evals/2026-08-30-routing-check/runs/gpt-5-6-sol.md"
+			if rel == "docs/evals/"+pinEvidenceEval+"/eval.md" {
+				wantPath = "docs/evals/2026-08-30-routing-check/eval.md"
+			}
+			if len(got) != 1 || got[0].Kind != PinEvidenceMalformed || got[0].Path != wantPath {
+				t.Fatalf("findings = %#v, want malformed logical path %q", got, wantPath)
+			}
+		})
+	}
+}
+
 func setPinEvidenceBeforeOpen(t *testing.T, hook func(string)) {
 	t.Helper()
 	previous := pinEvidenceBeforeOpen

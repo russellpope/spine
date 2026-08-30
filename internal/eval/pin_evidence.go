@@ -193,7 +193,8 @@ func (r *pinEvidenceRoot) openDirectory(name string) (*pinEvidenceRoot, PinEvide
 		return nil, PinEvidenceMalformed
 	}
 	opened, err := child.Stat(".")
-	if err != nil || !os.SameFile(info, opened) {
+	current, currentErr := r.root.Lstat(name)
+	if err != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, opened) || !os.SameFile(info, current) {
 		_ = child.Close()
 		return nil, PinEvidenceMalformed
 	}
@@ -222,7 +223,8 @@ func (r *pinEvidenceRoot) readRegularFile(name string) ([]byte, PinEvidenceKind)
 	}
 	defer file.Close()
 	opened, err := file.Stat()
-	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+	current, currentErr := r.root.Lstat(name)
+	if err != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || !os.SameFile(info, current) {
 		return nil, PinEvidenceMalformed
 	}
 	content, err := io.ReadAll(file)
