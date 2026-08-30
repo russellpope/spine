@@ -937,6 +937,74 @@ func TestGatePackRegionEditIsUnrecognized(t *testing.T) {
 	}
 }
 
+// I124: scoped authority changes the selected maipipe report into the same
+// candidate path used by --force. The candidate must still go through the one
+// maipipe preflight, and its refusal must abort the complete plan before any
+// managed file, including an unrelated hand-edited WORKFLOW.md, is written.
+func TestForceFileMaipipePreflightRefusalLeavesEveryManagedFileUnwritten(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	binDir := t.TempDir()
+	bin := filepath.Join(binDir, "maipipe")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldLookup := maipipeLookup
+	maipipeLookup = func(string) (string, error) { return bin, nil }
+	t.Cleanup(func() { maipipeLookup = oldLookup })
+
+	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	maipipePath := filepath.Join(dir, MaipipeFile)
+	tampered := strings.Replace(readFile(t, maipipePath),
+		`run = "spine gate go@1 tskip"`, `run = "echo hand-authored"`, 1)
+	if tampered == readFile(t, maipipePath) {
+		t.Fatal("managed maipipe fixture did not contain the tskip stage")
+	}
+	if err := os.WriteFile(maipipePath, []byte(tampered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workflowPath := filepath.Join(dir, "WORKFLOW.md")
+	workflowBefore := readFile(t, workflowPath) + "local_workflow_rule: keep\n"
+	if err := os.WriteFile(workflowPath, []byte(workflowBefore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := Run(Options{Dir: dir, ForceFiles: []string{MaipipeFile}})
+	if err != nil {
+		t.Fatalf("selected dry-run: %v", err)
+	}
+	before := make(map[string]string, len(plan))
+	for _, r := range plan {
+		before[r.Path] = readFile(t, filepath.Join(dir, r.Path))
+	}
+	if got := report(t, plan, MaipipeFile); got.State != Pending || got.Preflight != maipipeValidatePreflight {
+		t.Fatalf("selected maipipe plan = state %v preflight %q", got.State, got.Preflight)
+	}
+
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'invalid scoped candidate' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := Run(Options{Dir: dir, Write: true, ForceFiles: []string{MaipipeFile}})
+	if err == nil {
+		t.Fatal("selected invalid maipipe candidate was written")
+	}
+	selected := report(t, reports, MaipipeFile)
+	for _, want := range []string{"maipipe validate rejected the result", "invalid scoped candidate", "no files were written"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal does not include %q:\n%s", want, err)
+		}
+	}
+	if selected.State != Pending || selected.Preflight != maipipeValidatePreflight || selected.Refusal == "" {
+		t.Fatalf("selected invalid report = %#v", selected)
+	}
+	for path, want := range before {
+		if got := readFile(t, filepath.Join(dir, path)); got != want {
+			t.Errorf("%s changed despite scoped preflight refusal", path)
+		}
+	}
+}
+
 // AC (I085): damaged markers — a begin without an end — are hand-repair
 // work: reported, file skipped, and --force cannot paper over them.
 func TestGatePackBrokenMarkerIsReported(t *testing.T) {
