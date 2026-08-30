@@ -8,6 +8,11 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Fixed
 
+- **`spine doctor` now advises on meaningful Go toolchain skew.** D14 compares
+  the binary's Go release with `go env GOVERSION` on PATH at major/minor
+  precision, names both values and `make install` when they differ, and leaves
+  patch-only skew quiet. It is a warning-only proxy for the importer condition,
+  not a gate preflight or a claim that the binary cannot run. (I108, ADR 0021)
 - **`spine audit routing` recognizes openweights models in Claude-layout transcripts.**
   The audit now derives each evidence token's flavor from its observed model id,
   so mixed Claude and openweights sessions resolve against the correct model

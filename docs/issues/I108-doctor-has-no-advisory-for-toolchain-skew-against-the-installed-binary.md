@@ -2,7 +2,8 @@
 id: I108
 title: "spine doctor has no advisory for toolchain skew between the installed binary and the Go on PATH"
 severity: low
-status: open
+status: fixed
+commits: [3eae6e8]
 affects: [I107]
 blocked-by: [I107]
 execution-mode: subagent-driven
@@ -69,3 +70,17 @@ it", and it does not belong bolted onto I107's diff.
 - ADR 0021 — rejects the version-comparison proxy for the gate and records why
   the same proxy might survive as an advisory.
 - ADR 0018 — precedent for a machine-state precondition inside doctor.
+
+## Resolution
+
+Fixed 2026-08-29 in `3eae6e8`. Doctor check **D14** compares the Go
+major/minor version embedded in the spine binary with `go env GOVERSION` from
+PATH. It reports a `warn` advisory on `go` only when those components differ;
+patch-only skew remains silent. The message reuses I107's binary-toolchain,
+PATH-toolchain, and `make install` vocabulary.
+
+The comparison remains advisory-only: it is a best-effort proxy, not gate
+detection. An unavailable or unparseable PATH Go version is silent, and no
+gate behavior changed. Tests exercise the required patch-skew negative control
+and minor-skew positive case against a controlled PATH `go` command; focused
+doctor and CLI tests plus the full suite passed.
