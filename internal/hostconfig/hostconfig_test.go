@@ -100,6 +100,81 @@ func TestLoadRejectsClosedSchemaAndDuplicateRules(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsCaseMismatchedSchemaMembersAtEveryObjectDepth(t *testing.T) {
+	valid := `{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:1", "models": {"m": {"efforts": ["high"]}}}
+  }, "pins": {"claude.primary": {"model": "m", "effort": "high"}}
+}`
+	for _, tc := range []struct {
+		name, old, replacement string
+	}{
+		{"root", `"schema_version"`, `"SCHEMA_VERSION"`},
+		{"harness", `"available"`, `"AVAILABLE"`},
+		{"route", `"efforts"`, `"EFFORTS"`},
+		{"pin", `"model"`, `"MODEL"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeConfig(t, strings.Replace(valid, tc.old, tc.replacement, 1))
+			if _, err := Load(path, []string{"claude"}, func(string) (string, error) { return "/bin/claude", nil }); err == nil {
+				t.Fatal("Load() accepted case-mismatched schema member")
+			}
+		})
+	}
+}
+
+func TestLoadRejectsExplicitNullForTypedOptionalMembers(t *testing.T) {
+	valid := `{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:1", "models": {"m": {"efforts": ["high"], "observed_ids": ["seen"], "gateway_ref": "gateway"}}}
+  }, "pins": {"claude.primary": {"model": "m", "effort": "high", "evidence_refs": ["evidence"]}}
+}`
+	for _, tc := range []struct{ name, old, replacement string }{
+		{"observed IDs", `"observed_ids": ["seen"]`, `"observed_ids": null`},
+		{"gateway reference", `"gateway_ref": "gateway"`, `"gateway_ref": null`},
+		{"evidence references", `"evidence_refs": ["evidence"]`, `"evidence_refs": null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeConfig(t, strings.Replace(valid, tc.old, tc.replacement, 1))
+			if _, err := Load(path, []string{"claude"}, func(string) (string, error) { return "/bin/claude", nil }); err == nil {
+				t.Fatal("Load() accepted explicit null for typed optional member")
+			}
+		})
+	}
+}
+
+func TestLoadRejectsMalformedUTF8BeforeJSONDecode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "routing-host.json")
+	content := []byte(`{"schema_version":1,"host_id":"host`)
+	content = append(content, 0xff)
+	content = append(content, []byte(`","harnesses":{"claude":{"available":true,"executable":"claude","launch_contract_ref":"fleet:1","models":{"m":{"efforts":["high"]}}}},"pins":{}}`)...)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, []string{"claude"}, func(string) (string, error) { return "/bin/claude", nil }); err == nil {
+		t.Fatal("Load() accepted malformed UTF-8")
+	}
+}
+
+func TestLoadDiagnosticsDoNotExposeRawConfigurationValues(t *testing.T) {
+	const secret = "raw-observed-id-must-not-escape"
+	path := writeConfig(t, `{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:1", "models": {
+      "m": {"efforts": ["high"], "observed_ids": ["`+secret+`"]},
+      "n": {"efforts": ["high"], "observed_ids": ["`+secret+`"]}
+    }}
+  }, "pins": {}}
+`)
+	_, err := Load(path, []string{"claude"}, func(string) (string, error) { return "/bin/claude", nil })
+	if err == nil {
+		t.Fatal("Load() accepted duplicate observed ID")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Load() diagnostic leaked raw configuration value: %q", err)
+	}
+}
+
 func TestLoadAllowsEqualRoutesInDifferentHarnessesAndOnlyLooksUpExecutables(t *testing.T) {
 	path := writeConfig(t, `{
   "schema_version": 1, "host_id": "host", "harnesses": {

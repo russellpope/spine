@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // ErrNotConfigured reports the compatible case where the local capability
@@ -113,7 +114,13 @@ func configError(path, detail string) error {
 }
 
 func decode(raw []byte, flavors []string) (Config, error) {
+	if !utf8.Valid(raw) {
+		return Config{}, fmt.Errorf("configuration is not valid UTF-8")
+	}
 	if err := rejectDuplicateJSONMembers(raw); err != nil {
+		return Config{}, err
+	}
+	if err := validateClosedSchema(raw); err != nil {
 		return Config{}, err
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -147,38 +154,38 @@ func validate(raw rawConfig, flavors []string) (Config, error) {
 	observed := map[string]struct{}{}
 	for name, rawHarness := range raw.Harnesses {
 		if _, ok := known[name]; !ok || !safeString(name) {
-			return Config{}, fmt.Errorf("harness %q is not a current flavor", name)
+			return Config{}, fmt.Errorf("harness is not a current flavor")
 		}
 		if rawHarness.Available == nil || rawHarness.Executable == nil || rawHarness.LaunchContractRef == nil {
-			return Config{}, fmt.Errorf("harness %q is missing a required member", name)
+			return Config{}, fmt.Errorf("harness is missing a required member")
 		}
 		if !safeString(*rawHarness.Executable) || !safeString(*rawHarness.LaunchContractRef) {
-			return Config{}, fmt.Errorf("harness %q has an empty or unsafe reference", name)
+			return Config{}, fmt.Errorf("harness has an empty or unsafe reference")
 		}
 		if *rawHarness.Available && len(rawHarness.Models) == 0 {
-			return Config{}, fmt.Errorf("available harness %q must declare models", name)
+			return Config{}, fmt.Errorf("available harness must declare models")
 		}
 		h := Harness{Available: *rawHarness.Available, Executable: *rawHarness.Executable, LaunchContractRef: *rawHarness.LaunchContractRef, Models: make(map[string]ModelRoute, len(rawHarness.Models))}
 		for modelID, rawRoute := range rawHarness.Models {
 			if !safeString(modelID) || len(rawRoute.Efforts) == 0 {
-				return Config{}, fmt.Errorf("harness %q route has an empty model or efforts", name)
+				return Config{}, fmt.Errorf("route has an empty model or efforts")
 			}
 			route := ModelRoute{Efforts: append([]string(nil), rawRoute.Efforts...), ObservedIDs: append([]string(nil), rawRoute.ObservedIDs...)}
 			if rawRoute.GatewayRef != nil {
 				if !safeString(*rawRoute.GatewayRef) {
-					return Config{}, fmt.Errorf("harness %q route %q has unsafe gateway_ref", name, modelID)
+					return Config{}, fmt.Errorf("route has unsafe gateway_ref")
 				}
 				route.GatewayRef = *rawRoute.GatewayRef
 			}
 			if err := validateUniqueStrings(route.Efforts, "efforts"); err != nil {
-				return Config{}, fmt.Errorf("harness %q route %q: %w", name, modelID, err)
+				return Config{}, fmt.Errorf("route: %w", err)
 			}
 			if err := validateUniqueStrings(route.ObservedIDs, "observed_ids"); err != nil {
-				return Config{}, fmt.Errorf("harness %q route %q: %w", name, modelID, err)
+				return Config{}, fmt.Errorf("route: %w", err)
 			}
 			for _, id := range route.ObservedIDs {
 				if _, duplicate := observed[id]; duplicate {
-					return Config{}, fmt.Errorf("observed_id %q appears more than once", id)
+					return Config{}, fmt.Errorf("observed_id appears more than once")
 				}
 				observed[id] = struct{}{}
 			}
@@ -189,24 +196,24 @@ func validate(raw rawConfig, flavors []string) (Config, error) {
 	for key, rawPin := range raw.Pins {
 		flavor, tier, ok := strings.Cut(key, ".")
 		if !ok || flavor == "" || tier == "" || strings.Contains(tier, ".") {
-			return Config{}, fmt.Errorf("pin key %q must be flavor.tier", key)
+			return Config{}, fmt.Errorf("pin key must be flavor.tier")
 		}
 		if _, ok := known[flavor]; !ok || !knownTier(tier) {
-			return Config{}, fmt.Errorf("pin key %q names an unknown flavor or tier", key)
+			return Config{}, fmt.Errorf("pin key names an unknown flavor or tier")
 		}
 		if rawPin.Model == nil || rawPin.Effort == nil || !safeString(*rawPin.Model) || !safeString(*rawPin.Effort) {
-			return Config{}, fmt.Errorf("pin %q has an empty or unsafe model@effort", key)
+			return Config{}, fmt.Errorf("pin has an empty or unsafe model@effort")
 		}
 		if err := validateUniqueStrings(rawPin.EvidenceRefs, "evidence_refs"); err != nil {
-			return Config{}, fmt.Errorf("pin %q: %w", key, err)
+			return Config{}, fmt.Errorf("pin: %w", err)
 		}
 		harness, exists := config.Harnesses[flavor]
 		if !exists || !harness.Available {
-			return Config{}, fmt.Errorf("pin %q names an unavailable harness", key)
+			return Config{}, fmt.Errorf("pin names an unavailable harness")
 		}
 		route, exists := harness.Models[*rawPin.Model]
 		if !exists || !contains(route.Efforts, *rawPin.Effort) {
-			return Config{}, fmt.Errorf("pin %q model@effort is not declared by its harness", key)
+			return Config{}, fmt.Errorf("pin model@effort is not declared by its harness")
 		}
 		config.Pins[key] = Pin{Model: *rawPin.Model, Effort: *rawPin.Effort, EvidenceRefs: append([]string(nil), rawPin.EvidenceRefs...)}
 	}
@@ -225,7 +232,7 @@ func validateExecutables(config Config, lookup func(string) (string, error)) err
 	for _, name := range names {
 		harness := config.Harnesses[name]
 		if _, err := lookup(harness.Executable); err != nil {
-			return fmt.Errorf("available harness %q executable is not resolvable", name)
+			return fmt.Errorf("available harness executable is not resolvable")
 		}
 	}
 	return nil
@@ -265,6 +272,93 @@ func contains(values []string, want string) bool {
 	return false
 }
 
+// validateClosedSchema rejects the standard library decoder's permissive
+// case-insensitive struct-field matching before that decoder sees the input.
+// It also distinguishes an absent optional field from a present JSON null.
+func validateClosedSchema(raw []byte) error {
+	root, err := schemaObject(raw, "root")
+	if err != nil {
+		return err
+	}
+	if err := schemaMembers(root, []string{"schema_version", "host_id", "harnesses", "pins"}, nil, "root"); err != nil {
+		return err
+	}
+	harnesses, err := schemaObject(root["harnesses"], "harnesses")
+	if err != nil {
+		return err
+	}
+	pins, err := schemaObject(root["pins"], "pins")
+	if err != nil {
+		return err
+	}
+	for _, harnessRaw := range harnesses {
+		harness, err := schemaObject(harnessRaw, "harness")
+		if err != nil {
+			return err
+		}
+		if err := schemaMembers(harness, []string{"available", "executable", "launch_contract_ref", "models"}, nil, "harness"); err != nil {
+			return err
+		}
+		models, err := schemaObject(harness["models"], "models")
+		if err != nil {
+			return err
+		}
+		for _, routeRaw := range models {
+			route, err := schemaObject(routeRaw, "model route")
+			if err != nil {
+				return err
+			}
+			if err := schemaMembers(route, []string{"efforts"}, []string{"observed_ids", "gateway_ref"}, "model route"); err != nil {
+				return err
+			}
+		}
+	}
+	for _, pinRaw := range pins {
+		pin, err := schemaObject(pinRaw, "pin")
+		if err != nil {
+			return err
+		}
+		if err := schemaMembers(pin, []string{"model", "effort"}, []string{"evidence_refs"}, "pin"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func schemaObject(raw json.RawMessage, label string) (map[string]json.RawMessage, error) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, fmt.Errorf("%s must be an object", label)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
+		return nil, fmt.Errorf("%s must be an object", label)
+	}
+	return object, nil
+}
+
+func schemaMembers(object map[string]json.RawMessage, required, optional []string, label string) error {
+	allowed := make(map[string]struct{}, len(required)+len(optional))
+	for _, member := range required {
+		allowed[member] = struct{}{}
+		value, ok := object[member]
+		if !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("%s is missing a typed member", label)
+		}
+	}
+	for _, member := range optional {
+		allowed[member] = struct{}{}
+		if value, ok := object[member]; ok && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("%s has a null typed member", label)
+		}
+	}
+	for member := range object {
+		if _, ok := allowed[member]; !ok {
+			return fmt.Errorf("%s has an unsupported member", label)
+		}
+	}
+	return nil
+}
+
 func rejectDuplicateJSONMembers(raw []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	if err := scanJSONValue(dec); err != nil {
@@ -298,7 +392,7 @@ func scanJSONValue(dec *json.Decoder) error {
 				return fmt.Errorf("JSON object member name is not a string")
 			}
 			if _, duplicate := seen[key]; duplicate {
-				return fmt.Errorf("duplicate JSON member %q", key)
+				return fmt.Errorf("duplicate JSON member")
 			}
 			seen[key] = struct{}{}
 			if err := scanJSONValue(dec); err != nil {
