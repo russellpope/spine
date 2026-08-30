@@ -1492,9 +1492,102 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, warn
 				dispatches = append(dispatches, more...)
 				agents = append(agents, a)
 			}
+
+			workflowSubs, _ := filepath.Glob(filepath.Join(subDir, "workflows", "*", "agent-*.jsonl"))
+			sort.Strings(workflowSubs)
+			for _, sub := range workflowSubs {
+				meta, ok := loadWorkflowMeta(strings.TrimSuffix(sub, ".jsonl")+".meta.json", warnings)
+				if !ok || meta.AgentType != "workflow-subagent" || meta.SpawnDepth != 1 {
+					continue
+				}
+				a := subagent{source: source, description: workflowOpeningUserLine(sub)}
+				more, models, cwd := scanJSONL(sub, warnings)
+				if len(models) == 0 && meta.Model != "" {
+					models = []string{meta.Model}
+				}
+				workflowSession := id + "/" + filepath.Base(filepath.Dir(sub)) + "/" + strings.TrimSuffix(filepath.Base(sub), ".jsonl")
+				for i := range more {
+					more[i].flavor = source
+					more[i].source = source
+					more[i].identity = evidenceIdentity{source: source, session: workflowSession, dispatch: more[i].toolUseID}
+				}
+				a.models = models
+				a.cwd = cwd
+				dispatches = append(dispatches, more...)
+				agents = append(agents, a)
+			}
 		}
 	}
 	return dispatches, agents, matchedSession
+}
+
+type workflowMeta struct {
+	AgentType  string `json:"agentType"`
+	SpawnDepth int    `json:"spawnDepth"`
+	Model      string `json:"model"`
+}
+
+func loadWorkflowMeta(path string, warnings *[]string) (workflowMeta, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		*warnings = append(*warnings, path+": workflow metadata unreadable — transcript skipped: "+err.Error())
+		return workflowMeta{}, false
+	}
+	var meta workflowMeta
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		*warnings = append(*warnings, path+": malformed workflow metadata — transcript skipped")
+		return workflowMeta{}, false
+	}
+	return meta, true
+}
+
+func workflowOpeningUserLine(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+	r := bufio.NewReader(f)
+	for {
+		line, readErr := r.ReadBytes('\n')
+		if len(strings.TrimSpace(string(line))) > 0 {
+			var event struct {
+				Type    string `json:"type"`
+				Message struct {
+					Role    string          `json:"role"`
+					Content json.RawMessage `json:"content"`
+				} `json:"message"`
+			}
+			if json.Unmarshal(line, &event) == nil && (event.Type == "user" || event.Message.Role == "user") {
+				if text := workflowMessageText(event.Message.Content); text != "" {
+					return firstLine(text)
+				}
+			}
+		}
+		if readErr != nil {
+			return ""
+		}
+	}
+}
+
+func workflowMessageText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &blocks) != nil {
+		return ""
+	}
+	for _, block := range blocks {
+		if block.Type == "text" && block.Text != "" {
+			return block.Text
+		}
+	}
+	return ""
 }
 
 // fileMTime is sessionInScope's --since probe (D28, ticket I047): a file or
