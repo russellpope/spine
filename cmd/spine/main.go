@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -151,13 +152,18 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	dir := fs.String("dir", ".", "repo root")
 	write := fs.Bool("write", false, "apply changes (default: dry-run diff)")
 	force := fs.Bool("force", false, "regenerate files with unrecognized local edits (diff shows what gets dropped)")
-	if _, ok := parseArgs(fs, args, "update", `usage: spine update [--dir D] [--write] [--force]`, 0, stderr); !ok {
+	var forceFiles []string
+	fs.Func("force-file", "regenerate only this managed file when it has unrecognized local edits (repeatable)", func(path string) error {
+		forceFiles = append(forceFiles, path)
+		return nil
+	})
+	if _, ok := parseArgs(fs, args, "update", `usage: spine update [--dir D] [--write] [--force-file PATH]... [--force]`, 0, stderr); !ok {
 		return 2
 	}
 	if *write {
 		warnDirty(*dir, stderr)
 	}
-	opts := update.Options{Dir: *dir, Write: *write, Force: *force}
+	opts := update.Options{Dir: *dir, Write: *write, Force: *force, ForceFiles: forceFiles}
 	if *write {
 		opts.BeforeWrite = func(advisories []update.GateConfigAdvisory) {
 			printGateConfigAdvisories(stdout, advisories)
@@ -228,6 +234,20 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "%s: pre-flight: %s\n", r.Path, r.Preflight)
 		}
 	}
+	// Run owns normalization and validation. Once it returns reports, the raw
+	// values are safe to clean only for matching presentation to the exact
+	// planned path they authorized.
+	scopedAuthorization := func(r update.FileReport) bool {
+		if len(forceFiles) == 0 || r.State != update.Pending || len(r.Unrecognized) == 0 {
+			return false
+		}
+		for _, path := range forceFiles {
+			if filepath.Clean(path) == r.Path {
+				return true
+			}
+		}
+		return false
+	}
 	for _, r := range reports {
 		switch r.State {
 		case update.UpToDate:
@@ -239,6 +259,9 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			modelNotes(r)
 		case update.Pending:
 			if *write {
+				if scopedAuthorization(r) {
+					fmt.Fprintf(stdout, "%s: local edits will be overwritten (authorized by --force-file %s)\n", r.Path, r.Path)
+				}
 				if r.Created {
 					fmt.Fprintf(stdout, "created: %s\n", r.Path)
 				} else {
@@ -252,11 +275,18 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 				modelNotes(r)
 				stageNotes(r)
 				preflightNotes(r)
+				if scopedAuthorization(r) {
+					fmt.Fprintf(stdout, "%s: local edits will be overwritten (authorized by --force-file %s)\n", r.Path, r.Path)
+				}
 				fmt.Fprint(stdout, r.Diff)
 			}
 		case update.SkippedUnrecognized:
 			outstanding++
-			fmt.Fprintf(stderr, "skipped %s — unrecognized local edits (use --force to drop):\n", r.Path)
+			if len(forceFiles) > 0 {
+				fmt.Fprintf(stderr, "skipped %s — unrecognized local edits (use --force-file %s to drop only this file, or --force to drop all):\n", r.Path, r.Path)
+			} else {
+				fmt.Fprintf(stderr, "skipped %s — unrecognized local edits (use --force to drop):\n", r.Path)
+			}
 			for _, l := range r.Unrecognized {
 				fmt.Fprintf(stderr, "  %s\n", l)
 			}

@@ -359,6 +359,160 @@ func TestUpdateMissingWorkflowExits2(t *testing.T) {
 	}
 }
 
+// I124: the CLI owns parsing and presentation only. A selected, forceable
+// maipipe report follows the update package's existing plan/write path, while
+// an unselected hand edit remains byte-identical and gets the narrower remedy
+// on stderr.
+func TestUpdateForceFileCLIUsesExactScopedAuthorityAndChannels(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	setGateKeys(t, dir, "go@1", "[]")
+	setGateConfigKeys(t, dir, map[string]string{
+		"fixture_manifest":   "docs/fixtures.md",
+		"build_outputs":      "bin/spine",
+		"n_plus_one_clients": "List",
+		"test_enum_spec":     "docs/spec.md",
+	})
+	if code, out, errs := runCmd(t, "update", "--dir", dir, "--write"); code != 0 {
+		t.Fatalf("initial update: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+
+	maipipePath := filepath.Join(dir, "maipipe.toml")
+	workflowPath := filepath.Join(dir, "WORKFLOW.md")
+	tampered := strings.Replace(readUpdateFile(t, maipipePath),
+		`run = "spine gate go@1 tskip"`, `run = "echo hand-authored"`, 1)
+	if tampered == readUpdateFile(t, maipipePath) {
+		t.Fatal("maipipe fixture did not contain the managed tskip stage")
+	}
+	if err := os.WriteFile(maipipePath, []byte(tampered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workflowBefore := readUpdateFile(t, workflowPath) + "local_workflow_rule: keep\n"
+	if err := os.WriteFile(workflowPath, []byte(workflowBefore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errs := runCmd(t, "update", "--dir", dir, "--force-file", "./maipipe.toml")
+	if code != 1 {
+		t.Fatalf("dry-run code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	authority := "maipipe.toml: local edits will be overwritten (authorized by --force-file maipipe.toml)\n"
+	if !strings.Contains(out, authority+"--- maipipe.toml") {
+		t.Errorf("dry-run authority must be stdout immediately before its diff: %q", out)
+	}
+	wantSkip := "skipped WORKFLOW.md — unrecognized local edits (use --force-file WORKFLOW.md to drop only this file, or --force to drop all):\n" +
+		"  local_workflow_rule: keep\n"
+	if errs != wantSkip {
+		t.Errorf("dry-run stderr=%q, want %q", errs, wantSkip)
+	}
+	if got := readUpdateFile(t, workflowPath); got != workflowBefore {
+		t.Fatal("scoped dry-run changed the unselected WORKFLOW.md")
+	}
+	if got := readUpdateFile(t, maipipePath); got != tampered {
+		t.Fatal("scoped dry-run changed maipipe.toml")
+	}
+
+	code, out, errs = runCmd(t, "update", "--dir", dir, "--force-file", "maipipe.toml", "--write")
+	if code != 1 {
+		t.Fatalf("write code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	if !strings.Contains(out, authority+"updated: maipipe.toml\n") {
+		t.Errorf("write authority must be stdout immediately before updated line: %q", out)
+	}
+	if errs != wantSkip {
+		t.Errorf("write stderr=%q, want %q", errs, wantSkip)
+	}
+	if got := readUpdateFile(t, workflowPath); got != workflowBefore {
+		t.Fatal("scoped write changed the unselected WORKFLOW.md")
+	}
+	if got := readUpdateFile(t, maipipePath); strings.Contains(got, "echo hand-authored") {
+		t.Fatal("scoped write did not regenerate selected maipipe.toml")
+	}
+
+	// Repeated flags are valid and a selected clean report remains a no-op.
+	code, out, errs = runCmd(t, "update", "--dir", dir,
+		"--force-file", "./maipipe.toml", "--force-file", "docs/issues/README.md")
+	if code != 1 || strings.Contains(out, "authorized by --force-file") || errs != wantSkip {
+		t.Fatalf("selected-clean repeat: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+}
+
+// I124: malformed authority syntax never reaches update.Run, and all policy
+// rejections reach it before a write. The production break this catches is a
+// parser that accepts an unscoped path or mutates files before rejecting it.
+func TestUpdateForceFileCLIRejectsBadAuthorityWithoutWrites(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantError string
+	}{
+		{name: "duplicate normalized", args: []string{"--force-file", "./WORKFLOW.md", "--force-file", "WORKFLOW.md"}, wantError: `update: duplicate --force-file "WORKFLOW.md"`},
+		{name: "unknown", args: []string{"--force-file", "README.md"}, wantError: `update: --force-file "README.md" must name a managed file in this update plan`},
+		{name: "absolute", args: []string{"--force-file", "/WORKFLOW.md"}, wantError: `update: --force-file "/WORKFLOW.md" must be repository-relative and must not contain ".."`},
+		{name: "traversal", args: []string{"--force-file", "docs/../WORKFLOW.md"}, wantError: `update: --force-file "docs/../WORKFLOW.md" must be repository-relative and must not contain ".."`},
+		{name: "empty value", args: []string{"--force-file", ""}, wantError: `update: --force-file "" must be repository-relative and must not contain ".."`},
+		{name: "missing value", args: []string{"--force-file"}, wantError: "flag needs an argument"},
+		{name: "mixed global scoped", args: []string{"--force", "--force-file", "WORKFLOW.md"}, wantError: "update: --force cannot be combined with --force-file; choose one overwrite authority"},
+		{name: "post positional flag", args: []string{"unexpected", "--force-file", "WORKFLOW.md"}, wantError: `update: flags must precede positionals (saw "--force-file" after "unexpected")`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
+				t.Fatal(errs)
+			}
+			workflowPath := filepath.Join(dir, "WORKFLOW.md")
+			before := readUpdateFile(t, workflowPath)
+			args := append([]string{"update", "--dir", dir, "--write"}, tt.args...)
+			code, out, errs := runCmd(t, args...)
+			if code != 2 || out != "" || !strings.Contains(errs, tt.wantError) {
+				t.Fatalf("code=%d stdout=%q stderr=%q, want exit 2 and %q", code, out, errs, tt.wantError)
+			}
+			if got := readUpdateFile(t, workflowPath); got != before {
+				t.Fatal("rejected force-file invocation wrote WORKFLOW.md")
+			}
+		})
+	}
+}
+
+// I124: scoped wording is opt-in. This exact existing --force transcript is
+// a compatibility boundary, including its output channels and report order.
+func TestUpdateStandaloneForceOutputRemainsByteCompatible(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	path := filepath.Join(dir, "docs", "issues", "README.md")
+	if err := os.WriteFile(path, append([]byte(readUpdateFile(t, path)), []byte("local force control\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCmd(t, "update", "--dir", dir, "--force", "--write")
+	wantOut := "up-to-date: WORKFLOW.md\n" +
+		"up-to-date: CLAUDE.md\n" +
+		"up-to-date: AGENTS.md\n" +
+		"up-to-date: docs/harness-interface.md\n" +
+		"updated: docs/issues/README.md\n" +
+		"up-to-date: docs/issues/_template.md\n" +
+		"up-to-date: docs/adr/README.md\n" +
+		"up-to-date: docs/remediation/README.md\n" +
+		"up-to-date: docs/remediation/_hitlist.template.md\n" +
+		"up-to-date: docs/remediation/_round.template.md\n"
+	if code != 0 || out != wantOut || errs != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+}
+
+func readUpdateFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
 func TestADRNewAndList(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "docs", "adr"), 0o755); err != nil {
