@@ -71,6 +71,8 @@ func TestGen11To12WritesConventionAndIsIdempotent(t *testing.T) {
 func TestGen11To12PreservesLocalEditRefusals(t *testing.T) {
 	cases := map[string][2]string{
 		"WORKFLOW.md":              {"## Template authoring", "## Local template authoring"},
+		"CLAUDE.md":                {"**Mandatory gates:**", "**Local mandatory gates:**"},
+		"AGENTS.md":                {"This file is read by **Codex**", "This file is locally edited for **Codex**"},
 		"docs/issues/README.md":    {"# Issue / Bug Ledger — convention", "# Local ledger convention"},
 		"docs/issues/_template.md": {"## Fix", "## Local fix"},
 	}

@@ -102,6 +102,66 @@ func TestDiscardedClaudeIdentityIsPerDispatch(t *testing.T) {
 	}
 }
 
+// A Claude tool_use id is only unique within its session. A sidecar from a
+// different session that reuses the id must neither suppress the prototype
+// dispatch nor inherit its ticket attribution.
+func TestDiscardedClaudeLinkedDispatchIdentityIncludesSession(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+	if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(
+		"DISCARDED I078 source:claude session:prototype dispatch:toolu_1 tier:routine reason: prototype was discarded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transcripts := t.TempDir()
+	writeSingleDispatch(t, filepath.Join(transcripts, "prototype.jsonl"), repo, "I078", "I078 prototype", "claude-sonnet-5")
+	// The other session's sidecar names no ticket. It can reach I078 only if
+	// the audit cross-links it to the prototype by tool_use.id alone.
+	writeOrphanSubagent(t, transcripts, "other", "same-id", "toolu_1", repo, "unrelated worker", "claude-sonnet-5")
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I078"]
+	if row.Verdict != VerdictDiscardedWithReason || rep.Blocking() {
+		t.Fatalf("I078 = %s (%s), blocking=%v; cross-session same tool_use.id must not link", row.Verdict, row.Detail, rep.Blocking())
+	}
+}
+
+func TestDiscardedQuotedIdentityFieldsAreMalformed(t *testing.T) {
+	for _, record := range []string{
+		`DISCARDED I078 source:claude session:"prototype" dispatch:toolu_1 tier:routine reason: quoted session`,
+		`DISCARDED I078 source:claude session:prototype dispatch:"toolu_1" tier:routine reason: quoted dispatch`,
+	} {
+		t.Run(record, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+			if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(record+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			transcripts := t.TempDir()
+			writeSingleDispatch(t, filepath.Join(transcripts, "prototype.jsonl"), repo, "I078", "I078 prototype", "claude-sonnet-5")
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row := rowsByID(t, rep)["I078"]; row.Verdict != VerdictSilentDescent || !rep.Blocking() {
+				t.Fatalf("I078 = %s (%s), blocking=%v; quoted identity must not excuse", row.Verdict, row.Detail, rep.Blocking())
+			}
+			if got, want := strings.Join(rep.Warnings, "\n"), "DISCARDED line 1 malformed — ignored"; !strings.Contains(got, want) {
+				t.Fatalf("warnings = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 // A discarded declaration covers one exact event. A later routine dispatch
 // for the same primary ticket remains a real silent descent and must win the
 // ticket aggregation, while retaining the discarded prototype's reason.

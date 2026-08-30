@@ -58,26 +58,33 @@ func TestGen12To13PreservesI050AcceptanceContract(t *testing.T) {
 }
 
 func TestGen12To13RetainedI050EditIsUnrecognized(t *testing.T) {
-	dir := stageGen12Repo(t)
-	path := filepath.Join(dir, "WORKFLOW.md")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed := strings.Replace(string(raw), "## Acceptance exceptions", "## Local acceptance exceptions", 1)
-	if changed == string(raw) {
-		t.Fatal("generation-12 fixture lacks I050 heading")
-	}
-	if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reports, err := Run(Options{Dir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wf := report(t, reports, "WORKFLOW.md")
-	if wf.State != SkippedUnrecognized || len(wf.Unrecognized) == 0 {
-		t.Fatalf("WORKFLOW state=%v unrecognized=%v, want retained I050 local-edit refusal", wf.State, wf.Unrecognized)
+	for _, tc := range []struct{ name, old, new string }{
+		{"heading", "## Acceptance exceptions", "## Local acceptance exceptions"},
+		{"grammar", "- [ ] <criterion> -- APPROVED-UNTESTED <YYYY-MM-DD> by <approver> ref: <docs/YYYY-MM-DD-artifact.md#anchor> reason: <one-line reason>", "- [ ] <criterion> -- LOCAL-APPROVED-UNTESTED <YYYY-MM-DD> by <approver> ref: <docs/YYYY-MM-DD-artifact.md#anchor> reason: <one-line reason>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := stageGen12Repo(t)
+			path := filepath.Join(dir, "WORKFLOW.md")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := strings.Replace(string(raw), tc.old, tc.new, 1)
+			if changed == string(raw) {
+				t.Fatalf("generation-12 fixture lacks %q", tc.old)
+			}
+			if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			reports, err := Run(Options{Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wf := report(t, reports, "WORKFLOW.md")
+			if wf.State != SkippedUnrecognized || len(wf.Unrecognized) == 0 {
+				t.Fatalf("WORKFLOW state=%v unrecognized=%v, want retained I050 local-edit refusal", wf.State, wf.Unrecognized)
+			}
+		})
 	}
 }
 
