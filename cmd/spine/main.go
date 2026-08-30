@@ -1651,6 +1651,7 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 	dir := fs.String("dir", ".", "repo root")
 	effort := fs.Bool("effort", false, "print the resolved effort instead of the bare id")
 	asJSON := fs.Bool("json", false, "print the whole resolved entry as JSON")
+	dispatchEffort := fs.String("dispatch-effort", "", "request a raw dispatch effort (JSON output only)")
 	alternate := fs.Bool("alternate", false, "print the cell's alternate instead of its primary id/effort")
 	// I116's ordering guard now lives in parseArgs (I119 generalized it to
 	// every subcommand); this command's error text is the shape the helper
@@ -1658,6 +1659,18 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 	const modelUsage = `usage: spine model [--dir D] [--alternate] [--effort|--json] <flavor> <tier>`
 	pos, ok := parseArgs(fs, args, "model", modelUsage, 2, stderr)
 	if !ok {
+		return 2
+	}
+	dispatchEffortSet := false
+	fs.Visit(func(f *flag.Flag) {
+		dispatchEffortSet = f.Name == "dispatch-effort" || dispatchEffortSet
+	})
+	if dispatchEffortSet && !*asJSON {
+		fmt.Fprintln(stderr, "model: --dispatch-effort requires --json")
+		return 2
+	}
+	if dispatchEffortSet && *alternate {
+		fmt.Fprintln(stderr, "model: --dispatch-effort cannot be combined with --alternate")
 		return 2
 	}
 	var entry model.Entry
@@ -1680,6 +1693,13 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 	if err != nil {
 		fmt.Fprintln(stderr, "model:", err)
 		return 2
+	}
+	if dispatchEffortSet {
+		entry, err = model.ApplyDispatchEffort(entry, *dispatchEffort)
+		if err != nil {
+			fmt.Fprintln(stderr, "model:", err)
+			return 2
+		}
 	}
 	// --alternate answers from the cell's alternate half (I079). A cell that
 	// ships none is an error rather than a silent fall-back to the primary:

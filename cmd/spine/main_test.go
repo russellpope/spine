@@ -2962,6 +2962,42 @@ func TestModelPiAcceptsVocabularyEffortOverride(t *testing.T) {
 	}
 }
 
+func TestModelDispatchEffortIsJSONOnlyAndUsesSelectedFlavorVocabulary(t *testing.T) {
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--json", "--dispatch-effort", "low", "pi", "routine")
+	if code != 0 || errs != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	var got struct {
+		ID         string `json:"id"`
+		Effort     string `json:"effort"`
+		Provenance string `json:"provenance"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %q: %v", out, err)
+	}
+	if got.ID != "qwen3.8-27b-q8_0" || got.Effort != "low" || got.Provenance != "default" {
+		t.Fatalf("dispatch target = %+v, want pi default target with raw low effort", got)
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"without json", []string{"model", "--dir", t.TempDir(), "--dispatch-effort", "low", "pi", "routine"}, "--dispatch-effort requires --json"},
+		{"invalid pi effort", []string{"model", "--dir", t.TempDir(), "--json", "--dispatch-effort", "high", "pi", "routine"}, "pi effort vocabulary"},
+		{"whitespace", []string{"model", "--dir", t.TempDir(), "--json", "--dispatch-effort", " ", "pi", "routine"}, "must not be empty or whitespace"},
+		{"trailing flag", []string{"model", "--json", "pi", "routine", "--dispatch-effort", "low"}, "flags must precede positionals"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errs := runCmd(t, tc.args...)
+			if code != 2 || out != "" || !strings.Contains(errs, tc.want) {
+				t.Fatalf("code=%d stdout=%q stderr=%q, want exit 2, empty stdout, %q", code, out, errs, tc.want)
+			}
+		})
+	}
+}
+
 // I079 AC3 at the resolver's own seam: an on-disk pi row spelled as the
 // table ships it reports inherited; the same row with an edited alternate
 // reports override, so the refresh rule leaves the edit alone.
