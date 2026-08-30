@@ -3,6 +3,7 @@ id: I066
 title: Claude Code as a harness for 3rd-party models — wayfinder map
 severity: med
 status: fixed
+commits: [19e0683, 451e13a]
 affects: [model, audit, cli, workflow, fleet]
 blocked-by: []
 labels: [wayfinder:map]
@@ -124,7 +125,8 @@ gateways; the codex harness is untouched.
 
 ## Resolution
 
-Fixed 2026-08-30 as a wayfinder-map deliverable. The map's purpose under the
+Fixed 2026-08-30 as a wayfinder-map deliverable in `19e0683` and reconciled
+with the final owner rulings in `451e13a`. The map's purpose under the
 ledger convention is to record destination, decisions, frontier, and
 out-of-scope boundaries; its child tickets carry the downstream implementation
 work. I072-I075 now have their approved/accepted designs recorded above, and

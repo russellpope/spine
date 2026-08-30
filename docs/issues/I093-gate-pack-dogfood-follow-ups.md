@@ -3,6 +3,7 @@ id: I093
 title: "Gate pack dogfood follow-ups: sortFindings ordering untested, type-check error names downstream import, unconfigured classes render as exit-2 stages, update --force is all-or-nothing"
 severity: low
 status: fixed
+commits: [ab204e5]
 affects: [I082, I084, I085]
 blocked-by: []
 execution-mode:
