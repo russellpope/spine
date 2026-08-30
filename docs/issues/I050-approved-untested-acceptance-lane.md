@@ -3,7 +3,7 @@ id: I050
 title: "Verify convention: approved-untested as a first-class acceptance state"
 severity: med
 status: open
-commits: [7e94222, 4850488, fae360f, 6950089, c55faf3, 3761f4f, 8f8db36]
+commits: [7e94222, 4850488, fae360f, 6950089, c55faf3, 3761f4f, 8f8db36, f741224]
 affects: [templates, doctor]
 blocked-by: []
 execution-mode: subagent-driven
@@ -100,7 +100,8 @@ Correction commits so far are `3761f4f` (reopen the ticket and amend the
 binding design/plan before product edits) and `8f8db36` (relative-root
 normalization, unlimited line reading with surfaced errors, deterministic
 multi-failure aggregation, complete H1/H2 boundary recognition, and compiled
-CLI regressions). Focused affected-package tests and repeated aggregation/path
+CLI regressions), plus `f741224` (compiled hostile outside-root symlink
+acceptance). Focused affected-package tests and repeated aggregation/path
 controls passed after their recorded red runs. Full repository verification,
 fresh re-review, and independent verification remain pending; this is not a
 closure resolution.
