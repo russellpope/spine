@@ -1602,12 +1602,27 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 	if !ok {
 		return 2
 	}
-	resolution, err := model.ResolveForHost(*dir, hostPath, pos[0], pos[1], lookup)
+	var entry model.Entry
+	var resolution model.Resolution
+	var err error
+	if *alternate {
+		// I072 validates a present local file structurally, but host constraints
+		// deliberately do not apply to the legacy cell alternate. In particular,
+		// a valid config must not require this flavor, its executable, or its
+		// primary route to be reachable before returning the critic pair.
+		if err := model.ValidateHostConfig(hostPath, lookup); err != nil {
+			fmt.Fprintln(stderr, "model:", err)
+			return 2
+		}
+		entry, err = model.Resolve(*dir, pos[0], pos[1])
+	} else {
+		resolution, err = model.ResolveForHost(*dir, hostPath, pos[0], pos[1], lookup)
+		entry = resolution.Entry
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "model:", err)
 		return 2
 	}
-	entry := resolution.Entry
 	// --alternate answers from the cell's alternate half (I079). A cell that
 	// ships none is an error rather than a silent fall-back to the primary:
 	// an evaluator that asked for the critic and got the author would run a

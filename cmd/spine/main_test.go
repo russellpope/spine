@@ -2487,6 +2487,79 @@ func TestModelPiAlternateReturnsOwnerTunedPair(t *testing.T) {
 	}
 }
 
+// I072 correction: host routing constrains normal model selection, but the
+// alternate remains the repository cell's legacy critic choice. A present
+// malformed file is still rejected structurally; a valid host file must not
+// gate, replace, or filter that alternate.
+func TestModelAlternateLoadsHostConfigWithoutApplyingHostRoutes(t *testing.T) {
+	repo := t.TempDir()
+	lookup := func(string) (string, error) { return "/bin/harness", nil }
+	runWithHost := func(hostPath string, args ...string) (int, string, string) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		code := cmdModelWithHostPath(args, &stdout, &stderr, hostPath, lookup)
+		return code, stdout.String(), stderr.String()
+	}
+
+	for _, tc := range []struct {
+		name, config string
+	}{
+		{
+			name: "missing selected flavor",
+			config: `{
+  "schema_version": 1, "host_id": "test-host", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"gpt-5.6-sol": {"efforts": ["xhigh"]}}}
+  }, "pins": {}}
+`,
+		},
+		{
+			name: "unavailable selected harness",
+			config: `{
+  "schema_version": 1, "host_id": "test-host", "harnesses": {
+    "pi": {"available": false, "executable": "pi", "launch_contract_ref": "fleet:test", "models": {}}
+  }, "pins": {}}
+`,
+		},
+		{
+			name: "unreachable selected primary route",
+			config: `{
+  "schema_version": 1, "host_id": "test-host", "harnesses": {
+    "pi": {"available": true, "executable": "pi", "launch_contract_ref": "fleet:test", "models": {"other": {"efforts": ["high"]}}}
+  }, "pins": {}}
+`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hostPath := filepath.Join(t.TempDir(), "routing-host.json")
+			if err := os.WriteFile(hostPath, []byte(tc.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			code, out, errs := runWithHost(hostPath, "--dir", repo, "--alternate", "pi", "routine")
+			if code != 0 || out != "qwen3.8-27b-q8_0\n" || errs != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+			}
+		})
+	}
+
+	t.Run("malformed present config still fails structurally", func(t *testing.T) {
+		hostPath := filepath.Join(t.TempDir(), "routing-host.json")
+		if err := os.WriteFile(hostPath, []byte(`{"schema_version":`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, out, errs := runWithHost(hostPath, "--dir", repo, "--alternate", "pi", "routine")
+		if code != 2 || out != "" || !strings.Contains(errs, "host routing configuration") {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+		}
+	})
+
+	t.Run("absent config keeps alternate bytes", func(t *testing.T) {
+		code, out, errs := runWithHost(filepath.Join(t.TempDir(), "routing-host.json"), "--dir", repo, "--alternate", "pi", "routine")
+		if code != 0 || out != "qwen3.8-27b-q8_0\n" || errs != "" {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+		}
+	})
+}
+
 // I079 AC1: --json carries the alternate when the cell has one.
 func TestModelJSONCarriesAlternateForPi(t *testing.T) {
 	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--json", "pi", "routine")

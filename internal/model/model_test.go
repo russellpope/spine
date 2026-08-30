@@ -880,6 +880,54 @@ func TestValidateHostPinForLaunchPreservesAuditInvariant(t *testing.T) {
 	}
 }
 
+// I072 correction: callers that select a legacy alternate need the present
+// file's structural validation, but not a selected flavor route application.
+func TestValidateHostConfigDoesNotApplySelectedFlavorRoutes(t *testing.T) {
+	lookup := func(string) (string, error) { return "/bin/harness", nil }
+	for _, tc := range []struct {
+		name, config string
+	}{
+		{
+			name: "missing selected flavor",
+			config: `{
+  "schema_version": 1, "host_id": "test-host", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"gpt-5.6-sol": {"efforts": ["xhigh"]}}}
+  }, "pins": {}}
+`,
+		},
+		{
+			name: "unavailable selected harness",
+			config: `{
+  "schema_version": 1, "host_id": "test-host", "harnesses": {
+    "pi": {"available": false, "executable": "pi", "launch_contract_ref": "fleet:test", "models": {}}
+  }, "pins": {}}
+`,
+		},
+		{
+			name: "unreachable selected primary route",
+			config: `{
+  "schema_version": 1, "host_id": "test-host", "harnesses": {
+    "pi": {"available": true, "executable": "pi", "launch_contract_ref": "fleet:test", "models": {"other": {"efforts": ["high"]}}}
+  }, "pins": {}}
+`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateHostConfig(writeHostConfig(t, tc.config), lookup); err != nil {
+				t.Fatalf("ValidateHostConfig() error = %v", err)
+			}
+		})
+	}
+
+	malformed := writeHostConfig(t, `{"schema_version":`)
+	if err := ValidateHostConfig(malformed, lookup); err == nil {
+		t.Fatal("ValidateHostConfig() accepted malformed present config")
+	}
+	if err := ValidateHostConfig(filepath.Join(t.TempDir(), "routing-host.json"), lookup); err != nil {
+		t.Fatalf("ValidateHostConfig() absent config error = %v", err)
+	}
+}
+
 func TestResolveForHostPreservesPreferenceTrailAndRequiresExactReachability(t *testing.T) {
 	repo := writeWorkflow(t, "model_routing:\n  codex.primary: repository-safe @ xhigh\n")
 	configPath := writeHostConfig(t, `{
