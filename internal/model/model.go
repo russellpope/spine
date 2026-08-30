@@ -483,6 +483,56 @@ func Resolve(repoDir, flavor, tier string) (Entry, error) {
 	return resolveFrom(defaults, repoDir, flavor, tier)
 }
 
+// DispatchTargetRequest identifies one dispatch target and its optional raw
+// effort declaration. RequestedEffort == "" means the caller omitted an
+// override; non-empty values are preserved byte-for-byte after validation.
+type DispatchTargetRequest struct {
+	RepoDir         string
+	Flavor          string
+	Tier            string
+	RequestedEffort string
+}
+
+// ResolveDispatchTarget resolves the ordinary final repository target and,
+// when requested, replaces only its effort with a raw token valid for that
+// target's flavor. It deliberately does not apply host configuration: a
+// host-aware caller must validate its already selected final Entry through
+// the same override seam rather than duplicating host precedence here.
+func ResolveDispatchTarget(req DispatchTargetRequest) (Entry, error) {
+	entry, err := Resolve(req.RepoDir, req.Flavor, req.Tier)
+	if err != nil {
+		return Entry{}, err
+	}
+	return applyRequestedEffort(entry, req.RequestedEffort)
+}
+
+// ApplyDispatchEffort validates and replaces the effort on an already final
+// selected target. Host-aware callers use this after final selection so they
+// retain host precedence without this package reading a host configuration.
+// Unlike DispatchTargetRequest, an empty argument here is supplied input and
+// is therefore invalid.
+func ApplyDispatchEffort(entry Entry, requested string) (Entry, error) {
+	if requested == "" || strings.TrimSpace(requested) == "" {
+		return Entry{}, fmt.Errorf("requested effort must not be empty or whitespace")
+	}
+	if err := checkEffort(defaults, entry.Flavor, requested); err != nil {
+		return Entry{}, err
+	}
+	entry.Effort = requested
+	return entry, nil
+}
+
+// applyRequestedEffort applies a caller's raw effort declaration to a final
+// selected entry. It is intentionally entry-based so host-aware resolution
+// can validate only after it has selected a pin, without this package reading
+// host configuration or changing host precedence.
+func applyRequestedEffort(entry Entry, requested string) (Entry, error) {
+	if requested == "" {
+		return entry, nil
+	}
+	return ApplyDispatchEffort(entry, requested)
+}
+
 // HostStatus describes how the local capability file affected a resolution.
 type HostStatus string
 

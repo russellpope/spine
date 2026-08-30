@@ -175,6 +175,61 @@ func TestResolve_ExplicitEffort_ResolvesToThatEffort(t *testing.T) {
 	}
 }
 
+func TestResolveDispatchTargetUsesFinalResolvedEffortWhenOmitted(t *testing.T) {
+	dir := writeWorkflow(t, "model_routing:\n  pi.routine: qwen3.8-27b-q8_0 @ low\n")
+	want, err := Resolve(dir, "pi", "routine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveDispatchTarget(DispatchTargetRequest{RepoDir: dir, Flavor: "pi", Tier: "routine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ResolveDispatchTarget() = %+v, want unchanged final target %+v", got, want)
+	}
+}
+
+func TestResolveDispatchTargetOverridesOnlyEffortAfterSelection(t *testing.T) {
+	dir := writeWorkflow(t, "model_routing:\n  pi.routine: qwen3.8-27b-q8_0 @ low\n")
+	want, err := Resolve(dir, "pi", "routine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveDispatchTarget(DispatchTargetRequest{RepoDir: dir, Flavor: "pi", Tier: "routine", RequestedEffort: "xhigh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != want.ID || got.Provenance != want.Provenance || !reflect.DeepEqual(got.Aliases, want.Aliases) {
+		t.Fatalf("override changed target metadata: got %+v, want target %+v", got, want)
+	}
+	if got.Effort != "xhigh" {
+		t.Fatalf("Effort = %q, want byte-exact xhigh", got.Effort)
+	}
+}
+
+func TestResolveDispatchTargetRejectsWhitespaceAndInvalidSelectedFlavorEffort(t *testing.T) {
+	for _, requested := range []string{" ", "high"} {
+		t.Run(strconv.Quote(requested), func(t *testing.T) {
+			_, err := ResolveDispatchTarget(DispatchTargetRequest{Flavor: "pi", Tier: "routine", RequestedEffort: requested})
+			if err == nil {
+				t.Fatal("ResolveDispatchTarget() unexpectedly succeeded")
+			}
+		})
+	}
+}
+
+func TestApplyDispatchEffortRejectsExplicitEmptyValue(t *testing.T) {
+	entry, err := Resolve("", "pi", "routine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ApplyDispatchEffort(entry, "")
+	if err == nil || !strings.Contains(err.Error(), "must not be empty") {
+		t.Fatalf("ApplyDispatchEffort(empty) error = %v, want explicit empty rejection", err)
+	}
+}
+
 // AC: a value matching any historical default reports as inherited.
 func TestResolve_ValueMatchingHistory_ReportsInherited(t *testing.T) {
 	dir := writeWorkflow(t, "model_routing:\n  claude.fallback: claude-opus-4-8\n")
