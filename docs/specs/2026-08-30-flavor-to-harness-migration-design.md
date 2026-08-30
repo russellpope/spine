@@ -2,9 +2,9 @@
 
 ## Product requirement document
 
-**Status:** design and plan only. No implementation or fleet write may begin
-until I072's independent verifier records PASS for its exact final SHA and the
-owner authorizes the next write boundary.
+**Status:** owner-ratified for implementation and the named migration sequence
+once I072's independent verifier records PASS for its exact final SHA. No I073
+implementation or fleet write may begin before that prerequisite passes.
 
 **Ticket:** I073, flavor-to-harness rename migration.
 
@@ -188,17 +188,18 @@ rerun that verification with the prior binary, and fix a primary regression
 before retrying. Never reset a repository, edit unrelated dirty work, remove a
 host config to hide a failure, or use `--force`.
 
-## Owner-authorized write boundary
+## Owner-ratified write boundary
 
-This dispatch authorizes only this design, its paired plan, and an uncommitted
-worker report. It does not authorize implementation, I072 edits, binary
-installation, pushes, or fleet repository writes.
+The 2026-08-30 owner ruling ratifies I073 implementation and the named fleet
+migration sequence once I072 has an independent verifier PASS for its exact
+final SHA. That prerequisite is the remaining start gate; no further owner
+round trip is required for the in-scope implementation or roster.
 
-Implementation starts only after I072 verifier PASS for an exact SHA, owner
-ratification of this PRD/plan, and a separate owner authorization for the
-primary-repository implementation write. Fleet writes need another explicit
-owner authorization naming the candidate spine commit/binary and roster
-sequence. Stop if a repository no longer matches recorded preflight state.
+Use only an exact, independently verified I073 candidate binary for fleet
+writes, follow the sequence and per-repository stop conditions above, and stop
+if a repository no longer matches its recorded preflight state. This authority
+does not permit force writes, unrelated repository edits, or early removal of
+the generation-14 compatibility layer.
 
 ## Requirements attack
 
@@ -235,4 +236,4 @@ sequence. Stop if a repository no longer matches recorded preflight state.
 8. Compatibility removal requires a separate owner-approved gen-15-or-later
    effort after the fleet and JSON-consumer proof gate.
 9. A fresh requirements-attack review and independent verification pass before
-   I073 closes or fleet authorization is requested.
+   I073 closes or the ratified fleet sequence starts.

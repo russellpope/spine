@@ -1,9 +1,8 @@
 # Flavor-to-harness migration (I073) implementation plan
 
 > **For agentic workers:** use `superpowers:subagent-driven-development` or
-> `superpowers:executing-plans` task by task. Do not write outside this
-> repository or install a binary before the owner grants the separate boundary
-> in the design.
+> `superpowers:executing-plans` task by task. The owner-ratified write boundary
+> and its I072 prerequisite are defined in the design; do not exceed them.
 
 **Goal:** rename the model table's first axis to harness, ship a compatible
 generation-14 primary binary, then sweep the named primary estate without
@@ -24,7 +23,9 @@ rendered model mirror stays dotted, value-stable, and host-blind.
 - Do not start Task 1 until I072's independent verifier records PASS for the
   exact final SHA. Stop, rather than infer success, if that evidence is absent.
 - This is routine-tier implementation. Final whole-branch review and fresh
-  verification are primary-tier under `WORKFLOW.md`.
+  verification are primary-tier under `WORKFLOW.md`. The 2026-08-30 owner
+  ruling already authorizes the in-scope implementation and named fleet
+  sequence after that prerequisite passes.
 - Set `templates/VERSION` to 14. Do not revise host config v1 or the four
   harness values, model IDs, efforts, aliases, history, alternates, or mirrors.
 - Preserve I072's `Load`, `--alternate`, D16, host-blind renderer/update, and
@@ -198,13 +199,13 @@ the root update.
 - [ ] Commit ticket closure evidence only after both gates pass. Do not sweep
   the fleet in this task.
 
-### Task 8: Owner-authorized fleet sweep
+### Task 8: Ratified fleet sweep
 
 **Files:** per named primary, only generated paths from its reviewed update;
 create migration-only commit and fleet ledger entry.
 
-- [ ] Obtain an explicit owner authorization naming the candidate binary/commit
-  and roster sequence. It is separate from the implementation authorization.
+- [ ] Confirm the candidate binary is built from the exact independently
+  verified I073 SHA and record that SHA with the already-ratified roster.
 - [ ] For each primary in the design order, record status, branch, HEAD,
   generation, and excluded worktrees. Stop if state differs from preflight.
 - [ ] Review `spine update --dir <repo>` before every write. An unrecognized
