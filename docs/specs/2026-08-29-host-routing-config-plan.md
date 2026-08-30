@@ -93,8 +93,8 @@ Implement these names and keep their responsibilities narrow:
 var ErrNotConfigured error
 
 func DefaultPath() (string, error)
-func Load(path string, lookPath func(string) (string, error)) (Config, error)
-func Validate(c Config, lookPath func(string) (string, error)) error
+func Load(path string, flavors []string,
+    lookPath func(string) (string, error)) (Config, error)
 
 // internal/model
 type Resolution struct {
@@ -110,15 +110,25 @@ func ValidateLaunchForHost(req LaunchRequest, configPath string,
     lookPath func(string) (string, error)) (Resolution, error)
 ```
 
+`hostconfig.Load` is the sole exported host-config validation boundary. It
+accepts the current flavor vocabulary because closed-schema validation must
+reject a harness or pin for a flavor the embedded model table does not expose.
+For every present file, it detects duplicate JSON members; decodes the closed
+schema; validates semantic routes, pins, and safe strings; then resolves each
+available harness executable through `lookPath`. Its private decode, semantic,
+and executable-validation helpers are not exported. This keeps callers from
+obtaining a parsed config that has bypassed any part of the validation boundary
+and avoids a model-package dependency cycle. `ErrNotConfigured` remains the
+only absent-file result.
+
 `hostconfig.DefaultPath` delegates to an unexported pure helper that accepts a
 directory-provider function. Production passes `os.UserConfigDir`; tests pass
 a closure. `ResolveForHost` uses `DefaultPath` only when `configPath` is empty;
 production callers pass empty and tests pass an absolute fixture path. Doctor
 and audit use unexported `runWithHostPath` helpers that take the same explicit
 path. No test replaces global state, so parallel model, doctor, and audit tests
-remain race-safe. `ErrNotConfigured` is the only absent-file result and causes
-the legacy result, not an error. All present files are fully validated before a
-final pair is returned.
+remain race-safe. An absent file causes the legacy result, not an error. All
+present files pass the complete `Load` boundary before a final pair is returned.
 
 `ValidateLaunchForHost` is the only host-aware path for controlled
 `spine model [--dir REPO] validate`. It reads I051's strict repository
@@ -146,8 +156,9 @@ The resolver must not expose endpoint or config-file contents.
 **Consumes:** `os.UserConfigDir`, `encoding/json`, `os/exec.LookPath` through
 an injected function.
 
-**Produces:** schema-v1 `Config`, `DefaultPath`, `Load`, `Validate`, and
-`ErrNotConfigured` for model, doctor, and audit callers.
+**Produces:** schema-v1 `Config`, `DefaultPath`, `Load(path, flavors, lookup)`,
+and `ErrNotConfigured` for model, doctor, and audit callers. `Load` owns the
+complete exported validation boundary; no exported `Validate` is part of I072.
 
 - [ ] **Step 1: Write failing parser tests.** Cover the private platform-path
   helper by injecting the user config directory function and expecting
@@ -187,6 +198,10 @@ an injected function.
 
   Expected: PASS. Add a test lookup that records calls and proves validation
   performs only an executable lookup, not a shell execution or network action.
+  Keep the attack table explicit for every prohibited field: `token`,
+  `base_url`, `auth_header`, `credentials`, `modelOverrides`, `args`, and
+  `env` each appears in an otherwise valid fixture and each call to `Load`
+  fails with the fixture path in its diagnostic.
 
 - [ ] **Step 6: Commit the parser unit.**
 
@@ -292,6 +307,12 @@ requested/host/pin trail.
   and unreachable pin, each of normal, `--effort`, and `--json` exits 2,
   writes no stdout, and has one safe stderr diagnostic. Keep the existing
   flags-before-positionals and `--alternate` tests green unchanged.
+  Capture legacy `--alternate --json` bytes before the host fixture is
+  introduced, then assert byte identity both when the host file is absent and
+  when a valid present fixture names a different or missing selected route. In
+  both cases, the JSON must contain neither `requested` nor `host` nor `pin`.
+  A malformed present fixture still exits 2 with no stdout for alternate text,
+  effort, and JSON modes.
 
 - [ ] **Step 3: Add controlled validation command tests.** Through
   `spine model [--dir REPO] validate`, assert a safe divergent pin exits 2,
@@ -352,13 +373,15 @@ integration point, not pre-reserved in this plan.
   member, unavailable pinned harness, invalid declared executable, absent
   pinned model, and unsupported pin effort. Assert a Claude-only config checks
   all four Claude tiers and produces one warning per unreachable unpinned pair.
-  Assert a two-harness config checks every tier of both available harnesses in
-  lexical-harness then `model.Tiers` order. Assert an unavailable declared
+  Assert a two-available-harness config checks every tier of both available
+  harnesses in lexical harness order, then `model.Tiers` order. Assert an unavailable declared
   harness produces no preference warnings, a divergent valid pin produces a
   not-yet-auditable warning for its matching tier, a byte-identical pin
   suppresses only its matching preference warning, and a valid identical pin
-  without evidence refs is silent. Use explicit paths through the private helper; run the cases in
-  parallel to prove the path seam has no global-state race.
+  without evidence refs is silent. Use two independently-created explicit
+  fixture paths in `t.Parallel` subtests, each with a distinct lookup closure,
+  and assert their findings retain their own paths. Run that test under
+  `-race` to prove the path seam has no global-state race.
 
 - [ ] **Step 3: Write the command-level result test.** `spine doctor` must
   print the allocated ID, path, and severity and exit 1 for either error or
