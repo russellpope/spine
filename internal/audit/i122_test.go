@@ -300,3 +300,137 @@ func TestWorkflowMalformedMissingUnknownAndDeeperMetadataStayExcluded(t *testing
 		t.Fatalf("workflow metadata warnings missing=%v malformed=%v: %q", missing, malformed, rep.Warnings)
 	}
 }
+
+func TestWorkflowDuplicateMetadataMembersFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		sidecar     string
+		run         string
+		wantWarning string
+	}{
+		{
+			name:        "sidecar admission fields",
+			sidecar:     `{"agentType":"code-reviewer","agentType":"workflow-subagent","spawnDepth":2,"spawnDepth":1}`,
+			wantWarning: "ambiguous workflow metadata — transcript skipped",
+		},
+		{
+			name:        "run workflow progress",
+			run:         `{"workflowProgress":[],"workflowProgress":[{"agentId":"worker","model":"claude-sonnet-5"}]}`,
+			wantWarning: "ambiguous workflow run metadata — model fallback skipped",
+		},
+		{
+			name:        "run agent entry model",
+			run:         `{"workflowProgress":[{"agentId":"worker","model":"claude-haiku-4-5","model":"claude-sonnet-5"}]}`,
+			wantWarning: "ambiguous workflow run metadata — model fallback skipped",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I056": "routine"})
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I056", "", "workflow-subagent")
+			base := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker")
+			if tc.sidecar != "" {
+				if err := os.WriteFile(base+".meta.json", []byte(tc.sidecar), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.run != "" {
+				writeWorkflowRunRaw(t, transcripts, "session-1", "wf_1", tc.run)
+			}
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := rowsByID(t, rep)["I056"].Verdict; got != VerdictNoTranscript {
+				t.Fatalf("I056 verdict = %s, want no-transcript for ambiguous metadata", got)
+			}
+			if !warningContains(rep.Warnings, tc.wantWarning) {
+				t.Fatalf("warnings = %q, want %q", rep.Warnings, tc.wantWarning)
+			}
+		})
+	}
+}
+
+func TestWorkflowMetadataRejectsSymlinkScopeEscape(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		linkPath    func(string) string
+		targetPath  func(string) string
+		wantWarning string
+	}{
+		{
+			name: "sidecar",
+			linkPath: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-a", "subagents", "workflows", "wf_link", "agent-worker.meta.json")
+			},
+			targetPath: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-b", "subagents", "workflows", "wf_link", "agent-worker.meta.json")
+			},
+			wantWarning: "workflow metadata unsafe — transcript skipped",
+		},
+		{
+			name: "workflow run",
+			linkPath: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-a", "workflows", "wf_link.json")
+			},
+			targetPath: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-b", "workflows", "wf_link.json")
+			},
+			wantWarning: "workflow run metadata unsafe — model fallback skipped",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I057": "routine"})
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-a", "wf_link", "worker", repo, "Implement I057", "", "workflow-subagent")
+			writeWorkflowAgent(t, transcripts, "session-b", "wf_link", "worker", repo, "Ignore I057", "", "workflow-subagent")
+			writeWorkflowRun(t, transcripts, "session-b", "wf_link", "worker", "claude-sonnet-5")
+
+			link, target := tc.linkPath(transcripts), tc.targetPath(transcripts)
+			if err := os.Remove(link); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts, Session: "session-a"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := rowsByID(t, rep)["I057"].Verdict; got != VerdictNoTranscript {
+				t.Fatalf("I057 verdict = %s, want no-transcript after a symlink scope escape", got)
+			}
+			if !warningContains(rep.Warnings, tc.wantWarning) {
+				t.Fatalf("warnings = %q, want %q", rep.Warnings, tc.wantWarning)
+			}
+		})
+	}
+}
+
+func TestWorkflowSidecarOverOneMiBFailsClosed(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I058": "routine"})
+	transcripts := t.TempDir()
+	writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I058", "claude-sonnet-5", "workflow-subagent")
+	path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.meta.json")
+	tooLarge := append([]byte(`{"agentType":"workflow-subagent","spawnDepth":1,"padding":"`), make([]byte, (1<<20)+1)...)
+	tooLarge = append(tooLarge, []byte(`"}`)...)
+	if err := os.WriteFile(path, tooLarge, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rowsByID(t, rep)["I058"].Verdict; got != VerdictNoTranscript {
+		t.Fatalf("I058 verdict = %s, want no-transcript for oversized sidecar", got)
+	}
+	if !warningContains(rep.Warnings, "workflow metadata exceeds 1048576 bytes — transcript skipped") {
+		t.Fatalf("warnings = %q, want oversized sidecar warning", rep.Warnings)
+	}
+}
