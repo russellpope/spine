@@ -434,6 +434,66 @@ func TestDoctorCleanAndJSON(t *testing.T) {
 	}
 }
 
+func TestDoctorD15TextAndExitContract(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	writeDoctorAcceptanceFixture(t, dir, strings.TrimSuffix(validDoctorAcceptanceLine(), "lab unavailable"))
+	code, out, errs := runCmd(t, "doctor", "--dir", dir)
+	if code != 1 || errs != "" || !strings.Contains(out, "D15 warn") || !strings.Contains(out, "docs/issues/I050-test.md: line 9:") {
+		t.Fatalf("reasonless D15: code=%d out=%q stderr=%q", code, out, errs)
+	}
+
+	writeDoctorAcceptanceFixture(t, dir, validDoctorAcceptanceLine())
+	code, out, errs = runCmd(t, "doctor", "--dir", dir)
+	if code != 0 || strings.Contains(out, "D15") || errs != "" {
+		t.Fatalf("valid record changed doctor: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+func TestDoctorD15JSONShape(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	writeDoctorAcceptanceFixture(t, dir, strings.TrimSuffix(validDoctorAcceptanceLine(), "lab unavailable"))
+	code, out, errs := runCmd(t, "doctor", "--dir", dir, "--json")
+	if code != 1 || errs != "" {
+		t.Fatalf("doctor json: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	var payload struct {
+		Findings []map[string]any `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatal(err)
+	}
+	var found map[string]any
+	for _, finding := range payload.Findings {
+		if finding["id"] == "D15" {
+			found = finding
+		}
+	}
+	if len(found) != 4 || found["severity"] != "warn" || found["path"] != "docs/issues/I050-test.md" {
+		t.Fatalf("D15 JSON schema/value mismatch: %#v", found)
+	}
+}
+
+func validDoctorAcceptanceLine() string {
+	return "- [ ] Exercise failover -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/handoffs/2026-08-29-approval.md#failover reason: lab unavailable"
+}
+
+func writeDoctorAcceptanceFixture(t *testing.T, dir, line string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "docs", "handoffs", "2026-08-29-approval.md"), []byte("# Approval\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nid: I050\ntitle: test\nseverity: low\nstatus: open\n---\n\n## Acceptance criteria\n" + line + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "docs", "issues", "I050-test.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHandoffEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	code, out, errs := runCmd(t, "handoff", "new", "--dir", dir, "spine v2 wrap")

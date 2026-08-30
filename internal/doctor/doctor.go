@@ -1,4 +1,4 @@
-// Package doctor runs read-only workflow health checks (spec D1–D14).
+// Package doctor runs read-only workflow health checks (spec D1–D15).
 package doctor
 
 import (
@@ -67,6 +67,7 @@ func Run(dir string) ([]Finding, error) {
 	findings = append(findings, checkpointCheck(dir)...)
 	findings = append(findings, slugCheck(dir)...)
 	findings = append(findings, ticketCheck(dir)...)
+	findings = append(findings, acceptanceCheck(dir)...)
 	findings = append(findings, toolchainCheck()...)
 	return findings, nil
 }
