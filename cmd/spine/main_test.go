@@ -691,6 +691,44 @@ func TestDoctorReportsDefaultHostRoutingConfigD16Contracts(t *testing.T) {
 	})
 }
 
+// I077 evidence is doctor-only. Changing an opaque pin reference to a stale
+// or malformed eval claim must not alter model resolution or routing audit
+// bytes or exit status.
+func TestI077EvidenceDoesNotChangeModelOrAudit(t *testing.T) {
+	repo := t.TempDir()
+	transcripts := t.TempDir()
+	codexSessions := t.TempDir()
+	lookup := func(string) (string, error) { return "/bin/codex", nil }
+	configs := []string{
+		`{"schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:codex","models":{"gpt-5.6-sol":{"efforts":["xhigh"]}}}},"pins":{"codex.primary":{"model":"gpt-5.6-sol","effort":"xhigh","evidence_refs":["owner:I068"]}}}`,
+		`{"schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:codex","models":{"gpt-5.6-sol":{"efforts":["xhigh"]}}}},"pins":{"codex.primary":{"model":"gpt-5.6-sol","effort":"xhigh","evidence_refs":["eval:2020-01-01-stale/runs/gpt-5-6-sol.md"]}}}`,
+	}
+	type result struct {
+		code           int
+		stdout, stderr string
+	}
+	var models, audits []result
+	for _, config := range configs {
+		hostPath := filepath.Join(t.TempDir(), "routing-host.json")
+		if err := os.WriteFile(hostPath, []byte(config), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		code := cmdModelWithHostPath([]string{"--dir", repo, "codex", "primary"}, &stdout, &stderr, hostPath, lookup)
+		models = append(models, result{code, stdout.String(), stderr.String()})
+		stdout.Reset()
+		stderr.Reset()
+		code = cmdAuditRoutingWithHostPathAndDefaults([]string{"--dir", repo, "--transcripts", transcripts, "--codex-sessions", codexSessions}, &stdout, &stderr, hostPath, lookup, func(string) ([]string, error) { return []string{transcripts}, nil }, func() (string, error) { return codexSessions, nil })
+		audits = append(audits, result{code, stdout.String(), stderr.String()})
+	}
+	if models[0] != models[1] {
+		t.Fatalf("model changed with evidence: before=%#v after=%#v", models[0], models[1])
+	}
+	if audits[0] != audits[1] {
+		t.Fatalf("audit changed with evidence: before=%#v after=%#v", audits[0], audits[1])
+	}
+}
+
 func TestDoctorD15TextAndExitContract(t *testing.T) {
 	dir := t.TempDir()
 	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {

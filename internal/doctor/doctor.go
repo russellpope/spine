@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/cursor"
@@ -124,7 +125,8 @@ func hostRoutingCheck(repoDir, hostPath string, lookup func(string) (string, err
 		for _, tier := range model.Tiers {
 			requested, err := model.Resolve(repoDir, flavor, tier)
 			if err != nil {
-				return append(findings, Finding{"D16", "error", path, fmt.Sprintf("cannot resolve %s.%s preference", flavor, tier)})
+				findings = append(findings, Finding{"D16", "error", path, fmt.Sprintf("cannot resolve %s.%s preference", flavor, tier)})
+				return append(findings, pinEvidenceCheck(repoDir, config)...)
 			}
 			key := flavor + "." + tier
 			if pin, pinned := config.Pins[key]; pinned {
@@ -137,6 +139,43 @@ func hostRoutingCheck(repoDir, hostPath string, lookup func(string) (string, err
 			if !reachable || !hostRouteContains(route.Efforts, requested.Effort) {
 				findings = append(findings, Finding{"D16", "warn", path, fmt.Sprintf("repository %s %s requested %s@%s is not reachable on available harness", normalizedRepo, key, requested.ID, requested.Effort)})
 			}
+		}
+	}
+	return append(findings, pinEvidenceCheck(repoDir, config)...)
+}
+
+// pinEvidenceCheck formats only the typed, redacted result of eval's narrow
+// selected-run reader. It is intentionally advisory: config loading,
+// resolution, and every non-doctor command remain unaware of these findings.
+func pinEvidenceCheck(repoDir string, config hostconfig.Config) []Finding {
+	pins := make([]eval.PinEvidencePin, 0, len(config.Pins))
+	for key, pin := range config.Pins {
+		pins = append(pins, eval.PinEvidencePin{Key: key, Model: pin.Model, EvidenceRefs: pin.EvidenceRefs})
+	}
+	results := eval.CheckPinEvidence(repoDir, pins, time.Now().UTC())
+	findings := make([]Finding, 0, len(results))
+	for _, result := range results {
+		message := ""
+		switch result.Kind {
+		case eval.PinEvidenceNoReference:
+			message = fmt.Sprintf("pin %s has no eligible eval reference", result.PinKey)
+		case eval.PinEvidenceBadReference:
+			message = fmt.Sprintf("pin %s has a malformed eval reference", result.PinKey)
+		case eval.PinEvidenceMissing:
+			message = fmt.Sprintf("pin %s references missing eval evidence", result.PinKey)
+		case eval.PinEvidenceMalformed:
+			message = fmt.Sprintf("pin %s references malformed eval evidence", result.PinKey)
+		case eval.PinEvidenceStale:
+			message = fmt.Sprintf("pin %s references stale eval evidence", result.PinKey)
+		case eval.PinEvidenceModelMismatch:
+			message = fmt.Sprintf("pin %s eval model does not exactly match pinned model", result.PinKey)
+		case eval.PinEvidenceNoBattery:
+			message = fmt.Sprintf("pin %s eval evidence has no battery record", result.PinKey)
+		case eval.PinEvidenceFailedBattery:
+			message = fmt.Sprintf("pin %s eval battery verdict is fail", result.PinKey)
+		}
+		if message != "" {
+			findings = append(findings, Finding{"D17", "warn", result.Path, message})
 		}
 	}
 	return findings
