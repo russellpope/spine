@@ -44,3 +44,13 @@ checked before the decision is made.
 Evaluate and record (ADR or note in the team-spawn design) whether opencode's custom
 subagent + serve/event surface changes the pi-vs-opencode choice for local-model worker
 dispatch. No code change implied by this issue.
+
+## Related
+
+Research completed 2026-08-29 in
+[`docs/research/2026-08-29-opencode-pi-worker-dispatch.md`](../research/2026-08-29-opencode-pi-worker-dispatch.md).
+It verifies that OpenCode already provides the constrained, inspectable worker
+contract needed by ladderbench, while Pi needs an owner-maintained extension to
+match it. The material choice remains owner-dependent, so this ticket stays
+open: adopt OpenCode for the constrained worker lane now, or fund a scoped Pi
+extension that implements the listed parity controls. I102 remains unchanged.
