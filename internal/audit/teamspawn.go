@@ -21,13 +21,6 @@ import (
 // `--surface` is the flag cmux actually ships (`cmux send --surface
 // surface:19 '…'`); `--pane`/`--target` are accepted alongside it.
 //
-// A second recognizer for the same commands lives in codex.go
-// (codexTeamSpawnStartRe / codexTeamSpawnPromptRe) for codex rollout
-// transcripts. The two pair a worker with its prompt differently — this one
-// takes the FIRST prompt after a spawn, codex accumulates ALL of a worker's
-// prompt text. Both readings are defensible; that they differ by flavor is
-// not. Ticket I102 tracks sharing one worker-keyed pairing.
-//
 // and the follow-up prompt commands (`herdr agent prompt <name> …`,
 // a `cmux send` carrying no claude invocation) that a spawn borrows its
 // ticket attribution from when the spawn command names no ticket itself.
@@ -407,6 +400,18 @@ func referencedBriefPath(command string) (string, bool) {
 
 var catReferenceRe = regexp.MustCompile(`\$\(cat\s+([^\s)]+)\)`)
 
+// firstTeamPrompt is the shared worker-prompt pairing rule for both audit
+// readers. The first prompt after a worker spawn is its assignment; later
+// prompts are follow-up conversation and must not attach the worker's model
+// evidence to another ticket (I090 decision, unified by I102).
+func firstTeamPrompt(existing *string, next string) bool {
+	if *existing != "" || next == "" {
+		return false
+	}
+	*existing = next
+	return true
+}
+
 // attributeTeamPrompt gives a spawn that named no ticket the text of the
 // following prompt command addressed to the same worker, which is where a
 // claude-team lead names the ticket. The most recent unattributed spawn for
@@ -430,8 +435,7 @@ func attributeTeamPromptWithBriefs(dispatches []dispatch, p teamPrompt, briefs *
 		if d.teamTarget != p.target {
 			continue
 		}
-		if d.prompt == "" && d.briefText == "" && !namesATicket(d.description) {
-			d.prompt = p.text
+		if d.briefText == "" && !namesATicket(d.description) && firstTeamPrompt(&d.prompt, p.text) {
 			if briefs != nil && p.briefRef != "" {
 				if resolved, found := briefs.resolve(p.briefRef, d.cwd, d.briefCutoff); found {
 					p.briefText = resolved.body

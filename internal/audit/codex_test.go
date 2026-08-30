@@ -481,6 +481,41 @@ func TestCodexTwoTeamSpawnsKeyedPerWorker(t *testing.T) {
 	}
 }
 
+// Regression (I102): both audit transcript readers treat only a worker's
+// first prompt after its spawn as its assignment. A later prompt is follow-up
+// conversation, not a second ticket that can inherit the original spawn's
+// model evidence.
+func TestCodexTeamSpawnUsesFirstPromptOnly(t *testing.T) {
+	codexDir := t.TempDir()
+	sessRepo := t.TempDir()
+	writeAuditRepo(t, sessRepo, gen9DefaultWorkflow, map[string]string{"I903": "routine", "I904": "mechanical"})
+
+	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+		codexSessionMetaLine("root-102", "root-102", "", sessRepo, "user", topLevelSource),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"cmd": "herdr agent start w1 --kind codex --pane wA:p1 -- -m gpt-5.6-terra",
+		}),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"cmd": `herdr agent prompt w1 "implement I903"`,
+		}),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"cmd": `herdr agent prompt w1 "then also implement I904"`,
+		}),
+	)
+
+	rep, err := Run(Options{RepoDir: sessRepo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if r := rows["I903"]; r.Verdict != VerdictMatch {
+		t.Errorf("I903 verdict = %s (%s), want match from w1's assignment prompt", r.Verdict, r.Detail)
+	}
+	if r := rows["I904"]; r.Verdict != VerdictNoTranscript {
+		t.Errorf("I904 verdict = %s (%s), want no-transcript — w1's second prompt is follow-up, not an assignment", r.Verdict, r.Detail)
+	}
+}
+
 // Acceptance (Testing Decisions' CLI clause; review finding I3):
 // DefaultCodexSessionsDir's default-derivation branches — $CODEX_HOME set,
 // and the ~/.codex/sessions fallback when it is not.

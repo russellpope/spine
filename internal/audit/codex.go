@@ -64,12 +64,6 @@ import (
 	"time"
 )
 
-// The claude reader has its own team-spawn recognizer (teamspawn.go, ticket
-// I090) for Bash tool_use blocks. It pairs a worker with the FIRST prompt
-// that follows its spawn, where the accumulation below takes ALL of a
-// worker's prompt text. The divergence is known and deliberate for now;
-// ticket I102 tracks sharing one worker-keyed pairing across both flavors.
-//
 // codexTeamSpawnStartRe matches a team spawn "start" command — herdr agent
 // start <worker> … -- -m <model> (I009's verified example) or the cmux
 // equivalent — capturing the worker name and the explicit model. Only
@@ -342,8 +336,9 @@ type codexNearMiss struct {
 // accumulator — is what stops two correctly-tiered spawns for two different
 // tickets from colliding into a single, wrong dispatch record.
 type codexExecWorker struct {
-	model string
-	text  strings.Builder
+	model  string
+	text   strings.Builder
+	prompt string
 }
 
 // codexScanState is scanCodexFile's mutable per-file accumulator, threaded
@@ -496,8 +491,10 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 				w.text.WriteByte(' ')
 			} else if match := codexTeamSpawnPromptRe.FindStringSubmatch(cmd); match != nil {
 				w := st.execWorker(match[1])
-				w.text.WriteString(cmd)
-				w.text.WriteByte(' ')
+				if firstTeamPrompt(&w.prompt, cmd) {
+					w.text.WriteString(cmd)
+					w.text.WriteByte(' ')
+				}
 			}
 		case "custom_tool_call":
 			// I009 cmux-lead fact (fix): cmux codex-team LEADS dispatch via
