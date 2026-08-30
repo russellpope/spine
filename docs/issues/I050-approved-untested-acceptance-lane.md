@@ -3,7 +3,7 @@ id: I050
 title: "Verify convention: approved-untested as a first-class acceptance state"
 severity: med
 status: open
-commits: [7e94222, 4850488, fae360f, 6950089, c55faf3, 3761f4f, 8f8db36, f741224, 0547817, fc20dba]
+commits: [7e94222, 4850488, fae360f, 6950089, c55faf3, 3761f4f, 8f8db36, f741224, 0547817, fc20dba, a353f98]
 affects: [templates, doctor]
 blocked-by: []
 execution-mode: subagent-driven
@@ -131,3 +131,11 @@ identity scoping, per-iteration close/error handling, and package/doctor/audit/
 compiled-CLI regressions. Focused and full local verification passed before
 the code commit. Fresh primary re-review, independent verification, maipipe at
 the eventual exact review SHA, and ticket closure remain pending.
+
+The deterministic-order correction is `a353f98`. It places the rule-2
+`criterion is required` failure before the rule-3 multiple-structural-marker
+failure and keeps both before date and later fields. The exact combined
+package regression and doctor, audit, and compiled-CLI output regressions were
+observed red before the aggregation-only reorder and pass afterward. I050
+remains open and unchecked pending a fresh primary re-review, a different
+independent verifier, final maipipe, and ticket closure.
