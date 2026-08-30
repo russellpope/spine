@@ -2,7 +2,7 @@
 id: I093
 title: "Gate pack dogfood follow-ups: sortFindings ordering untested, type-check error names downstream import, unconfigured classes render as exit-2 stages, update --force is all-or-nothing"
 severity: low
-status: open
+status: fixed
 affects: [I082, I084, I085]
 blocked-by: []
 execution-mode:
@@ -82,3 +82,14 @@ hash) — owner call.
 - Item 4 is filed as I124 with additive repeatable `--force-file` authority;
   global `--force` remains compatible.
 - Item 5 remains shape-only. No I125 is filed.
+
+## Resolution
+
+Fixed 2026-08-30. Items 1 and 2 landed in
+`ab204e5` (`fix(gate): I093.1/.2 — pin sortFindings order (kills mutation
+probe); type-check refusal names the first compile error, not the importer
+symptom`), with the completed-test and diagnostic evidence recorded above.
+The owner accepted the remaining disposition: I123 records item 3, I124
+records item 4, and item 5 remains shape-only with no I125. I123 and I124
+remain open implementation tickets; this resolution does not claim their work
+has shipped.

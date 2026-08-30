@@ -2,7 +2,7 @@
 id: I066
 title: Claude Code as a harness for 3rd-party models — wayfinder map
 severity: med
-status: open
+status: fixed
 affects: [model, audit, cli, workflow, fleet]
 blocked-by: []
 labels: [wayfinder:map]
@@ -37,6 +37,9 @@ gateways; the codex harness is untouched.
   cmux/herdr claude-team dispatch skills are in blast radius ([I071](I071-claude-auto-invocation-contract.md)).
 - Build path after the map: standard gate chain per effort (grill → PRD →
   tickets → dispatch per WORKFLOW.md routing).
+- Batch coordination: I121, I122, I123, and I124 joined the tracked
+  open-ledger batch. They are separately scoped audit/update work; their batch
+  membership records coordination only, not implementation.
 
 ## Decisions so far
 
@@ -76,32 +79,37 @@ gateways; the codex harness is untouched.
   the final exact `(model, effort)` pair. Mirrors, templates, update, and fleet
   state stay host-blind. This design is approved for I072 implementation, not
   evidence that the implementation or dependent rename/eval work has landed.
-- [Effort dispatch recommendation](I075-effort-first-class-dispatch-parameter.md)
-  — the completed grill recommends raw target-harness `(harness, model,
-  effort)` declarations per dispatch. Omitted effort resolves to the selected
+- [Effort dispatch declarations](I075-effort-first-class-dispatch-parameter.md)
+  — the owner-ratified I075 PRD makes raw target-harness `(harness, model,
+  effort)` declarations first-class. Omitted effort resolves to the selected
   target; a supplied raw token is validated for that harness; the existing
   exact `ESCALATION <ticket> effort <from>-><to> reason: ...` line authorizes
-  only that declared pair. Audit should report declared effort separately from
-  unconfirmed effective effort. This is a recommendation awaiting owner
-  approval and an I075 PRD, not a settled audit verdict.
+  only that declared pair. Audit records declared effort separately from
+  unconfirmed effective effort; I074 owns later observed-effort verdicts.
+- [Flavor → harness migration](I073-flavor-to-harness-rename-migration.md)
+  — the owner-ratified I073 PRD and migration plan define the compatibility
+  window and fleet sequence. Implementation remains blocked until I072's
+  independent verifier records PASS for its exact final SHA.
+- [Heterogeneous routing verdicts](I074-audit-heterogeneous-verdicts.md)
+  — the accepted I074 contract defines declared-versus-observed correlation,
+  blocking mismatches, and nonblocking unconfirmable evidence for explicit
+  heterogeneous dispatches. It depends on I072 and I075; no implementation is
+  implied by this map decision.
+- [Eval-informed equivalence pins](I077-eval-informed-equivalence-pins.md)
+  — the round-2 owner policy selects both mechanisms, warn-only: at
+  ratification, a pin records a repo-local `docs/evals/` reference for its
+  exact pinned model, and doctor warns if that evidence is missing, stale, or
+  failing. Those warnings never de-ratify, replace, block, or gate a pin. The
+  I077 PRD waits for verified I072.
 
 ## Not yet specified
 
-- [I072](I072-host-config-schema-and-precedence.md) — specified by the
-  committed design and awaiting implementation, review, and verification.
-- [I073](I073-flavor-to-harness-rename-migration.md) — awaits I072's verified
-  implementation, then its own migration PRD and fleet plan.
-- [I074](I074-audit-heterogeneous-verdicts.md) — the declared-versus-observed
-  verdict vocabulary, correlation, and severity remain unspecified.
-- [I075](I075-effort-first-class-dispatch-parameter.md) — a grill
-  recommendation exists, but owner approval, PRD, implementation, and the
-  declared-versus-observed audit decision remain open.
-- [I076](I076-routing-yield-review-record-and-yield-verb.md) — review-record
-  grammar and `spine yield` remain to be designed; its model/harness naming
-  must follow I073 rather than freeze the old flavor term.
-- [I077](I077-eval-informed-equivalence-pins.md) — awaits I072's verified
-  implementation and must still define how eval evidence informs, but never
-  silently replaces, owner pin ratification.
+- [I076](I076-routing-yield-review-record-and-yield-verb.md) — its PRD may
+  land now, but implementation follows verified I073 so its grammar uses the
+  migrated harness term rather than freezing the old flavor term.
+- [I077](I077-eval-informed-equivalence-pins.md) — the owner policy is bound,
+  but its PRD waits for verified I072; that PRD must define the exact
+  repo-local reference grammar, freshness rule, and doctor read boundary.
 
 ## Out of scope
 
@@ -113,3 +121,13 @@ gateways; the codex harness is untouched.
   hosts that need it (e.g. the work laptop), never a replacement track.
 - Building or operating gateways/proxies themselves — spine consumes what a
   host declares reachable; it does not provide the plumbing.
+
+## Resolution
+
+Fixed 2026-08-30 as a wayfinder-map deliverable. The map's purpose under the
+ledger convention is to record destination, decisions, frontier, and
+out-of-scope boundaries; its child tickets carry the downstream implementation
+work. I072-I075 now have their approved/accepted designs recorded above, and
+I076-I077 have explicit PRD prerequisites. Closing this map therefore records
+completed wayfinding only; it does not assert that any dependent implementation
+or fleet migration has shipped.
