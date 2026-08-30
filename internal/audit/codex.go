@@ -1000,8 +1000,15 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 				// the session actually served.
 				openingLine := firstLine(res.openingUserMessage)
 				matches := firstLineTicketMatches(openingLine, tokens)
-				referenceCount := ticketref.ReferenceCount(openingLine, tokens)
+				referenceCount := ticketref.ReferenceCount(strings.ToUpper(openingLine), tokens)
 				if len(matches) == 0 {
+					if text := res.searchText(); strings.TrimSpace(text) != "" {
+						nearMisses = append(nearMisses, codexNearMiss{
+							text:   text,
+							file:   path,
+							reason: "ticket token absent from the opening message's first line — a later mention does not attribute (D21)",
+						})
+					}
 					continue
 				}
 				if referenceCount != 1 {
