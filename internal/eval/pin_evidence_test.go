@@ -35,6 +35,7 @@ func TestPinEvidenceClassifiesSelectedRunFailures(t *testing.T) {
 	}{
 		{name: "no eval reference", ref: "owner:I068", want: PinEvidenceNoReference, wantPath: "routing-host.json"},
 		{name: "bad ref date", ref: "eval:2026-02-30-routing-check/runs/run.md", want: PinEvidenceBadReference, wantPath: "routing-host.json"},
+		{name: "year-zero ref date", ref: "eval:0000-01-01-routing-check/runs/run.md", want: PinEvidenceBadReference, wantPath: "routing-host.json"},
 		{name: "bad ref slug", ref: "eval:2026-08-30-Routing/runs/run.md", want: PinEvidenceBadReference, wantPath: "routing-host.json"},
 		{name: "bad ref run", ref: "eval:2026-08-30-routing-check/runs/.run.md", want: PinEvidenceBadReference, wantPath: "routing-host.json"},
 		{name: "missing run", ref: "eval:2026-08-30-routing-check/runs/missing.md", want: PinEvidenceMissing, wantPath: "docs/evals/2026-08-30-routing-check/runs/missing.md"},
@@ -44,6 +45,9 @@ func TestPinEvidenceClassifiesSelectedRunFailures(t *testing.T) {
 		{name: "bad front matter", ref: pinEvidenceRef, mutate: func(t *testing.T, dir string) { mustWrite(t, pinEvidenceRunPath(dir), "not front matter\n") }, want: PinEvidenceMalformed, wantPath: "docs/evals/2026-08-30-routing-check/runs/gpt-5-6-sol.md"},
 		{name: "future date", ref: pinEvidenceRef, mutate: func(t *testing.T, dir string) {
 			writePinEvidenceRun(t, dir, "2026-08-31", pinEvidenceModel, fullPassingBattery())
+		}, want: PinEvidenceMalformed, wantPath: "docs/evals/2026-08-30-routing-check/runs/gpt-5-6-sol.md"},
+		{name: "year-zero run date", ref: pinEvidenceRef, mutate: func(t *testing.T, dir string) {
+			writePinEvidenceRun(t, dir, "0000-01-01", pinEvidenceModel, fullPassingBattery())
 		}, want: PinEvidenceMalformed, wantPath: "docs/evals/2026-08-30-routing-check/runs/gpt-5-6-sol.md"},
 		{name: "day 91 stale", ref: pinEvidenceRef, mutate: func(t *testing.T, dir string) {
 			writePinEvidenceRun(t, dir, "2026-05-31", pinEvidenceModel, fullPassingBattery())

@@ -192,7 +192,7 @@ func parsePinEvidenceDate(s string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	date, err := time.Parse("2006-01-02", s)
-	return date, err == nil
+	return date, err == nil && date.Year() != 0
 }
 
 func utcDate(value time.Time) time.Time {
