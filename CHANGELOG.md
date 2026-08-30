@@ -46,6 +46,7 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Added
 
+- **`spine update --force-file PATH` scopes overwrite authority to exact managed files.** The repeatable flag accepts canonical paths in the current plan, preserves unselected local edits, and keeps standalone `--force` global. Malformed, duplicate, unknown, unmanaged, or mixed requests fail deterministically before writes; selected marker damage still requires manual repair, and candidate-preflight refusal remains whole-plan no-write. (I124)
 - **Host-scoped routing capability and equivalence pins.** An owner-local,
   closed JSON file can constrain repository preferences to available harnesses
   or select an exact model-effort pin without leaking host state into
