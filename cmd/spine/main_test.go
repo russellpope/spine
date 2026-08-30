@@ -1026,6 +1026,30 @@ func TestAuditRoutingEndToEnd(t *testing.T) {
 	}
 }
 
+func TestAuditRoutingDiscardedRecordIsVisibleAndNonBlocking(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditFixtureRepo(t, repo, map[string]string{"I078": "primary"})
+	if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(
+		"DISCARDED I078 source:claude session:prototype dispatch:toolu_1 tier:routine reason: prototype was discarded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transcripts := t.TempDir()
+	writeAuditDispatch(t, filepath.Join(transcripts, "prototype.jsonl"), repo, "I078", "claude-sonnet-5")
+	code, out, errs := runCmd(t, "audit", "routing", "--dir", repo, "--transcripts", transcripts,
+		"--codex-sessions", filepath.Join(t.TempDir(), "no-codex"))
+	if code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want visible nonblocking discarded verdict", code, out, errs)
+	}
+	for _, want := range []string{"discarded-with-reason", "prototype was discarded"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout=%q, want %q", out, want)
+		}
+	}
+}
+
 // Acceptance (I041): --codex-sessions overrides discovery, mirroring
 // --transcripts. A missing/nonexistent dir degrades to a warning, never an
 // error, and never changes the exit code driven by claude-side evidence.

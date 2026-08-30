@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -65,6 +66,158 @@ func TestSubagentTranscriptIsTheActual(t *testing.T) {
 	// I102 has no subagent transcript: the dispatch alias is the evidence.
 	if got := strings.Join(rows["I102"].Actuals, ","); got != "fable" {
 		t.Errorf("I102 actuals = %q, want fable (dispatch alias)", got)
+	}
+}
+
+// A discarded declaration is scoped to the immutable Claude dispatch event,
+// not merely to a ticket or tier. Removing that correlation must make this
+// regression fail: a routine prototype on a primary ticket would otherwise
+// remain a blocking silent descent.
+func TestDiscardedClaudeIdentityIsPerDispatch(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+	if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(
+		"DISCARDED I078 source:claude session:prototype dispatch:toolu_1 tier:routine reason: prototype was discarded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transcripts := t.TempDir()
+	writeSingleDispatch(t, filepath.Join(transcripts, "prototype.jsonl"), repo, "I078", "I078 prototype", "claude-sonnet-5")
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I078"]
+	if got, want := string(row.Verdict), "discarded-with-reason"; got != want {
+		t.Fatalf("I078 verdict = %q (%s), want %q", got, row.Detail, want)
+	}
+	if !strings.Contains(row.Detail, "prototype was discarded") {
+		t.Fatalf("I078 detail = %q, want discarded reason", row.Detail)
+	}
+	if rep.Blocking() {
+		t.Fatal("one exact discarded prototype must be advisory, not blocking")
+	}
+}
+
+// A discarded declaration covers one exact event. A later routine dispatch
+// for the same primary ticket remains a real silent descent and must win the
+// ticket aggregation, while retaining the discarded prototype's reason.
+func TestDiscardedDoesNotExcuseLandedSibling(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+	if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(
+		"DISCARDED I078 source:claude session:prototype dispatch:toolu_1 tier:routine reason: prototype was discarded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transcripts := t.TempDir()
+	writeSingleDispatch(t, filepath.Join(transcripts, "prototype.jsonl"), repo, "I078", "I078 prototype", "claude-sonnet-5")
+	writeSingleDispatch(t, filepath.Join(transcripts, "landed.jsonl"), repo, "I078", "I078 landed work", "claude-sonnet-5")
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I078"]
+	if row.Verdict != VerdictSilentDescent || !rep.Blocking() {
+		t.Fatalf("I078 = %s (%s), blocking=%v; want blocking silent descent", row.Verdict, row.Detail, rep.Blocking())
+	}
+	if !strings.Contains(row.Detail, "prototype was discarded") {
+		t.Fatalf("I078 detail = %q, want preserved discarded reason", row.Detail)
+	}
+}
+
+func TestDiscardedAbsentKeepsSilentDescent(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+	transcripts := t.TempDir()
+	writeSingleDispatch(t, filepath.Join(transcripts, "prototype.jsonl"), repo, "I078", "I078 prototype", "claude-sonnet-5")
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row := rowsByID(t, rep)["I078"]; row.Verdict != VerdictSilentDescent || !rep.Blocking() {
+		t.Fatalf("I078 = %s (%s), blocking=%v; want blocking silent descent", row.Verdict, row.Detail, rep.Blocking())
+	}
+}
+
+func TestDiscardedWrongIdentityOrTierDoesNotExcuse(t *testing.T) {
+	for _, record := range []string{
+		"DISCARDED I078 source:codex session:prototype dispatch:toolu_1 tier:routine reason: wrong source",
+		"DISCARDED I078 source:claude session:other dispatch:toolu_1 tier:routine reason: wrong session",
+		"DISCARDED I078 source:claude session:prototype dispatch:other tier:routine reason: wrong dispatch",
+		"DISCARDED I078 source:claude session:prototype dispatch:toolu_1 tier:mechanical reason: wrong tier",
+	} {
+		t.Run(record, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+			if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(record+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			transcripts := t.TempDir()
+			writeSingleDispatch(t, filepath.Join(transcripts, "prototype.jsonl"), repo, "I078", "I078 prototype", "claude-sonnet-5")
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row := rowsByID(t, rep)["I078"]; row.Verdict != VerdictSilentDescent || !rep.Blocking() {
+				t.Fatalf("I078 = %s (%s), blocking=%v; want blocking silent descent", row.Verdict, row.Detail, rep.Blocking())
+			}
+		})
+	}
+}
+
+func TestDiscardedMalformedDuplicateAndAmbiguousRecordsDoNotExcuse(t *testing.T) {
+	for _, tc := range []struct {
+		name, ledger string
+		ambiguous    bool
+	}{
+		{"missing dispatch", "DISCARDED I078 source:claude session:prototype tier:routine reason: missing dispatch", false},
+		{"reordered fields", "DISCARDED I078 session:prototype source:claude dispatch:toolu_1 tier:routine reason: reordered", false},
+		{"empty reason", "DISCARDED I078 source:claude session:prototype dispatch:toolu_1 tier:routine reason: ", false},
+		{"duplicate identity", "DISCARDED I078 source:claude session:prototype dispatch:toolu_1 tier:routine reason: first\nDISCARDED I078 source:claude session:prototype dispatch:toolu_1 tier:routine reason: second", false},
+		{"ambiguous evidence", "DISCARDED I078 source:claude session:prototype dispatch:toolu_1 tier:routine reason: too coarse", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+			if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(tc.ledger+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			transcripts := t.TempDir()
+			path := filepath.Join(transcripts, "prototype.jsonl")
+			writeSingleDispatch(t, path, repo, "I078", "I078 prototype", "claude-sonnet-5")
+			if tc.ambiguous {
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, append(raw, raw...), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row := rowsByID(t, rep)["I078"]; row.Verdict != VerdictSilentDescent || !rep.Blocking() {
+				t.Fatalf("I078 = %s (%s), blocking=%v; want blocking silent descent", row.Verdict, row.Detail, rep.Blocking())
+			}
+			if got := strings.Join(rep.Warnings, "\n"); !strings.Contains(got, "DISCARDED") {
+				t.Fatalf("warnings = %q, want discarded grammar diagnostic", rep.Warnings)
+			}
+		})
 	}
 }
 

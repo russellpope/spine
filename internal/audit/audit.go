@@ -130,6 +130,7 @@ const (
 	VerdictNoTranscript           Verdict = "no-transcript"           // warn
 	VerdictUnattributedTranscript Verdict = "unattributed-transcript" // warn (D24, ticket I044)
 	VerdictEscalatedWithReason    Verdict = "escalated-with-reason"   // advisory
+	VerdictDiscardedWithReason    Verdict = "discarded-with-reason"   // advisory
 	VerdictMatch                  Verdict = "match"
 	VerdictExempt                 Verdict = "exempt"      // informational (D27, ticket I046): tier: n/a opts out
 	VerdictUnannotated            Verdict = "unannotated" // informational
@@ -139,6 +140,7 @@ const (
 var severity = map[Verdict]int{
 	VerdictMatch:               0,
 	VerdictEscalatedWithReason: 1,
+	VerdictDiscardedWithReason: 1,
 	VerdictEscalatedNoReason:   2,
 	VerdictUnexplainedFallback: 3,
 	VerdictUnmappedDispatch:    4,
@@ -205,6 +207,20 @@ type evidenceToken struct {
 	flavor     string
 	source     string
 	sourceFile string // source transcript file (D24, codex only); "" for claude, keeping claude details byte-identical
+	identity   evidenceIdentity
+}
+
+// evidenceIdentity is the immutable dispatch-event correlation key used by
+// DISCARDED records. A partial key is deliberately unusable: source/session
+// alone is too broad to distinguish a discarded prototype from later work.
+type evidenceIdentity struct {
+	source   string
+	session  string
+	dispatch string
+}
+
+func (i evidenceIdentity) usable() bool {
+	return i.source != "" && i.session != "" && i.dispatch != ""
 }
 
 // tokenValues extracts the raw model strings from a slice of evidence
@@ -319,6 +335,7 @@ func Run(opts Options) (Report, error) {
 		mappings[flavor] = mapping
 	}
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
+	rep.Warnings = append(rep.Warnings, ledger.warnings...)
 	var dispatches []dispatch
 	var agents []subagent
 	sessionMatched := false
@@ -435,7 +452,7 @@ func Run(opts Options) (Report, error) {
 				continue // the subagent transcript below is the actual
 			}
 			if d.model != "" {
-				evidence[t.id] = append(evidence[t.id], evidenceToken{value: d.model, flavor: d.flavor, source: d.source, sourceFile: d.sourceFile})
+				evidence[t.id] = append(evidence[t.id], evidenceToken{value: d.model, flavor: d.flavor, source: d.source, sourceFile: d.sourceFile, identity: d.identity})
 			}
 		}
 		for _, a := range agents {
@@ -463,12 +480,13 @@ func Run(opts Options) (Report, error) {
 			if use {
 				for _, m := range a.models {
 					evidence[t.id] = append(evidence[t.id], evidenceToken{
-						value: m, flavor: deriveFlavor(m, a.source, mappings), source: a.source, sourceFile: a.sourceFile,
+						value: m, flavor: deriveFlavor(m, a.source, mappings), source: a.source, sourceFile: a.sourceFile, identity: a.identity,
 					})
 				}
 			}
 		}
 	}
+	rep.Warnings = append(rep.Warnings, validateDiscarded(ledger, tickets, evidence, mappings)...)
 	for i, d := range dispatches {
 		if !claimed[i] {
 			rep.Unmatched = appendUnmatched(rep.Unmatched, DispatchInfo{
@@ -627,15 +645,27 @@ func judge(t ticket, tokens []evidenceToken, mappings map[string]map[string]reso
 	// aggregate verdict is itself Match (i.e. every token matched: any
 	// worse per-token verdict would already have won via worse() above).
 	var matchSources []string
+	var discardedDetails []string
 	for _, tok := range tokens {
 		v, d := judgeToken(tok, t, mappings, l)
 		worse(v, d)
+		if v == VerdictDiscardedWithReason && d != "" {
+			discardedDetails = append(discardedDetails, d)
+		}
 		if v == VerdictMatch && tok.source == "codex" && tok.sourceFile != "" {
 			matchSources = append(matchSources, tok.sourceFile)
 		}
 	}
 	if verdict == VerdictMatch && len(matchSources) > 0 {
 		detail = "source: " + strings.Join(dedupSorted(matchSources), ", ")
+	}
+	if verdict != VerdictDiscardedWithReason && len(discardedDetails) > 0 {
+		note := "discarded event: " + strings.Join(dedupSorted(discardedDetails), "; ")
+		if detail == "" {
+			detail = note
+		} else {
+			detail += "; " + note
+		}
 	}
 	return verdict, detail
 }
@@ -682,6 +712,10 @@ func judgeToken(tok evidenceToken, t ticket, mappings map[string]map[string]reso
 		}
 	}
 	if t.tier != "fallback" && tierRank[actual] < tierRank[t.tier] {
+		key := discardedKey{ticket: t.id, identity: tok.identity, tier: actual}
+		if rec, ok := l.discarded[key]; ok && tok.identity.usable() {
+			return VerdictDiscardedWithReason, withSource(fmt.Sprintf("%s (%s) vs declared %s — DISCARDED reason: %s", tok.value, actual, t.tier, rec.reason), tok)
+		}
 		return VerdictSilentDescent, withSource(fmt.Sprintf("%s (%s) below declared %s with no ESCALATION record", tok.value, actual, t.tier), tok)
 	}
 	return VerdictEscalatedNoReason, withSource(fmt.Sprintf("%s (%s) above declared %s with no ESCALATION record", tok.value, actual, t.tier), tok)
@@ -952,6 +986,23 @@ type escRecord struct {
 type ledger struct {
 	escalation map[string][]escRecord // ticket id -> model-tier escalation records
 	fallback   map[string]string      // ticket id -> fallback reason
+	discarded  map[discardedKey]discardedRecord
+	pending    []discardedRecord
+	warnings   []string
+}
+
+type discardedKey struct {
+	ticket   string
+	identity evidenceIdentity
+	tier     string
+}
+
+type discardedRecord struct {
+	ticket   string
+	identity evidenceIdentity
+	tier     string
+	reason   string
+	line     int
 }
 
 // readLedger scans the build ledger for the pinned one-line grammar:
@@ -965,12 +1016,21 @@ type ledger struct {
 // model tier. A model-tier record keeps its to-tier — it excuses dispatches
 // on that tier only.
 func readLedger(path string) ledger {
-	l := ledger{escalation: map[string][]escRecord{}, fallback: map[string]string{}}
+	l := ledger{escalation: map[string][]escRecord{}, fallback: map[string]string{}, discarded: map[discardedKey]discardedRecord{}}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return l
 	}
-	for _, line := range strings.Split(string(raw), "\n") {
+	for lineNo, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "DISCARDED") {
+			rec, ok := parseDiscarded(strings.TrimSpace(line), lineNo+1)
+			if !ok {
+				l.warnings = append(l.warnings, fmt.Sprintf("DISCARDED line %d malformed — ignored", lineNo+1))
+				continue
+			}
+			l.pending = append(l.pending, rec)
+			continue
+		}
 		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-* "))
 		kind, rest, ok := strings.Cut(line, " ")
 		if !ok {
@@ -1001,7 +1061,116 @@ func readLedger(path string) ledger {
 			l.fallback[id] = reason
 		}
 	}
+	counts := map[discardedKey]int{}
+	for _, rec := range l.pending {
+		counts[discardedKey{ticket: rec.ticket, identity: rec.identity, tier: rec.tier}]++
+	}
+	duplicates := map[discardedKey]bool{}
+	for _, rec := range l.pending {
+		key := discardedKey{ticket: rec.ticket, identity: rec.identity, tier: rec.tier}
+		if counts[key] > 1 {
+			if !duplicates[key] {
+				l.warnings = append(l.warnings, fmt.Sprintf("DISCARDED line %d duplicate identity — ignored", rec.line))
+				duplicates[key] = true
+			}
+			continue
+		}
+		l.discarded[key] = rec
+	}
 	return l
+}
+
+// parseDiscarded accepts only the published, ordered one-line grammar. The
+// literal spacing is intentional: reordering or adding a field must not turn
+// a broad operator typo into a routing exception.
+func parseDiscarded(line string, lineNo int) (discardedRecord, bool) {
+	const prefix = "DISCARDED "
+	if !strings.HasPrefix(line, prefix) {
+		return discardedRecord{}, false
+	}
+	head, reason, ok := strings.Cut(strings.TrimPrefix(line, prefix), " reason: ")
+	if !ok || strings.TrimSpace(reason) == "" {
+		return discardedRecord{}, false
+	}
+	parts := strings.Split(head, " ")
+	if len(parts) != 5 || parts[0] == "" {
+		return discardedRecord{}, false
+	}
+	get := func(part, name string) (string, bool) {
+		value, ok := strings.CutPrefix(part, name)
+		return value, ok && value != "" && !strings.ContainsAny(value, " \t")
+	}
+	source, ok := get(parts[1], "source:")
+	if !ok || (source != "claude" && source != "codex") {
+		return discardedRecord{}, false
+	}
+	session, ok := get(parts[2], "session:")
+	if !ok {
+		return discardedRecord{}, false
+	}
+	dispatch, ok := get(parts[3], "dispatch:")
+	if !ok {
+		return discardedRecord{}, false
+	}
+	tier, ok := get(parts[4], "tier:")
+	if !ok {
+		return discardedRecord{}, false
+	}
+	if _, ok := tierRank[tier]; !ok {
+		return discardedRecord{}, false
+	}
+	return discardedRecord{ticket: parts[0], identity: evidenceIdentity{source: source, session: session, dispatch: dispatch}, tier: tier, reason: strings.TrimSpace(reason), line: lineNo}, true
+}
+
+// validateDiscarded restricts each parsed record to exactly one otherwise
+// lower-tier token. Records that match zero or several candidates remain
+// visible as warnings and never enter the judge lookup.
+func validateDiscarded(l ledger, tickets []ticket, evidence map[string][]evidenceToken, mappings map[string]map[string]resolvedTier) []string {
+	byID := map[string]ticket{}
+	for _, t := range tickets {
+		byID[t.id] = t
+	}
+	var warnings []string
+	for key, rec := range l.discarded {
+		t, ok := byID[rec.ticket]
+		matches := 0
+		if ok {
+			for _, tok := range evidence[rec.ticket] {
+				if tok.identity != rec.identity || !discardEligible(tok, t, mappings, l) {
+					continue
+				}
+				actual := pickTier(tiersOf(tok.value, mappings[tok.flavor]), t.tier, l.fallback[t.id] != "")
+				if actual == rec.tier {
+					matches++
+				}
+			}
+		}
+		if matches != 1 {
+			delete(l.discarded, key)
+			warnings = append(warnings, fmt.Sprintf("DISCARDED line %d matches %d eligible evidence token(s) — ignored", rec.line, matches))
+		}
+	}
+	return warnings
+}
+
+func discardEligible(tok evidenceToken, t ticket, mappings map[string]map[string]resolvedTier, l ledger) bool {
+	if !tok.identity.usable() || t.tier == "" || t.tier == "n/a" {
+		return false
+	}
+	tiers := tiersOf(tok.value, mappings[tok.flavor])
+	if len(tiers) == 0 {
+		return false
+	}
+	actual := pickTier(tiers, t.tier, l.fallback[t.id] != "")
+	if actual == "fallback" || actual == t.tier || t.tier == "fallback" || tierRank[actual] >= tierRank[t.tier] {
+		return false
+	}
+	for _, rec := range l.escalation[t.id] {
+		if rec.to == actual {
+			return false
+		}
+	}
+	return true
 }
 
 // --- transcript inputs (undocumented harness format; degrade, never fail) ---
@@ -1019,6 +1188,7 @@ type dispatch struct {
 	source      string // transcript layout/source; distinct from model-derived flavor (I111)
 	sourceFile  string // source transcript file (D24, codex only); "" for claude
 	cwd         string // D28 (I047): the event line's own cwd, claude only; "" for codex (D22 scopes it separately)
+	identity    evidenceIdentity
 
 	// teamSpawn marks this record as a claude-team worker spawn (I090) —
 	// see DispatchInfo.TeamSpawn for what an unmatched one means.
@@ -1037,6 +1207,7 @@ type subagent struct {
 	source      string // transcript layout/source; each model derives its own flavor (I111)
 	sourceFile  string // source transcript file (D24, codex only); "" for claude
 	cwd         string // D28 (I047): the subagent transcript's own session cwd, claude only
+	identity    evidenceIdentity
 }
 
 // repoQualifies implements D28's claude-side repo-qualification rule
@@ -1244,6 +1415,7 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, warn
 			for i := range more {
 				more[i].flavor = source
 				more[i].source = source
+				more[i].identity = evidenceIdentity{source: source, session: id, dispatch: more[i].toolUseID}
 			}
 			dispatches = append(dispatches, more...)
 		}
@@ -1260,12 +1432,14 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, warn
 					}
 					if json.Unmarshal(metaRaw, &meta) == nil {
 						a.toolUseID, a.description = meta.ToolUseID, meta.Description
+						a.identity = evidenceIdentity{source: source, session: id, dispatch: meta.ToolUseID}
 					}
 				}
 				more, models, cwd := scanJSONL(sub, warnings)
 				for i := range more {
 					more[i].flavor = source
 					more[i].source = source
+					more[i].identity = evidenceIdentity{source: source, session: id, dispatch: more[i].toolUseID}
 				}
 				a.models = models
 				a.cwd = cwd
