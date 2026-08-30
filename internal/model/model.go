@@ -95,6 +95,9 @@ const (
 	// Override: an on-disk value is present and matches no default this
 	// entry has ever shipped — a deliberate per-repo choice.
 	Override Provenance = "override"
+	// Host: a validated local host pin supplied the final pair. The requested
+	// entry retains its repository provenance in a host-aware resolution trail.
+	Host Provenance = "host"
 )
 
 // Alternate is a cell's owner-tuned alternate (CONTEXT.md "alternate"): the
@@ -485,7 +488,7 @@ type HostStatus string
 
 const (
 	HostUnconfigured HostStatus = "unconfigured"
-	HostConstrained  HostStatus = "constrained"
+	HostReachable    HostStatus = "reachable"
 	HostPinned       HostStatus = "pinned"
 )
 
@@ -560,13 +563,17 @@ func applyHostConfig(requested Entry, path string, config hostconfig.Config) (Re
 	if !ok || !harness.Available {
 		return Resolution{}, fmt.Errorf("host routing configuration %q: harness %q is unavailable", path, requested.Flavor)
 	}
-	trail := HostResolution{ID: config.HostID, Status: HostConstrained, ConfigPath: path}
+	trail := HostResolution{ID: config.HostID, Status: HostReachable, ConfigPath: path}
 	key := requested.Flavor + "." + requested.Tier
 	if pin, pinned := config.Pins[key]; pinned {
 		final := requested
-		final.ID = pin.Model
-		final.Effort = pin.Effort
-		final.Aliases = nil
+		if pin.Model != requested.ID || pin.Effort != requested.Effort {
+			final.ID = pin.Model
+			final.Effort = pin.Effort
+			final.Aliases = nil
+			final.Alternate = nil
+			final.Provenance = Host
+		}
 		trail.Status = HostPinned
 		return Resolution{Entry: final, Requested: requested, Host: trail, Pin: &PinResolution{Model: pin.Model, Effort: pin.Effort, EvidenceRefs: append([]string(nil), pin.EvidenceRefs...)}}, nil
 	}

@@ -62,6 +62,42 @@ func TestHostRoutingCheckReportsInvalidConfigAsD16Error(t *testing.T) {
 	}
 }
 
+func TestHostRoutingCheckSkipsAbsentAndUnavailableHarnesses(t *testing.T) {
+	absent := filepath.Join(t.TempDir(), "routing-host.json")
+	if findings := hostRoutingCheck(t.TempDir(), absent, func(string) (string, error) {
+		t.Fatal("lookup called for absent config")
+		return "", nil
+	}); len(findings) != 0 {
+		t.Fatalf("absent findings = %#v", findings)
+	}
+
+	path := writeDoctorHostConfig(t, `{
+  "schema_version": 1, "host_id": "doctor-host", "harnesses": {
+    "codex": {"available": false, "executable": "codex", "launch_contract_ref": "fleet:codex"}
+  }, "pins": {}}
+`)
+	if findings := hostRoutingCheck(t.TempDir(), path, func(string) (string, error) {
+		t.Fatal("lookup called for unavailable harness")
+		return "", nil
+	}); len(findings) != 0 {
+		t.Fatalf("unavailable findings = %#v", findings)
+	}
+}
+
+func TestHostRoutingCheckIdenticalPinSuppressesOnlyMatchingPreferenceWarning(t *testing.T) {
+	path := writeDoctorHostConfig(t, `{
+  "schema_version": 1, "host_id": "doctor-host", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:codex", "models": {"gpt-5.6-sol": {"efforts": ["xhigh"]}}}
+  }, "pins": {"codex.primary": {"model": "gpt-5.6-sol", "effort": "xhigh"}}}
+`)
+	findings := hostRoutingCheck(t.TempDir(), path, func(string) (string, error) { return "/bin/codex", nil })
+	for _, finding := range findings {
+		if strings.Contains(finding.Message, "codex.primary") {
+			t.Fatalf("identical pin finding = %#v", finding)
+		}
+	}
+}
+
 func TestHostRoutingCheckUsesLexicalAvailableHarnessOrderWithParallelExplicitPaths(t *testing.T) {
 	for _, hostID := range []string{"alpha", "beta"} {
 		hostID := hostID

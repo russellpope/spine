@@ -239,11 +239,6 @@ func tokenValues(tokens []evidenceToken) []string {
 type Options struct {
 	RepoDir              string
 	ClaudeTranscriptsDir string
-	// HostConfigPath and HostExecutableLookup are private-equivalent argument
-	// seams exposed on Options for race-safe tests. Empty values select the
-	// one production local path and exec.LookPath.
-	HostConfigPath       string
-	HostExecutableLookup func(string) (string, error)
 	// ClaudeTranscriptsDirs is the default-discovery union. When non-empty it
 	// supersedes ClaudeTranscriptsDir; the singular field remains the explicit
 	// --transcripts and backwards-compatible public Run seam.
@@ -280,7 +275,11 @@ type Options struct {
 // Warnings; the only errors are a repo without docs/issues and the D14
 // version-gate refusal (see the package comment).
 func Run(opts Options) (Report, error) {
-	if err := preflightHostConfig(opts); err != nil {
+	return runWithHostPath(opts, "", nil)
+}
+
+func runWithHostPath(opts Options, hostPath string, lookup func(string) (string, error)) (Report, error) {
+	if err := preflightHostConfig(hostPath, lookup); err != nil {
 		return Report{}, err
 	}
 	repoDir := opts.RepoDir
@@ -559,8 +558,7 @@ func Run(opts Options) (Report, error) {
 // executable availability, and exact pins before any transcript work. It
 // intentionally does not infer reachability for unpinned preferences or
 // alter any preference-only audit mapping; those are I074 concerns.
-func preflightHostConfig(opts Options) error {
-	path := opts.HostConfigPath
+func preflightHostConfig(path string, lookup func(string) (string, error)) error {
 	if path == "" {
 		var err error
 		path, err = hostconfig.DefaultPath()
@@ -568,7 +566,6 @@ func preflightHostConfig(opts Options) error {
 			return err
 		}
 	}
-	lookup := opts.HostExecutableLookup
 	if lookup == nil {
 		lookup = exec.LookPath
 	}

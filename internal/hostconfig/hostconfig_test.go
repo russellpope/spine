@@ -195,6 +195,98 @@ func TestLoadAllowsEqualRoutesInDifferentHarnessesAndOnlyLooksUpExecutables(t *t
 	}
 }
 
+func TestLoadRejectsPathBearingExecutablesBeforeLookup(t *testing.T) {
+	for _, executable := range []string{
+		filepath.Join(string(filepath.Separator), "bin", "sh"),
+		"." + string(filepath.Separator) + "tool",
+	} {
+		t.Run(executable, func(t *testing.T) {
+			path := writeConfig(t, `{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": true, "executable": "`+executable+`", "launch_contract_ref": "fleet:1", "models": {"m": {"efforts": ["high"]}}}
+  }, "pins": {}}
+`)
+			lookups := 0
+			_, err := Load(path, []string{"claude"}, func(string) (string, error) {
+				lookups++
+				return "/bin/tool", nil
+			})
+			if err == nil {
+				t.Fatal("Load() accepted a path-bearing executable")
+			}
+			if lookups != 0 {
+				t.Fatalf("lookup calls = %d, want 0", lookups)
+			}
+			if strings.Contains(err.Error(), executable) {
+				t.Fatalf("Load() diagnostic leaked executable value: %q", err)
+			}
+		})
+	}
+}
+
+func TestLoadUsesInjectedLookupForBareExecutableName(t *testing.T) {
+	path := writeConfig(t, `{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:1", "models": {"m": {"efforts": ["high"]}}}
+  }, "pins": {}}
+`)
+	var got []string
+	if _, err := Load(path, []string{"claude"}, func(name string) (string, error) {
+		got = append(got, name)
+		return "/bin/claude", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"claude"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("lookup names = %q, want %q", got, want)
+	}
+}
+
+func TestLoadAllowsUnavailableHarnessWithoutModelsAndSkipsLookup(t *testing.T) {
+	path := writeConfig(t, `{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": false, "executable": "claude", "launch_contract_ref": "fleet:1"}
+  }, "pins": {}}
+`)
+	lookups := 0
+	config, err := Load(path, []string{"claude"}, func(string) (string, error) {
+		lookups++
+		return "/bin/claude", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Harnesses["claude"].Available || config.Harnesses["claude"].Models == nil || len(config.Harnesses["claude"].Models) != 0 {
+		t.Fatalf("unavailable harness = %#v", config.Harnesses["claude"])
+	}
+	if lookups != 0 {
+		t.Fatalf("lookup calls = %d, want 0", lookups)
+	}
+}
+
+func TestLoadRejectsPathBearingExecutableForUnavailableHarnessBeforeLookup(t *testing.T) {
+	executable := "." + string(filepath.Separator) + "tool"
+	path := writeConfig(t, `{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": false, "executable": "`+executable+`", "launch_contract_ref": "fleet:1"}
+  }, "pins": {}}
+`)
+	lookups := 0
+	_, err := Load(path, []string{"claude"}, func(string) (string, error) {
+		lookups++
+		return "/bin/tool", nil
+	})
+	if err == nil {
+		t.Fatal("Load() accepted a path-bearing executable for an unavailable harness")
+	}
+	if lookups != 0 {
+		t.Fatalf("lookup calls = %d, want 0", lookups)
+	}
+	if strings.Contains(err.Error(), executable) {
+		t.Fatalf("Load() diagnostic leaked executable value: %q", err)
+	}
+}
+
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "routing-host.json")

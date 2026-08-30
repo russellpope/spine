@@ -880,7 +880,7 @@ func cmdAuditRoutingWithHostPathAndDefaults(args []string, stdout, stderr io.Wri
 		fmt.Fprintln(stderr, "audit routing:", err)
 		return 2
 	}
-	auditOpts := audit.Options{RepoDir: *dir, Since: *since, Session: *session, HostConfigPath: hostPath, HostExecutableLookup: lookup}
+	auditOpts := audit.Options{RepoDir: *dir, Since: *since, Session: *session}
 	if *transcripts == "" {
 		derived, err := defaultTranscriptsDirs(*dir)
 		if err != nil {

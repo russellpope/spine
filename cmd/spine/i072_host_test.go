@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,7 @@ func TestModelHostOutputUsesFinalPairAndExposesTrail(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded["id"] != "host-safe" || decoded["effort"] != "high" || decoded["provenance"] != "override" {
+	if decoded["id"] != "host-safe" || decoded["effort"] != "high" || decoded["provenance"] != "host" {
 		t.Fatalf("old JSON fields = %#v", decoded)
 	}
 	requested, _ := decoded["requested"].(map[string]any)
@@ -43,6 +44,71 @@ func TestModelHostOutputUsesFinalPairAndExposesTrail(t *testing.T) {
 	}
 }
 
+func TestModelHostIdenticalPinPreservesFinalEntryMetadata(t *testing.T) {
+	path := writeModelHostConfig(t, `{
+  "schema_version": 1, "host_id": "cli-host", "harnesses": {
+    "pi": {"available": true, "executable": "pi", "launch_contract_ref": "fleet:test", "models": {"qwen3.8-27b-q8_0": {"efforts": ["medium"]}}}
+  }, "pins": {"pi.routine": {"model": "qwen3.8-27b-q8_0", "effort": "medium"}}
+}`)
+	code, out, errs := runModelWithHostPath(t, path, "--json", "pi", "routine")
+	if code != 0 || errs != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	aliases, _ := decoded["aliases"].([]any)
+	alternate, _ := decoded["alternate"].(map[string]any)
+	if len(aliases) != 2 || alternate == nil || decoded["provenance"] != "default" {
+		t.Fatalf("identical pinned final metadata = %#v", decoded)
+	}
+	if strings.Join([]string{aliases[0].(string), aliases[1].(string)}, ",") != "qwen3.8,qwen" || alternate["id"] != "qwen3.8-27b-q8_0" || alternate["effort"] != "xhigh" {
+		t.Fatalf("identical pinned final metadata = %#v", decoded)
+	}
+}
+
+func TestModelHostDivergentPinDoesNotCarryRequestedMetadata(t *testing.T) {
+	path := writeModelHostConfig(t, `{
+  "schema_version": 1, "host_id": "cli-host", "harnesses": {
+    "pi": {"available": true, "executable": "pi", "launch_contract_ref": "fleet:test", "models": {"qwen3.8-27b-q8_0": {"efforts": ["medium"]}, "host-safe": {"efforts": ["high"]}}}
+  }, "pins": {"pi.routine": {"model": "host-safe", "effort": "high"}}
+}`)
+	code, out, errs := runModelWithHostPath(t, path, "--json", "pi", "routine")
+	if code != 0 || errs != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	aliases, _ := decoded["aliases"].([]any)
+	requested, _ := decoded["requested"].(map[string]any)
+	if decoded["id"] != "host-safe" || decoded["effort"] != "high" || decoded["provenance"] != "host" || len(aliases) != 0 || decoded["alternate"] != nil || requested["id"] != "qwen3.8-27b-q8_0" || requested["provenance"] != "default" {
+		t.Fatalf("divergent pinned metadata = %#v", decoded)
+	}
+}
+
+func TestModelHostNoPinUsesReachableStatus(t *testing.T) {
+	path := writeModelHostConfig(t, `{
+  "schema_version": 1, "host_id": "cli-host", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"gpt-5.6-sol": {"efforts": ["xhigh"]}}}
+  }, "pins": {}}
+`)
+	code, out, errs := runModelWithHostPath(t, path, "--json", "codex", "primary")
+	if code != 0 || errs != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	host, _ := decoded["host"].(map[string]any)
+	if host["status"] != "reachable" {
+		t.Fatalf("host status = %#v, want reachable", host)
+	}
+}
+
 func TestModelHostConfigFailureWritesNoStandardOutput(t *testing.T) {
 	path := writeModelHostConfig(t, `{"schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:test","models":{"m":{"efforts":["high"],"token":"secret"}}}},"pins":{}}`)
 	for _, args := range [][]string{{"codex", "primary"}, {"--effort", "codex", "primary"}, {"--json", "codex", "primary"}} {
@@ -50,6 +116,30 @@ func TestModelHostConfigFailureWritesNoStandardOutput(t *testing.T) {
 		if code != 2 || out != "" || !strings.Contains(errs, "host routing configuration") || strings.Count(errs, "\n") != 1 {
 			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, out, errs)
 		}
+	}
+}
+
+func TestModelHostFailureClassesRejectEveryOutputMode(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config string
+		lookup func(string) (string, error)
+	}{
+		{"malformed config", `{"schema_version":`, func(string) (string, error) { return "/bin/tool", nil }},
+		{"unavailable harness", `{"schema_version":1,"host_id":"host","harnesses":{"codex":{"available":false,"executable":"codex","launch_contract_ref":"fleet:test"}},"pins":{}}`, func(string) (string, error) { return "/bin/tool", nil }},
+		{"missing executable", `{"schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:test","models":{"gpt-5.6-sol":{"efforts":["xhigh"]}}}},"pins":{}}`, func(string) (string, error) { return "", errors.New("not found") }},
+		{"unreachable preference", `{"schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:test","models":{"other":{"efforts":["high"]}}}},"pins":{}}`, func(string) (string, error) { return "/bin/tool", nil }},
+		{"unreachable pin", `{"schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:test","models":{"gpt-5.6-sol":{"efforts":["xhigh"]}}}},"pins":{"codex.primary":{"model":"other","effort":"high"}}}`, func(string) (string, error) { return "/bin/tool", nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeModelHostConfig(t, tc.config)
+			for _, args := range [][]string{{"codex", "primary"}, {"--effort", "codex", "primary"}, {"--json", "codex", "primary"}} {
+				code, out, errs := runModelWithHostPathAndLookup(t, path, tc.lookup, args...)
+				if code != 2 || out != "" || !strings.Contains(errs, "host routing configuration") || strings.Count(errs, "\n") != 1 {
+					t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, out, errs)
+				}
+			}
+		})
 	}
 }
 
@@ -178,9 +268,13 @@ func TestModelValidateHostCommandMatrix(t *testing.T) {
 }
 
 func runModelWithHostPath(t *testing.T, hostPath string, args ...string) (int, string, string) {
+	return runModelWithHostPathAndLookup(t, hostPath, func(string) (string, error) { return "/bin/tool", nil }, args...)
+}
+
+func runModelWithHostPathAndLookup(t *testing.T, hostPath string, lookup func(string) (string, error), args ...string) (int, string, string) {
 	t.Helper()
 	var out, errs bytes.Buffer
-	code := cmdModelWithHostPath(args, &out, &errs, hostPath, func(string) (string, error) { return "/bin/tool", nil })
+	code := cmdModelWithHostPath(args, &out, &errs, hostPath, lookup)
 	return code, out.String(), errs.String()
 }
 

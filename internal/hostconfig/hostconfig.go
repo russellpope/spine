@@ -162,8 +162,14 @@ func validate(raw rawConfig, flavors []string) (Config, error) {
 		if !safeString(*rawHarness.Executable) || !safeString(*rawHarness.LaunchContractRef) {
 			return Config{}, fmt.Errorf("harness has an empty or unsafe reference")
 		}
+		if !bareExecutableName(*rawHarness.Executable) {
+			return Config{}, fmt.Errorf("harness executable must be a bare name")
+		}
 		if *rawHarness.Available && len(rawHarness.Models) == 0 {
 			return Config{}, fmt.Errorf("available harness must declare models")
+		}
+		if !*rawHarness.Available && len(rawHarness.Models) != 0 {
+			return Config{}, fmt.Errorf("unavailable harness must not declare models")
 		}
 		h := Harness{Available: *rawHarness.Available, Executable: *rawHarness.Executable, LaunchContractRef: *rawHarness.LaunchContractRef, Models: make(map[string]ModelRoute, len(rawHarness.Models))}
 		for modelID, rawRoute := range rawHarness.Models {
@@ -238,6 +244,10 @@ func validateExecutables(config Config, lookup func(string) (string, error)) err
 	return nil
 }
 
+func bareExecutableName(value string) bool {
+	return value != "." && value != ".." && !filepath.IsAbs(value) && filepath.Base(value) == value
+}
+
 func validateUniqueStrings(values []string, field string) error {
 	seen := map[string]struct{}{}
 	for _, value := range values {
@@ -296,12 +306,26 @@ func validateClosedSchema(raw []byte) error {
 		if err != nil {
 			return err
 		}
-		if err := schemaMembers(harness, []string{"available", "executable", "launch_contract_ref", "models"}, nil, "harness"); err != nil {
+		if err := schemaMembers(harness, []string{"available", "executable", "launch_contract_ref"}, []string{"models"}, "harness"); err != nil {
 			return err
 		}
-		models, err := schemaObject(harness["models"], "models")
+		var available bool
+		if err := json.Unmarshal(harness["available"], &available); err != nil {
+			return fmt.Errorf("available must be a boolean")
+		}
+		modelsRaw, present := harness["models"]
+		if available && !present {
+			return fmt.Errorf("harness is missing a typed member")
+		}
+		if !present {
+			continue
+		}
+		models, err := schemaObject(modelsRaw, "models")
 		if err != nil {
 			return err
+		}
+		if !available && len(models) != 0 {
+			return fmt.Errorf("unavailable harness must not declare models")
 		}
 		for _, routeRaw := range models {
 			route, err := schemaObject(routeRaw, "model route")
