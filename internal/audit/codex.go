@@ -62,6 +62,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/russellpope/spine/internal/ticketref"
 )
 
 // codexTeamSpawnStartRe matches a team spawn "start" command — herdr agent
@@ -739,7 +741,7 @@ func firstLineTicketMatches(text string, tokens []string) []string {
 		if tok == "" || seen[tok] {
 			continue
 		}
-		if containsToken(upper, strings.ToUpper(tok)) {
+		if ticketref.Contains(upper, strings.ToUpper(tok)) {
 			seen[tok] = true
 			matches = append(matches, tok)
 		}

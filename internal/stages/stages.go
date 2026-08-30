@@ -112,6 +112,7 @@ import (
 	"github.com/russellpope/spine/internal/acceptance"
 	"github.com/russellpope/spine/internal/cursor"
 	"github.com/russellpope/spine/internal/handoff"
+	"github.com/russellpope/spine/internal/ticketref"
 )
 
 // Verdict classifies one stage row's derivation outcome.
@@ -567,9 +568,6 @@ func frontmatterID(content string) string {
 	return ""
 }
 
-var ticketIDRe = regexp.MustCompile(`^I\d+$`)
-var ticketRangeRe = regexp.MustCompile(`^I(\d+)-I(\d+)$`)
-
 // resolveTicketIDs parses the cursor's tickets: value into the concrete set
 // of ticket ids it anchors. Four grammar forms resolve (see package doc and
 // cursor.Grammar, I026, I114): a bare single-ticket id "I0NN" (resolves to
@@ -605,30 +603,24 @@ func resolveTicketIDs(dir, raw string) ([]string, bool) {
 		sort.Strings(out)
 		return out, true
 	}
-	if ticketIDRe.MatchString(raw) {
+	if ticketref.IsID(raw) {
 		return []string{raw}, true
 	}
 	if strings.Contains(raw, ",") {
 		ids := strings.Split(raw, ",")
 		seen := make(map[string]bool, len(ids))
 		for _, id := range ids {
-			if !ticketIDRe.MatchString(id) || seen[id] {
+			if !ticketref.IsID(id) || seen[id] {
 				return nil, false
 			}
 			seen[id] = true
 		}
 		return ids, true
 	}
-	m := ticketRangeRe.FindStringSubmatch(raw)
-	if m == nil || len(m[1]) != len(m[2]) {
+	start, end, width, ok := ticketref.Range(raw)
+	if !ok {
 		return nil, false
 	}
-	start, err1 := strconv.Atoi(m[1])
-	end, err2 := strconv.Atoi(m[2])
-	if err1 != nil || err2 != nil || start > end {
-		return nil, false
-	}
-	width := len(m[1])
 	out := make([]string, 0, end-start+1)
 	for n := start; n <= end; n++ {
 		out = append(out, fmt.Sprintf("I%0*d", width, n))

@@ -116,6 +116,7 @@ import (
 
 	"github.com/russellpope/spine/internal/hostconfig"
 	"github.com/russellpope/spine/internal/model"
+	"github.com/russellpope/spine/internal/ticketref"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
 )
@@ -424,7 +425,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 		if d.source == "codex" {
 			desc, prompt = strings.ToUpper(desc), strings.ToUpper(prompt)
 		}
-		if !(containsToken(desc, id) || containsToken(prompt, id)) {
+		if !(ticketref.Contains(desc, id) || ticketref.Contains(prompt, id)) {
 			return false
 		}
 		// D28 (ticket I047): a claude dispatch claims the ticket only if it
@@ -477,7 +478,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 			if a.source == "codex" {
 				desc = strings.ToUpper(desc)
 			}
-			use := containsToken(desc, t.id)
+			use := ticketref.Contains(desc, t.id)
 			// D28: the same repo qualification a dispatch needs applies to a
 			// subagent's own description carrying the ticket token directly
 			// (meta.json's description typically mirrors its parent
@@ -586,7 +587,7 @@ func nearMissDetail(nms []codexNearMiss, id string) (string, bool) {
 	var parts []string
 	seen := map[string]bool{}
 	for _, nm := range nms {
-		if !containsToken(strings.ToUpper(nm.text), id) {
+		if !ticketref.Contains(strings.ToUpper(nm.text), id) {
 			continue
 		}
 		key := nm.reason + "|" + nm.file
