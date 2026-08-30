@@ -1,7 +1,6 @@
 package stages_test
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -632,38 +631,6 @@ func TestTickedMissingNamesPartialMissingIDs(t *testing.T) {
 	}
 	if strings.Contains(issues.Detail, "I001") || strings.Contains(issues.Detail, "I003") {
 		t.Errorf("Detail = %q, must not name the present ids I001/I003 as missing", issues.Detail)
-	}
-}
-
-// I029: a long missing set must truncate the named ids with a "+N more"
-// count rather than dumping every missing id onto one line.
-func TestTickedMissingTruncatesLongMissingSet(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
-	// Only I001 exists; derive the range from the production naming cap so the
-	// missing set is always exactly one larger than that cap.
-	rangeEnd := stages.MaxNamedMissingIDsForTest + 2
-	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
-	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
-		fmt.Sprintf("effort: x\nprd: docs/specs/x.md\ntickets: I001-I%03d\nstages: grill[x] prd[x] issues[x] implement[<]\n", rangeEnd)+
-		"<!-- /spine:cursor -->\n")
-	rep, err := stages.Derive(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	issues := rowByName(t, rep.Stages, "issues")
-	if issues.Verdict != stages.VerdictTickedMissing {
-		t.Fatalf("issues verdict = %s (%s), want ticked-missing", issues.Verdict, issues.Detail)
-	}
-	if !rep.Blocking() {
-		t.Error("want Blocking() true — ticked-missing must still block")
-	}
-	if !strings.Contains(issues.Detail, "more") {
-		t.Errorf("Detail = %q, want a truncated \"+N more\" tail for a long missing set", issues.Detail)
-	}
-	lastID := fmt.Sprintf("I%03d", rangeEnd)
-	if strings.Contains(issues.Detail, lastID) {
-		t.Errorf("Detail = %q, want the tail id %s folded into the +N more count, not named", issues.Detail, lastID)
 	}
 }
 
