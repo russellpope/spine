@@ -489,8 +489,8 @@ func Run(opts Options) (Report, error) {
 				if use {
 					break
 				}
-				if d.source == "claude" && a.source == "claude" {
-					use = d.identity.usable() && d.identity == a.identity && matches(d, t.id)
+				if d.source == "claude" {
+					use = a.source == "claude" && d.identity.usable() && d.identity == a.identity && matches(d, t.id)
 				} else {
 					use = d.toolUseID != "" && d.toolUseID == a.toolUseID && matches(d, t.id)
 				}
@@ -1140,7 +1140,7 @@ func parseDiscarded(line string, lineNo int) (discardedRecord, bool) {
 	}
 	get := func(part, name string) (string, bool) {
 		value, ok := strings.CutPrefix(part, name)
-		return value, ok && value != "" && !strings.ContainsAny(value, " \t\"")
+		return value, ok && value != "" && !strings.ContainsAny(value, " \t\"'")
 	}
 	source, ok := get(parts[1], "source:")
 	if !ok || (source != "claude" && source != "codex") {
