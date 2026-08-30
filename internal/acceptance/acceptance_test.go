@@ -116,6 +116,24 @@ func TestScanTicketRejectsAmbiguousStructuralMarkers(t *testing.T) {
 	}
 }
 
+func TestI050Rereview2DamagedMultipleMarkerUsesContractOrder(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/reviews/2026-08-29-ok.md", "# Approval\n")
+	line := "- [ ]  -- APPROVED-UNTESTED 2026-02-30 by owner ref: docs/reviews/2026-08-29-ok.md#a reason: why -- APPROVED-UNTESTED 2026-08-30 by other ref: docs/reviews/2026-08-29-ok.md#b reason: second"
+	path := writeTicket(t, dir, "I312-contract-order.md", "I312", "open", "## Acceptance criteria\n"+line+"\n")
+
+	got := ScanTicket(dir, path)
+	want := []string{
+		"criterion is required",
+		"record must contain exactly one ` -- APPROVED-UNTESTED ` structural marker",
+		"date must be a real YYYY-MM-DD date",
+	}
+	if got.ValidCount() != 0 || got.InvalidCount() != 1 || got.CandidateCount() != 1 ||
+		!slicesEqual(got.Problems[0].Failed, want) {
+		t.Fatalf("damaged multiple-marker contract order:\n got %#v\nwant %#v", got.Problems, want)
+	}
+}
+
 func TestScanTicketRejectsCheckboxAndSectionDamage(t *testing.T) {
 	dir := ticketRepo(t)
 	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")

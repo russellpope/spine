@@ -1359,6 +1359,25 @@ func TestDoctorAndAuditUseStructuralAcceptanceMarker(t *testing.T) {
 	}
 }
 
+func TestDoctorAndAuditPinDamagedMultipleMarkerContractOrder(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	line := "- [ ]  -- APPROVED-UNTESTED 2026-02-30 by owner ref: docs/handoffs/2026-08-29-approval.md#a reason: why -- APPROVED-UNTESTED 2026-08-30 by other ref: docs/handoffs/2026-08-29-approval.md#b reason: second"
+	writeAuditAcceptanceTicket(t, dir, "I001-contract-order.md", "I001", line)
+	const problem = "line 6: invalid APPROVED-UNTESTED record: criterion is required; record must contain exactly one ` -- APPROVED-UNTESTED ` structural marker; date must be a real YYYY-MM-DD date"
+
+	code, out, errs := runCmd(t, "doctor", "--dir", dir)
+	const doctorLine = "D15 warn  docs/issues/I001-contract-order.md: " + problem
+	if code != 1 || errs != "" || strings.Count(out, doctorLine) != 1 {
+		t.Fatalf("doctor contract order: code=%d out=%q stderr=%q, want one %q", code, out, errs, doctorLine)
+	}
+
+	code, out, errs = runCmd(t, "audit", "stages", "--dir", dir)
+	const auditLine = "warning: docs/issues/I001-contract-order.md: " + problem + "\n"
+	if code != 0 || !strings.Contains(out, "acceptance: approved-untested=0 invalid=1\n") || errs != auditLine {
+		t.Fatalf("audit contract order: code=%d out=%q stderr=%q, want stderr=%q", code, out, errs, auditLine)
+	}
+}
+
 func TestCompiledCLIUsesStructuralAcceptanceMarker(t *testing.T) {
 	dir := auditAcceptanceRepo(t, "I001")
 	line := "- [ ] Document APPROVED-UNTESTED semantics -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/handoffs/2026-08-29-approval.md#a reason: why"
@@ -1377,6 +1396,20 @@ func TestCompiledCLIUsesStructuralAcceptanceMarker(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "acceptance: approved-untested=0 invalid=1\n") ||
 		!strings.Contains(errs, "record must contain exactly one ` -- APPROVED-UNTESTED ` structural marker") {
 		t.Fatalf("compiled ambiguous marker: code=%d out=%q stderr=%q", code, out, errs)
+	}
+
+	damaged := "- [ ]  -- APPROVED-UNTESTED 2026-02-30 by owner ref: docs/handoffs/2026-08-29-approval.md#a reason: why -- APPROVED-UNTESTED 2026-08-30 by other ref: docs/handoffs/2026-08-29-approval.md#b reason: second"
+	writeAuditAcceptanceTicket(t, dir, "I001-structural.md", "I001", damaged)
+	const problem = "line 6: invalid APPROVED-UNTESTED record: criterion is required; record must contain exactly one ` -- APPROVED-UNTESTED ` structural marker; date must be a real YYYY-MM-DD date"
+	code, out, errs = runCompiledSpine(t, bin, dir, "doctor", "--dir", ".")
+	const doctorLine = "D15 warn  docs/issues/I001-structural.md: " + problem
+	if code != 1 || errs != "" || strings.Count(out, doctorLine) != 1 {
+		t.Fatalf("compiled damaged doctor: code=%d out=%q stderr=%q, want one %q", code, out, errs, doctorLine)
+	}
+	code, out, errs = runCompiledSpine(t, bin, dir, "audit", "stages", "--dir", ".")
+	const auditLine = "warning: docs/issues/I001-structural.md: " + problem + "\n"
+	if code != 0 || !strings.Contains(out, "acceptance: approved-untested=0 invalid=1\n") || errs != auditLine {
+		t.Fatalf("compiled damaged audit: code=%d out=%q stderr=%q, want stderr=%q", code, out, errs, auditLine)
 	}
 }
 

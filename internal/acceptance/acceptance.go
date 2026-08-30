@@ -257,9 +257,6 @@ func parseLine(repoRoot, ticketPath string, lineNo int, line string, inAcceptanc
 	if !strings.HasPrefix(line, "- [ ] ") {
 		failed = append(failed, "record must start at column 0 with the exact - [ ] prefix")
 	}
-	if structuralCount > 1 {
-		failed = append(failed, "record must contain exactly one ` -- APPROVED-UNTESTED ` structural marker")
-	}
 	criterionText := beforeMarker
 	if checkboxEnd := strings.Index(criterionText, "]"); checkboxEnd >= 0 {
 		criterionText = criterionText[checkboxEnd+1:]
@@ -273,6 +270,9 @@ func parseLine(repoRoot, ticketPath string, lineNo int, line string, inAcceptanc
 	record.Criterion = strings.Trim(criterionText, " \t")
 	if record.Criterion == "" {
 		failed = append(failed, "criterion is required")
+	}
+	if structuralCount > 1 {
+		failed = append(failed, "record must contain exactly one ` -- APPROVED-UNTESTED ` structural marker")
 	}
 	if !hasSeparator {
 		failed = append(failed, "criterion and marker must be separated by exact ` -- ` bytes")
