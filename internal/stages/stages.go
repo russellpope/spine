@@ -291,7 +291,7 @@ func deriveStages(dir string, c cursor.Cursor) ([]StageRow, []string) {
 		case "issues":
 			verdict, detail = judgeSet(s.State, issuesPresent, ids, c.Tickets, false, "ticket file(s)")
 		case "implement":
-			verdict, detail = judgeSet(s.State, implPresent, ids, c.Tickets, implAnchored, "ledger implement evidence")
+			verdict, detail = judgeSet(s.State, implPresent, ids, "", implAnchored, "ledger implement evidence")
 		default:
 			verdict, detail = VerdictNotJudged, "no derivation rule for stage \""+s.Name+"\""
 		}

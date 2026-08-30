@@ -556,11 +556,11 @@ func TestTickedMissingNamesPartialMissingIDs(t *testing.T) {
 func TestTickedMissingTruncatesLongMissingSet(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
-	// Only I004 exists; the range I001-I007 resolves to 7 ids, so 6 are
-	// missing — enough to exceed the naming cap and trigger "+N more".
+	// Only I004 exists; the much larger range keeps this fixture independent
+	// of ordinary changes to maxNamedMissingIDs while still exceeding the cap.
 	writeFile(t, dir, "docs/issues/I004-d.md", "---\nid: I004\n---\nx\n")
 	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
-		"effort: x\nprd: docs/specs/x.md\ntickets: I001-I007\nstages: grill[x] prd[x] issues[x] implement[<]\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I001-I100\nstages: grill[x] prd[x] issues[x] implement[<]\n"+
 		"<!-- /spine:cursor -->\n")
 	rep, err := stages.Derive(dir)
 	if err != nil {
@@ -576,7 +576,7 @@ func TestTickedMissingTruncatesLongMissingSet(t *testing.T) {
 	if !strings.Contains(issues.Detail, "more") {
 		t.Errorf("Detail = %q, want a truncated \"+N more\" tail for a long missing set", issues.Detail)
 	}
-	if strings.Contains(issues.Detail, "I007") {
+	if strings.Contains(issues.Detail, "I100") {
 		t.Errorf("Detail = %q, want the tail id folded into the +N more count, not named", issues.Detail)
 	}
 }
@@ -638,10 +638,32 @@ func TestImplementAllMissingWithAnchoredLinesNamesDoneWordRule(t *testing.T) {
 	}
 }
 
-// I117 negative control: with no ledger line for the id at all, the I032
-// typo hint stands verbatim — proving the anchored/absent split is
-// load-bearing.
-func TestImplementAllMissingNoAnchoredLinesKeepsTypoHint(t *testing.T) {
+// I032: the all-missing tickets typo hint belongs to the issues row, not the
+// implement row, whose missing evidence is in the ledger rather than ticket
+// files.
+func TestImplementAllMissingDoesNotMentionTicketsTypo(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement, functional-test]\n")
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
+		"effort: x\nprd: docs/specs/x.md\ntickets: I001\nstages: grill[x] prd[x] issues[x] implement[x] functional-test[<]\n"+
+		"<!-- /spine:cursor -->\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	impl := rowByName(t, rep.Stages, "implement")
+	if impl.Verdict != stages.VerdictTickedMissing {
+		t.Fatalf("implement verdict = %s (%s), want ticked-missing", impl.Verdict, impl.Detail)
+	}
+	if strings.Contains(impl.Detail, "tickets:") || strings.Contains(impl.Detail, "typo") {
+		t.Errorf("implement detail = %q, want the tickets typo hint scoped to issues", impl.Detail)
+	}
+}
+
+// I032 supersedes I117's negative control: with no ledger line for the id at
+// all, the implement row still must not receive the issues-row typo hint.
+func TestImplementAllMissingNoAnchoredLinesSuppressesTypoHint(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement, functional-test]\n")
 	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
@@ -656,11 +678,11 @@ func TestImplementAllMissingNoAnchoredLinesKeepsTypoHint(t *testing.T) {
 	if impl.Verdict != stages.VerdictTickedMissing {
 		t.Fatalf("implement verdict = %s (%s), want ticked-missing", impl.Verdict, impl.Detail)
 	}
-	if !strings.Contains(impl.Detail, "typo") {
-		t.Errorf("Detail = %q, want the typo hint for a fully-absent id", impl.Detail)
+	if strings.Contains(impl.Detail, "typo") {
+		t.Errorf("Detail = %q, want the typo hint scoped to the issues row", impl.Detail)
 	}
-	if strings.Contains(impl.Detail, "as a whole word") {
-		t.Errorf("Detail = %q, want no done-word message when no line anchors the id", impl.Detail)
+	if strings.Contains(impl.Detail, "tickets:") {
+		t.Errorf("Detail = %q, want no tickets hint on the implement row", impl.Detail)
 	}
 }
 
