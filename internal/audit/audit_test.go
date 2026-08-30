@@ -171,6 +171,39 @@ func TestDiscardedClaudeLinkedDispatchIdentityIncludesSource(t *testing.T) {
 	}
 }
 
+// Direct Codex dispatches retain their documented root-thread linkage only to
+// Codex spawned-thread actuals. A Claude sidecar with the same coarse id must
+// not suppress or replace that direct dispatch evidence.
+func TestDiscardedCodexLinkedDispatchIdentityIncludesSource(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+	if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(
+		"DISCARDED I078 source:codex session:root-1 dispatch:call_discard tier:routine reason: prototype was discarded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codexDir := t.TempDir()
+	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+		codexSessionMetaLine("root-1", "root-1", "", repo, "user", topLevelSource),
+		codexFunctionCallLineWithID("spawn_agent", "call_discard", map[string]string{
+			"task_name": "I078 prototype", "model": "gpt-5.6-terra",
+		}),
+	)
+	transcripts := t.TempDir()
+	writeOrphanSubagent(t, transcripts, "other", "same-id", "codex:root-1", repo, "unrelated worker", "claude-sonnet-5")
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts, CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I078"]
+	if row.Verdict != VerdictDiscardedWithReason || rep.Blocking() {
+		t.Fatalf("I078 = %s (%s), blocking=%v; cross-source Codex root must not link", row.Verdict, row.Detail, rep.Blocking())
+	}
+}
+
 func TestDiscardedQuotedIdentityFieldsAreMalformed(t *testing.T) {
 	for _, record := range []string{
 		`DISCARDED I078 source:claude session:"prototype" dispatch:toolu_1 tier:routine reason: quoted session`,
