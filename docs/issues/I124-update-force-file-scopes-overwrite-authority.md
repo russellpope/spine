@@ -30,3 +30,5 @@ atomic writes stay unchanged.
 ## Related
 
 - I093 item 4. Owner selected additive scoped forcing on 2026-08-30.
+- Accepted design and implementation plan: `docs/specs/2026-08-30-i124-update-force-file-authority-design.md` and `docs/specs/2026-08-30-i124-update-force-file-authority-plan.md`.
+- Round-2 ruling: implementation and closure are already owner-authorized; close after the plan's primary review, independent verification, ticket evidence, and exact-SHA lane gates, unless a genuine contradiction or out-of-scope expansion requires a stop.

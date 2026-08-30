@@ -30,3 +30,5 @@ missing configuration does not become an implicit disable.
 ## Related
 
 - I093 item 3. Owner selected the pre-write advisory option on 2026-08-30.
+- Accepted design and implementation plan: `docs/specs/2026-08-30-i123-update-gate-config-advisory-design.md` and `docs/specs/2026-08-30-i123-update-gate-config-advisory-plan.md`.
+- Round-2 ruling: implementation and closure are already owner-authorized; close after the plan's review, independent verification, ticket evidence, and exact-SHA lane gates, unless a genuine contradiction or out-of-scope expansion requires a stop.
