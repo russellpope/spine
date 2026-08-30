@@ -11,8 +11,10 @@ mirrors or updates host-dependent.
 **Architecture:** `internal/hostconfig` owns parsing, default-path lookup, and
 closed-schema validation. `internal/model` retains `Resolve` for estate plus
 repository preference and adds a host-aware result carrying requested and
-final pairs. The CLI, doctor, and audit consume that shared result. Update and
-template rendering stay deliberately outside the host-aware call path.
+final pairs. `model validate` validates its strict I051 repository route and
+then consumes that same host result. Doctor checks declared available
+harnesses deterministically. Audit performs structural config preflight only.
+Update and template rendering stay outside every host-aware call path.
 
 **Tech stack:** Go standard library only. JSON uses `encoding/json`; default
 path uses `os.UserConfigDir`; executable presence uses an injected
@@ -31,8 +33,11 @@ path uses `os.UserConfigDir`; executable presence uses an injected
   first; otherwise record the actual allocation in the implementation report,
   ticket, tests, and changelog.
 - Read the local config only from `os.UserConfigDir()/spine/routing-host.json`.
-  Tests inject a file path. Do not add a normal path flag or environment
-  override.
+  Its platform lookup may read standard configuration environment state; JSON
+  values never expand environment input, execute, or make a network request.
+  Tests use private argument-based directory-provider helpers or absolute
+  fixture paths. Never mutate a package global in a test. Do not add a normal
+  path flag or environment override.
 - The schema is closed. Do not add endpoint, token, auth, credentials,
   `modelOverrides`, arbitrary `args`, or `env` fields. Never execute a
   configured command, read environment values, make a network call, or print
@@ -44,6 +49,12 @@ path uses `os.UserConfigDir`; executable presence uses an injected
   `transcriptFlavor`, or `--alternate` behavior.
 - I074 owns heterogeneous confirmation. I077 owns evidence interpretation.
   `observed_ids` and `evidence_refs` must remain exact opaque data in I072.
+- The host file is a trusted owner/fleet-managed authority. I072 proves route
+  feasibility only. It does not ratify pins or require evidence refs.
+- Audit validates declared config and pins before Claude transcript discovery,
+  but retains its preference-only mappings and every verdict/output byte. It
+  does not test unpinned reachability or host-to-observed conformance.
+- Do not change templates or template generation.
 - Stage explicit paths only. Do not stage `.cache/`,
   `docs/research/2026-08-26-fusion-harness-borrow-hitlist.md`, concurrent code,
   or scratch files.
@@ -52,16 +63,16 @@ path uses `os.UserConfigDir`; executable presence uses an injected
 
 | File | Responsibility |
 | --- | --- |
-| `internal/hostconfig/hostconfig.go` | Schema-v1 types; `DefaultPath`, `Load`, and validation for a local host file. |
-| `internal/hostconfig/hostconfig_test.go` | Parser, security boundary, route, observed-ID, and injected executable/path tests. |
-| `internal/model/model.go` | Existing `Resolve` stays preference-only; new host-aware `ResolveForHost` and resolution-trail types return requested and final pairs. |
-| `internal/model/model_test.go` | Precedence, compatibility, no-substitution, pi, and alternate negative controls. |
-| `cmd/spine/main.go` | `cmdModel` prints final pair and additive JSON trail; `cmdAuditRouting` passes host validation through audit. |
-| `cmd/spine/main_test.go` | CLI success, compatibility, error, stdout, and doctor exit tests. |
+| `internal/hostconfig/hostconfig.go` | Schema-v1 types; default-path helper, `Load`, and validation for a trusted local host file. |
+| `internal/hostconfig/hostconfig_test.go` | Parser, nested closed-schema, security boundary, route, observed-ID, and injected executable/path tests. |
+| `internal/model/model.go` | Existing `Resolve` stays preference-only; host-aware resolution and I051-compatible final launch resolution return requested and final pairs. |
+| `internal/model/model_test.go` | Precedence, I051 compatibility, one-result consumption, no-substitution, pi, and alternate negative controls. |
+| `cmd/spine/main.go` | `cmdModel` and `cmdModelValidate` print or consume the final pair; audit CLI keeps its existing output path. |
+| `cmd/spine/main_test.go` | CLI success, compatibility, final-ID expectation, error, stdout, and doctor exit tests. |
 | `internal/doctor/doctor.go` | `hostRoutingCheck` adds the integration-allocated I072 finding without writes. |
-| `internal/doctor/doctor_test.go` | Absent, error, and active unpinned-reachability cases for that allocated finding. |
-| `internal/audit/audit.go` | Audit preflight validates host routing before transcripts or ticket verdicts. |
-| `internal/audit/resolve_test.go` | Host-config preflight and no-heterogeneous-confirmation regression tests. |
+| `internal/doctor/doctor_test.go` | Absent, config-error, and every-available-harness/tier reachability tests. |
+| `internal/audit/audit.go` | Structural host-config preflight before transcript discovery, without host-aware audit mappings. |
+| `internal/audit/resolve_test.go` | Claude-only preflight and byte-compatible verdict/output regression tests. |
 | `docs/specs/2026-08-29-host-routing-config-design.md` | Binding PRD for implementation and final spec review. |
 | `docs/issues/I072-host-config-schema-and-precedence.md` | Closure, commit IDs, review evidence, and implementation resolution. |
 | `CHANGELOG.md` | Consumer-visible `spine model` and doctor behavior after the feature ships. |
@@ -87,13 +98,27 @@ type Resolution struct {
 
 func ResolveForHost(repoDir, configPath, flavor, tier string,
     lookPath func(string) (string, error)) (Resolution, error)
+
+func ValidateLaunchForHost(req LaunchRequest, configPath string,
+    lookPath func(string) (string, error)) (Resolution, error)
 ```
 
-`ResolveForHost` uses `hostconfig.DefaultPath` only when its `configPath`
-argument is empty. Production callers pass the empty value; tests pass a
-fixture path. `ErrNotConfigured` is the only absent-file result and causes the
-legacy result, not an error. All present files are fully validated before a
+`hostconfig.DefaultPath` delegates to an unexported pure helper that accepts a
+directory-provider function. Production passes `os.UserConfigDir`; tests pass
+a closure. `ResolveForHost` uses `DefaultPath` only when `configPath` is empty;
+production callers pass empty and tests pass an absolute fixture path. Doctor
+and audit use unexported `runWithHostPath` helpers that take the same explicit
+path. No test replaces global state, so parallel model, doctor, and audit tests
+remain race-safe. `ErrNotConfigured` is the only absent-file result and causes
+the legacy result, not an error. All present files are fully validated before a
 final pair is returned.
+
+`ValidateLaunchForHost` is the only host-aware path for `model validate`. It
+reads I051's strict repository snapshot once, reads the host file once, applies
+the I051 safe-ID and deny policy to both the requested and pinned final IDs,
+and returns one `Resolution`. `cmdModelValidate` prints `Resolution.Entry.ID`;
+a launcher that needs effort reads `Resolution.Entry.Effort` from that same
+value. Existing `ValidateLaunch` stays the no-host I051 compatibility path.
 
 The exact exported field layout may gain JSON tags or small nested types, but
 it must represent: final `Entry`; requested ID, effort, and provenance; host
@@ -113,19 +138,21 @@ an injected function.
 **Produces:** schema-v1 `Config`, `DefaultPath`, `Load`, `Validate`, and
 `ErrNotConfigured` for model, doctor, and audit callers.
 
-- [ ] **Step 1: Write failing parser tests.** Cover the platform-path seam by
-  injecting the user config directory function and expecting
+- [ ] **Step 1: Write failing parser tests.** Cover the private platform-path
+  helper by injecting the user config directory function and expecting
   `<config-dir>/spine/routing-host.json`; an absent file returns exactly
   `ErrNotConfigured`; a valid Claude config has route
   `gpt-5.6-sol @ high`; a pin key `claude.primary` validates; and `Load` does
   not create a file.
 
 - [ ] **Step 2: Write failing schema-boundary tests.** Reject malformed JSON,
-  `schema_version: 2`, unknown root/harness/route/pin members, duplicate JSON
-  object keys, control characters, empty IDs, invalid dotted pin keys,
+  `schema_version: 2`, unknown root/harness/route/pin members at every nested
+  object, duplicate JSON object keys, control characters, empty IDs, invalid
+  or unknown-flavor dotted pin keys,
   unknown tiers, duplicate effort strings, duplicate observed IDs across the
   config, unavailable pin harnesses, absent pin model, and a pin effort not in
-  its route. Include table cases for `token`, `base_url`, `auth_header`,
+  its route. Prove equal routes in distinct harnesses are allowed: there is no
+  duplicate-semantic-route error. Include table cases for `token`, `base_url`, `auth_header`,
   `credentials`, `modelOverrides`, `args`, and `env`; every case must fail.
 
 - [ ] **Step 3: Run the focused tests red.**
@@ -135,12 +162,13 @@ an injected function.
   Expected: fail because the package and symbols do not exist.
 
 - [ ] **Step 4: Implement the minimum closed-schema parser.** Decode JSON in
-  a way that detects duplicate object keys and rejects unknown members. Use
-  `os.UserConfigDir` for the production default, injected lookup for tests,
-  and `exec.LookPath` only to test executable presence. Do not execute the
-  result. Make a present but unreadable file, invalid schema, unavailable
-  harness, or absent executable an error with its config path and safe field
-  name only.
+  a way that detects duplicate object keys and rejects unknown members at every
+  object depth. Use `os.UserConfigDir` only through the private
+  directory-provider helper, injected lookup for tests, and `exec.LookPath`
+  only to test executable presence. Do not execute the result. Make a present
+  but unreadable file, invalid schema, unavailable pinned harness, invalid
+  declared executable, or absent pin route an error with its config path and
+  safe field name only.
 
 - [ ] **Step 5: Verify green and prove the security boundary.**
 
@@ -183,32 +211,47 @@ trail, while `Resolve` and all mirror callers remain preference-only.
   - pi is not silently host-filtered, and `--alternate` still uses the old
     cell-only behavior.
 
-- [ ] **Step 2: Add host-blind negative controls.** Use a valid host fixture
+- [ ] **Step 2: Write failing I051 compatibility tests.** Start from a strict
+  I051 repository snapshot, then apply a host fixture. Assert a safe divergent
+  pin returns a final pair even though its ID is not a repository override; a
+  forbidden pin fails the I051 positive-ID/deny policy; an expectation for the
+  requested ID fails when the final ID differs; an expectation for the final
+  ID passes; and a mock launcher consumes the model and effort from one
+  `Resolution`, not separate resolver calls. Assert the no-host result keeps
+  I051's current output and exit behavior byte-for-byte.
+
+- [ ] **Step 3: Add host-blind negative controls.** Use a valid host fixture
   with a divergent Claude pin, then prove `MirrorRows()`,
   `update.applyModelRouting`, and rendered `WORKFLOW.md` still contain only
   the embedded/repository result. The host fixture must not create a refresh
   or an override item.
 
-- [ ] **Step 3: Run focused tests red.**
+- [ ] **Step 4: Run focused tests red.**
 
   Run: `go test ./internal/model ./internal/update -run 'Test.*(Host|Mirror|ModelRouting)' -count=1`
 
   Expected: FAIL because host-aware resolution and its trail do not yet exist.
 
-- [ ] **Step 4: Implement `ResolveForHost`.** First call existing `Resolve`
-  to get the requested entry. Map `ErrNotConfigured` to an `unconfigured`
-  trail. For a present config, require the selected flavor-named harness and
-  executable, apply an exact tier pin when present, otherwise require the
+- [ ] **Step 5: Implement `ResolveForHost` and the I051 adapter.** First call
+  existing `Resolve` to obtain the ordinary requested entry. For validation,
+  first use I051's strict one-snapshot repository reader and policy, then
+  apply the host constraint to that validated requested entry in the same
+  process. Validate a final pin under the same I051 ID policy, return its
+  model and effort in the same `Resolution`, and compare `--expect` to final
+  ID. Never require a valid host pin to be a repository override. Map
+  `ErrNotConfigured` to an `unconfigured` trail and retain exact I051 no-host
+  behavior. For a present config, require the selected flavor-named harness
+  and executable, apply an exact tier pin when present, otherwise require the
   requested model and effort route. Keep `Resolve`, `MirrorRows`, and
   `applyModelRouting` free of hostconfig imports.
 
-- [ ] **Step 5: Verify green.**
+- [ ] **Step 6: Verify green.**
 
   Run: `go test ./internal/model ./internal/update -count=1`
 
   Expected: PASS, including existing historical-default and update tests.
 
-- [ ] **Step 6: Commit the resolver unit.**
+- [ ] **Step 7: Commit the resolver unit.**
 
   Run: `git add internal/model/model.go internal/model/model_test.go internal/update/modelrouting_test.go && git commit -m 'feat(I072): resolve host routing constraints'`
 
@@ -219,8 +262,8 @@ trail, while `Resolve` and all mirror callers remain preference-only.
 - Modify: `cmd/spine/main.go` (`cmdModel`)
 - Modify: `cmd/spine/main_test.go`
 
-**Consumes:** `model.ResolveForHost` and existing `--json`, `--effort`, and
-`--alternate` flag behavior.
+**Consumes:** `model.ResolveForHost`, the I051-compatible final launch result,
+and existing `--json`, `--effort`, and `--alternate` flag behavior.
 
 **Produces:** text output for the final pair and additive machine-readable
 requested/host/pin trail.
@@ -237,25 +280,33 @@ requested/host/pin trail.
   writes no stdout, and has one safe stderr diagnostic. Keep the existing
   flags-before-positionals and `--alternate` tests green unchanged.
 
-- [ ] **Step 3: Run the focused tests red.**
+- [ ] **Step 3: Add final-ID validation command tests.** Through
+  `spine model validate`, assert a safe divergent pin prints the final ID and
+  its paired effort reaches the fake launcher from the same result. Assert
+  `--expect` rejects the requested ID and accepts the final ID, a forbidden
+  pin returns the I051 refusal with no stdout, and an absent file preserves
+  I051 bytes and exits. Do not permit fallback to plain `spine model`.
+
+- [ ] **Step 4: Run the focused tests red.**
 
   Run: `go test ./cmd/spine -run 'TestModel.*(Host|Config|JSON|Alternate|Flag)' -count=1`
 
   Expected: FAIL because `cmdModel` still calls preference-only `Resolve`.
 
-- [ ] **Step 4: Implement the thin CLI adapter.** Replace the one resolution
-  call with `ResolveForHost`; keep flag parsing in `cmdModel`, select final
-  entry for text and effort output, and marshal additive JSON. Return 2 before
+- [ ] **Step 5: Implement the thin CLI adapters.** Replace the ordinary
+  resolution call with `ResolveForHost`; adapt `cmdModelValidate` to the
+  I051-compatible final result. Keep flag parsing in `cmdModel`, select final
+  entry for text and effort output, and marshal additive JSON. Return before
   emitting any success output on host errors. Never read config contents into
   command output.
 
-- [ ] **Step 5: Verify green.**
+- [ ] **Step 6: Verify green.**
 
   Run: `go test ./cmd/spine -run 'TestModel' -count=1`
 
   Expected: PASS.
 
-- [ ] **Step 6: Commit the CLI unit.**
+- [ ] **Step 7: Commit the CLI unit.**
 
   Run: `git add cmd/spine/main.go cmd/spine/main_test.go && git commit -m 'feat(I072): expose host routing resolution'`
 
@@ -267,8 +318,8 @@ requested/host/pin trail.
 - Modify: `internal/doctor/doctor_test.go`
 - Modify: `cmd/spine/main_test.go`
 
-**Consumes:** shared hostconfig validation and preference resolution. Doctor
-must pass the repository directory only for the active requested-pair check.
+**Consumes:** shared hostconfig validation and preference-only resolution.
+Doctor receives an explicit fixture path through its private helper in tests.
 
 **Produces:** an I072 host-routing health finding without changing doctor’s
 existing exit contract. Its ID is allocated from source at this task's
@@ -282,12 +333,17 @@ integration point, not pre-reserved in this plan.
   reserve D14.
 
 - [ ] **Step 2: Write failing doctor tests.** Assert no allocated finding when
-  the file is absent. Assert one allocated-ID `error` with config path for malformed config,
-  duplicate semantic route, unsupported schema, forbidden security member,
-  unavailable pinned harness, missing executable, absent pinned model, and
-  unsupported pin effort. Assert a valid no-pin config with the repository's
-  requested pair unreachable produces one allocated-ID `warn` that names the repo,
-  flavor, tier, and pair. Assert a valid pin without evidence refs is silent.
+  the file is absent. Assert allocated-ID errors with config path for malformed
+  config, nested unknown members, unsupported schema, forbidden security
+  member, unavailable pinned harness, invalid declared executable, absent
+  pinned model, and unsupported pin effort. Assert a Claude-only config checks
+  all four Claude tiers and produces one warning per unreachable unpinned pair.
+  Assert a two-harness config checks every tier of both available harnesses in
+  lexical-harness then `model.Tiers` order. Assert an unavailable declared
+  harness produces no preference warnings, a divergent valid pin suppresses
+  only its matching tier warning, and a valid pin without evidence refs is
+  silent. Use explicit paths through the private helper; run the cases in
+  parallel to prove the path seam has no global-state race.
 
 - [ ] **Step 3: Write the command-level result test.** `spine doctor` must
   print the allocated ID, path, and severity and exit 1 for either error or
@@ -302,9 +358,11 @@ integration point, not pre-reserved in this plan.
 
 - [ ] **Step 5: Implement `hostRoutingCheck`.** Add it to `doctor.Run` after
   core repository checks. Reuse the same loader/validation path as model
-  resolution. Return the allocated-ID error for invalid host state; inspect
-  only the repository's active requested pair for the allocated-ID warn case.
-  Do not inspect every unused harness and do not print JSON content.
+  resolution. Return allocated-ID errors for invalid host state. For every
+  available declared harness and every model tier, resolve the repository
+  preference without host substitution and return one allocated-ID warning for
+  each unpinned unreachable pair. Ignore absent and unavailable harnesses; do
+  not print JSON content.
 
 - [ ] **Step 6: Verify green.**
 
@@ -327,30 +385,37 @@ integration point, not pre-reserved in this plan.
   handling if required)
 - Modify: `cmd/spine/main_test.go`
 
-**Consumes:** host-aware resolution and existing audit report/verdict types.
+**Consumes:** hostconfig structural validation and existing preference-only
+audit mappings and report/verdict types.
 
 **Produces:** a configuration error before transcript traversal, never a
 ticket evidence verdict for bad local routing state.
 
-- [ ] **Step 1: Write failing audit tests.** Give audit a malformed or
-  unreachable pinned host config and assert `audit.Run` returns a
-  configuration error before transcript discovery, with zero ticket verdicts.
-  At the CLI boundary assert `spine audit routing` exits 2. Give it a valid
-  divergent Claude host pin and raw `observed_ids`; assert current
-  source-derived audit behavior is retained and does not report a newly
-  confirmed match or a new silent-descent verdict.
+- [ ] **Step 1: Write failing audit tests.** Give audit a malformed config,
+  nested unknown member, invalid declared executable, or unreachable pin and
+  assert `audit.Run` returns a configuration error before Claude transcript
+  discovery, with zero ticket verdicts. At the CLI boundary assert `spine audit
+  routing` exits 2. Give it a valid Claude-only config with an unreachable
+  unpinned repository preference and assert audit proceeds. Give it a valid
+  divergent Claude pin and raw `observed_ids`; assert current preference-only
+  mappings, verdicts, report text, and exit result are byte-for-byte unchanged.
+  Use an explicit audit fixture path and a transcript-read recorder to prove
+  preflight ordering without mutable global test state.
 
 - [ ] **Step 2: Run focused tests red.**
 
   Run: `go test ./internal/audit ./cmd/spine -run 'Test.*(Host.*Audit|Audit.*Host|Routing.*Config)' -count=1`
 
-  Expected: FAIL because audit currently resolves preference-only entries.
+  Expected: FAIL because audit currently has no host-config preflight.
 
 - [ ] **Step 3: Implement preflight only.** Validate the default or injected
-  host path before transcript discovery. Thread final host-aware resolution
-  where audit needs the final pair, but do not modify `transcriptFlavor`,
-  aliases, transcript parsing, verdict names, or effort confirmation. Convert
-  a host configuration failure to the existing command's exit-2 error route.
+  path before Claude transcript discovery. Enforce the closed config schema,
+  declared executables, and exact pins on available declared harnesses. Do not
+  call `ResolveForHost`, change `resolveFlavorTiers`, modify
+  `transcriptFlavor`, aliases, transcript parsing, verdict names, output, or
+  effort confirmation. Convert a host configuration failure to the existing
+  command's exit-2 error route. Unpinned reachability and all declared-to-
+  observed correlation remain I074 work.
 
 - [ ] **Step 4: Verify green.**
 
@@ -391,10 +456,13 @@ ticket evidence verdict for bad local routing state.
 
 - [ ] **Step 2: Run functional command simulations with a disposable config
   location injected by the test seam.** Prove: unconfigured resolution matches
-  the prior ID/effort; a configured pin returns its final pair and JSON trail;
-  an unreachable unpinned preference exits 2 with no stdout; doctor reports
-  its integration-allocated host-routing finding; audit refuses a malformed pin before a verdict. Record commands and
-  output in the implementation evidence.
+  the prior ID/effort and I051 validation bytes; a safe divergent pin returns
+  its final pair and JSON trail; a forbidden pin refuses; final-ID `--expect`
+  passes while requested-ID `--expect` fails; doctor reports all reachable and
+  unreachable available-harness tiers with one warning per unpinned failure;
+  audit refuses a malformed pin before a Claude transcript read but proceeds
+  for a valid unreachable unpinned preference without changing verdict bytes.
+  Record commands and output in the implementation evidence.
 
 - [ ] **Step 3: Run the repository gates.**
 
@@ -414,11 +482,13 @@ ticket evidence verdict for bad local routing state.
 
 - [ ] **Step 4: Perform a fresh spec review.** A fresh primary-tier reviewer
   reads the finished diff and this PRD, attacks every requirement first, then
-  verifies the ten acceptance criteria. The reviewer must specifically check
-  the evidence-backed doctor-ID allocation, no implicit substitution, exact observed-ID behavior,
-  secret-free output, host-blind update/mirror paths, no public rename, and
-  no I074/I077 behavior. Resolve findings and rerun affected tests before
-  approval.
+  verifies the twelve acceptance criteria. The reviewer must specifically check
+  the evidence-backed doctor-ID allocation, every-available-harness/tier
+  matrix, I051 final-pair/expect behavior, no implicit substitution, nested
+  schema closure, injected-path race safety, exact observed-ID behavior,
+  secret-free output, host-blind update/mirror paths, no template change, no
+  public rename, and no I074/I077 behavior. Resolve findings and rerun affected
+  tests before approval.
 
 - [ ] **Step 5: Perform independent verification.** A fresh primary-tier
   verifier reruns focused and full tests, static checks, functional probes,
@@ -444,11 +514,12 @@ ticket evidence verdict for bad local routing state.
 ## Plan self-review checklist
 
 - [x] Every PRD acceptance criterion maps to Tasks 1 through 6.
-- [x] Every production seam named by the grill has a focused test-first task.
+- [x] Every production seam named by the grill has a focused test-first task,
+  including private race-safe directory and explicit-path seams.
 - [x] The doctor ID is intentionally allocated from integration state after
   I108 and I050, with D16 only an evidence-dependent expectation.
-- [x] I073 public rename, I074 confirmation, and I077 evidence interpretation
-  are fenced out of code tasks.
+- [x] I073 public rename, I074 reachability/conformance verdicts, and I077
+  evidence interpretation are fenced out of code tasks.
 - [x] No task changes `models/defaults.json`, aliases, mirrors, update behavior,
   or normal config-path selection.
-- [x] Placeholder scan found no TBD, TODO, or unspecified test step.
+- [x] Placeholder scan found no placeholder markers or unspecified test steps.
