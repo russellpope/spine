@@ -1851,11 +1851,65 @@ func cmdModelValidateWithHostPath(args []string, repoDir string, stdout, stderr 
 			printModelLaunchRefusal(stderr, refusal, repoDir, expectSet)
 			return 1
 		}
-		fmt.Fprintln(stderr, "model validate:", err)
+		writeModelValidateConfigurationDiagnostic(stderr, pos[0], pos[1], err)
 		return 2
 	}
 	fmt.Fprintln(stdout, resolution.Entry.ID)
 	return 0
+}
+
+func writeModelValidateConfigurationDiagnostic(stderr io.Writer, flavor, tier string, err error) {
+	detail := escapeModelValidateControlBytes(err.Error())
+	key, known := knownModelRouteKey(flavor, tier)
+	if !known {
+		fmt.Fprintf(stderr, "model validate: %s\n", detail)
+		return
+	}
+
+	// Some resolver errors already lead with the selected key. Keep one
+	// canonical route label and escape any other detail occurrence so an
+	// untrusted path cannot duplicate or impersonate it.
+	detail = strings.TrimPrefix(detail, key+": ")
+	detail = strings.ReplaceAll(detail, key, flavor+`\x2e`+tier)
+	fmt.Fprintf(stderr, "model validate: %s: %s\n", key, detail)
+}
+
+func knownModelRouteKey(flavor, tier string) (string, bool) {
+	knownFlavor := false
+	for _, candidate := range model.Flavors() {
+		if flavor == candidate {
+			knownFlavor = true
+			break
+		}
+	}
+	if !knownFlavor {
+		return "", false
+	}
+	for _, candidate := range model.Tiers {
+		if tier == candidate {
+			return flavor + "." + tier, true
+		}
+	}
+	return "", false
+}
+
+func escapeModelValidateControlBytes(value string) string {
+	var escaped strings.Builder
+	for _, r := range value {
+		switch {
+		case r == '\n':
+			escaped.WriteString(`\n`)
+		case r == '\r':
+			escaped.WriteString(`\r`)
+		case r == '\t':
+			escaped.WriteString(`\t`)
+		case r < ' ' || (r >= 0x7f && r <= 0x9f):
+			fmt.Fprintf(&escaped, `\u%04x`, r)
+		default:
+			escaped.WriteRune(r)
+		}
+	}
+	return escaped.String()
 }
 
 func printModelLaunchRefusal(stderr io.Writer, refusal *model.LaunchRefusal, repoDir string, expected bool) {

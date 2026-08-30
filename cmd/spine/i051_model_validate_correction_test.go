@@ -85,6 +85,68 @@ func TestI051ModelValidateUsageDiagnosticsArePrefixed(t *testing.T) {
 	}
 }
 
+func TestI051ModelValidateKnownKeyConfigurationDiagnostics(t *testing.T) {
+	unreadable := filepath.Join(t.TempDir(), "codex.primary")
+	if err := os.Mkdir(unreadable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(unreadable, "WORKFLOW.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	malformed := writeModelWorkflow(t, "model_routing:\n  codex.primary: one @ high @ low\n")
+	newer := writeModelWorkflow(t, "template_version: 14\n")
+
+	for _, tc := range []struct {
+		name string
+		dir  string
+	}{
+		{name: "unreadable WORKFLOW", dir: unreadable},
+		{name: "malformed selected row", dir: malformed},
+		{name: "newer template generation", dir: newer},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errs := runCmd(t, "model", "--dir", tc.dir, "validate", "codex", "primary")
+			if code != 2 || out != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+			}
+			if !strings.HasPrefix(errs, "model validate:") || strings.Count(errs, "\n") != 1 {
+				t.Fatalf("stderr=%q, want one model validate diagnostic line", errs)
+			}
+			if strings.Count(errs, "codex.primary") != 1 {
+				t.Fatalf("stderr=%q, want known route key exactly once", errs)
+			}
+			if strings.ContainsAny(strings.TrimSuffix(errs, "\n"), "\t\r") {
+				t.Fatalf("stderr contains a raw control byte: %q", errs)
+			}
+		})
+	}
+}
+
+func TestI051ModelValidateUnknownRouteDiagnosticsStayQuoted(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		flavor     string
+		tier       string
+		wantQuoted string
+	}{
+		{name: "unknown flavor", flavor: "bad\nflavor", tier: "primary", wantQuoted: `unknown flavor "bad\nflavor"`},
+		{name: "unknown tier", flavor: "codex", tier: "bad\ttier", wantQuoted: `unknown tier "bad\ttier"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errs := runCmd(t, "model", "validate", tc.flavor, tc.tier)
+			if code != 2 || out != "" || strings.Count(errs, "\n") != 1 {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+			}
+			if !strings.HasPrefix(errs, "model validate: "+tc.wantQuoted) {
+				t.Fatalf("stderr=%q, want safely quoted compatible diagnostic %q", errs, tc.wantQuoted)
+			}
+			if strings.ContainsAny(strings.TrimSuffix(errs, "\n"), "\t\r") {
+				t.Fatalf("stderr contains a raw control byte: %q", errs)
+			}
+		})
+	}
+}
+
 func TestI051ModelValidateDiagnosticAdapterDoesNotRewritePlainModelErrors(t *testing.T) {
 	code, out, errs := runCmd(t, "model", "--bogus", "codex", "primary")
 	if code != 2 || out != "" || !strings.HasPrefix(errs, "flag provided but not defined: -bogus\n") {
