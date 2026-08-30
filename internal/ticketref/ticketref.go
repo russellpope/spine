@@ -32,23 +32,7 @@ func Range(raw string) (start, end, width int, ok bool) {
 // Contains reports whether text names id either literally or through a valid
 // inclusive range token. It does not expand malformed or descending ranges.
 func Contains(text, id string) bool {
-	if !IsID(id) {
-		return false
-	}
-	if containsToken(text, id) {
-		return true
-	}
-	want, err := strconv.Atoi(strings.TrimPrefix(id, "I"))
-	if err != nil {
-		return false
-	}
-	for _, reference := range References(text) {
-		start, end, width, ok := Range(reference)
-		if ok && len(id)-1 == width && want >= start && want <= end {
-			return true
-		}
-	}
-	return false
+	return ContainsStandalone(text, id)
 }
 
 // ContainsStandalone applies the strict standalone reference boundary to both
@@ -98,23 +82,6 @@ func References(text string) []string {
 // still makes an opening ambiguous.
 func ReferenceCount(text string, auditedIDs []string) int {
 	return len(References(text))
-}
-
-func containsToken(text, token string) bool {
-	for start := 0; ; {
-		i := strings.Index(text[start:], token)
-		if i < 0 {
-			return false
-		}
-		i += start
-		before := i == 0 || !isAlnum(text[i-1])
-		afterIndex := i + len(token)
-		after := afterIndex >= len(text) || !isAlnum(text[afterIndex])
-		if before && after {
-			return true
-		}
-		start = i + 1
-	}
 }
 
 func isAlnum(value byte) bool {

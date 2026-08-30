@@ -425,7 +425,16 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 		if d.source == "codex" {
 			desc, prompt = strings.ToUpper(desc), strings.ToUpper(prompt)
 		}
-		if !(ticketref.Contains(desc, id) || ticketref.Contains(prompt, id)) {
+		claimsTicket := ticketref.Contains(desc, id) || ticketref.Contains(prompt, id)
+		if d.source == "codex" {
+			// Team-spawn commands conventionally carry the assignment through
+			// a dispatch-task-I###.md file reference. This is a structured
+			// artifact name, not a hyphen-delimited ticket token, so retain it
+			// as the one Codex-specific compatibility path while ordinary text
+			// uses ticketref's strict standalone grammar.
+			claimsTicket = claimsTicket || containsCodexDispatchTaskReference(desc, id) || containsCodexDispatchTaskReference(prompt, id)
+		}
+		if !claimsTicket {
 			return false
 		}
 		// D28 (ticket I047): a claude dispatch claims the ticket only if it
@@ -1305,6 +1314,31 @@ func isPathWordChar(c byte) bool {
 // path) and keeps one mechanism for both clauses instead of two.
 func containsPathToken(text, path string) bool {
 	return containsTokenWith(text, path, isPathWordChar)
+}
+
+// containsCodexDispatchTaskReference recognizes the historical Codex team
+// dispatch artifact name, dispatch-task-I###.md, only as a full path
+// component. It deliberately does not relax ticketref's standalone grammar
+// for ordinary hyphenated text.
+func containsCodexDispatchTaskReference(text, id string) bool {
+	const prefix = "DISPATCH-TASK-"
+	const suffix = ".MD"
+	text = strings.ToUpper(text)
+	name := prefix + strings.ToUpper(id) + suffix
+	for start := 0; ; {
+		i := strings.Index(text[start:], name)
+		if i < 0 {
+			return false
+		}
+		i += start
+		before := i == 0 || text[i-1] == '/' || text[i-1] == '\\'
+		afterIndex := i + len(name)
+		after := afterIndex >= len(text) || !isPathWordChar(text[afterIndex])
+		if before && after {
+			return true
+		}
+		start = i + 1
+	}
 }
 
 // containsTokenWith generalizes containsToken's word-boundary matching

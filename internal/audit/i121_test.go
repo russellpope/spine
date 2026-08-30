@@ -32,7 +32,7 @@ func TestTicketRangeDispatchAttributesEveryInteriorID(t *testing.T) {
 	}
 }
 
-func TestHyphenatedNonRangeDoesNotAttributeInteriorIDs(t *testing.T) {
+func TestMalformedPartialRangeDoesNotAttributeAnyIDs(t *testing.T) {
 	repo := t.TempDir()
 	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{
 		"I051": "routine",
@@ -49,12 +49,64 @@ func TestHyphenatedNonRangeDoesNotAttributeInteriorIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := rowsByID(t, rep)
-	if got := rows["I051"].Verdict; got != VerdictMatch {
-		t.Fatalf("literal endpoint I051 verdict = %s (%s), want match", got, rows["I051"].Detail)
-	}
-	for _, id := range []string{"I052", "I053"} {
+	for _, id := range []string{"I051", "I052", "I053"} {
 		if got := rows[id].Verdict; got != VerdictNoTranscript {
-			t.Errorf("%s verdict = %s (%s), malformed range must not expand", id, got, rows[id].Detail)
+			t.Errorf("%s verdict = %s (%s), malformed partial range must not attribute", id, got, rows[id].Detail)
+		}
+	}
+}
+
+// I121: direct Claude dispatch attribution must use the same strict boundary
+// grammar as opening-line attribution, so hyphen-embedded endpoint IDs never
+// supply routing evidence.
+func TestClaudeDispatchRejectsEveryEndpointOfNonStandaloneTicketForms(t *testing.T) {
+	for _, tc := range []struct {
+		name, description string
+		ids               []string
+	}{
+		{name: "surrounding hyphens", description: "slug-I051-I056-tail", ids: []string{"I051", "I056"}},
+		{name: "chained range", description: "I051-I056-I060", ids: []string{"I051", "I056", "I060"}},
+		{name: "leading hyphen", description: "-I051", ids: []string{"I051"}},
+		{name: "trailing hyphen", description: "I051-", ids: []string{"I051"}},
+		{name: "malformed partial range", description: "I051-I05X", ids: []string{"I051"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			tickets := make(map[string]string, len(tc.ids))
+			for _, id := range tc.ids {
+				tickets[id] = "routine"
+			}
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, tickets)
+
+			transcripts := t.TempDir()
+			writeSingleDispatch(t, filepath.Join(transcripts, "malformed.jsonl"), repo,
+				"I000", tc.description, "claude-sonnet-5")
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := rowsByID(t, rep)
+			for _, id := range tc.ids {
+				if got := rows[id].Verdict; got != VerdictNoTranscript {
+					t.Errorf("%s verdict = %s (%s), want no-transcript from non-standalone dispatch form", id, got, rows[id].Detail)
+				}
+			}
+		})
+	}
+}
+
+func TestCodexDispatchTaskReferenceRequiresAFullPathComponent(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want bool
+	}{
+		{text: "/tmp/dispatch-task-I051.md", want: true},
+		{text: "slug-dispatch-task-I051.md", want: false},
+		{text: "/tmp/dispatch-task-I051.md-tail", want: false},
+	} {
+		if got := containsCodexDispatchTaskReference(tc.text, "I051"); got != tc.want {
+			t.Errorf("containsCodexDispatchTaskReference(%q, I051) = %v, want %v", tc.text, got, tc.want)
 		}
 	}
 }

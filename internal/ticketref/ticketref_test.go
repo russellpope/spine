@@ -28,6 +28,7 @@ func TestContainsRecognizesLiteralAndInteriorReferencesOnly(t *testing.T) {
 		text, id string
 		want     bool
 	}{
+		{text: "ticket I051", id: "I051", want: true},
 		{text: "tickets I051-I056", id: "I053", want: true},
 		{text: "tickets (I051-I056).", id: "I056", want: true},
 		{text: "tickets I051-I05X", id: "I053", want: false},
@@ -39,6 +40,29 @@ func TestContainsRecognizesLiteralAndInteriorReferencesOnly(t *testing.T) {
 		if got := Contains(tc.text, tc.id); got != tc.want {
 			t.Errorf("Contains(%q, %q) = %v, want %v", tc.text, tc.id, got, tc.want)
 		}
+	}
+}
+
+// Removing Contains' strict References-based matching would make malformed
+// hyphenated text claim endpoint IDs as standalone literals.
+func TestContainsRejectsEveryEndpointOfNonStandaloneForms(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		ids  []string
+	}{
+		{text: "slug-I051-I056-tail", ids: []string{"I051", "I056"}},
+		{text: "I051-I056-I060", ids: []string{"I051", "I056", "I060"}},
+		{text: "-I051", ids: []string{"I051"}},
+		{text: "I051-", ids: []string{"I051"}},
+		{text: "I051-I05X", ids: []string{"I051"}},
+	} {
+		t.Run(tc.text, func(t *testing.T) {
+			for _, id := range tc.ids {
+				if Contains(tc.text, id) {
+					t.Errorf("Contains(%q, %q) = true, want false for non-standalone form", tc.text, id)
+				}
+			}
+		})
 	}
 }
 
