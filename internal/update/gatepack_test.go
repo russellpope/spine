@@ -4,11 +4,87 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/russellpope/spine/internal/gate"
 )
+
+// I123: advisory requiredness is explicit metadata, rather than an
+// implication of a class consuming an optional environment value. A missing
+// fixture-manifest input must be reported, while an empty tskip allowlist and
+// every config-free class remain quiet. Removing requiredness metadata,
+// ignoring disabled classes, or deriving ordering from a map breaks this
+// behavior.
+func TestGateConfigAdvisories(t *testing.T) {
+	allMissing := []GateConfigAdvisory{
+		{Class: "fixture-manifest", Key: "fixture_manifest"},
+		{Class: "gitignore-control", Key: "build_outputs"},
+		{Class: "n-plus-one", Key: "n_plus_one_clients"},
+		{Class: "test-enum-vs-spec", Key: "test_enum_spec"},
+	}
+	base := gatePackSettings{pack: gate.PackID(), disabled: map[string]bool{}, config: map[string]string{}}
+	regionBefore := renderGateRegion(base)
+	if got := gateConfigAdvisories(base); !reflect.DeepEqual(got, allMissing) {
+		t.Fatalf("empty required config advisories = %#v, want %#v", got, allMissing)
+	}
+	if regionAfter := renderGateRegion(base); regionAfter != regionBefore {
+		t.Fatalf("advisory calculation changed rendered region:\n--- before\n%s--- after\n%s", regionBefore, regionAfter)
+	}
+
+	for _, tc := range []struct {
+		name string
+		edit func(gatePackSettings)
+		want []GateConfigAdvisory
+	}{
+		{
+			name: "one configured key removes only its class",
+			edit: func(s gatePackSettings) { s.config["fixture_manifest"] = "docs/fixtures.md" },
+			want: allMissing[1:],
+		},
+		{
+			name: "one disabled class removes only its class",
+			edit: func(s gatePackSettings) { s.disabled["gitignore-control"] = true },
+			want: []GateConfigAdvisory{allMissing[0], allMissing[2], allMissing[3]},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := gatePackSettings{pack: base.pack, disabled: map[string]bool{}, config: map[string]string{}}
+			tc.edit(s)
+			if got := gateConfigAdvisories(s); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("advisories = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+
+	// tskip's empty allowlist is valid and the remaining classes consume no
+	// required config. Adding optional/config-free names must not create a
+	// spurious advisory.
+	withOptional := gatePackSettings{
+		pack:     base.pack,
+		disabled: map[string]bool{},
+		config:   map[string]string{"tskip_allow": ""},
+	}
+	if got := gateConfigAdvisories(withOptional); !reflect.DeepEqual(got, allMissing) {
+		t.Fatalf("empty optional tskip config advisories = %#v, want %#v", got, allMissing)
+	}
+
+	oldPackClassesFor := packClassesFor
+	packClassesFor = func(pack string) ([]string, bool) {
+		if pack != gate.PackID() {
+			return nil, false
+		}
+		return []string{"binary-hygiene", "deferred-cleanup-errcheck", "fixture-manifest", "fixture-manifest", "mutate", "tskip"}, true
+	}
+	t.Cleanup(func() { packClassesFor = oldPackClassesFor })
+	if got, want := gateConfigAdvisories(base), []GateConfigAdvisory{{Class: "fixture-manifest", Key: "fixture_manifest"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("config-free and duplicate classes advisories = %#v, want %#v", got, want)
+	}
+	if got := gateConfigAdvisories(gatePackSettings{pack: "go@99", disabled: map[string]bool{}, config: map[string]string{}}); len(got) != 0 {
+		t.Fatalf("unknown pack advisories = %#v, want none", got)
+	}
+}
 
 // gateRepo is a gen-11 repo that has opted into the pack: WORKFLOW.md is
 // migrated first, then the gate-pack keys are set the way an owner would.

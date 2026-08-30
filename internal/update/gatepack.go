@@ -49,6 +49,24 @@ var gateCheckConfig = map[string]string{
 	"n-plus-one":        "n_plus_one_clients",
 }
 
+// requiredGateConfig marks the enabled classes whose gate_pack_config input
+// must be non-empty. It is deliberately separate from gateCheckConfig:
+// tskip consumes an optional allowlist, while these classes cannot run with
+// an absent input.
+var requiredGateConfig = map[string]string{
+	"fixture-manifest":  "fixture_manifest",
+	"gitignore-control": "build_outputs",
+	"n-plus-one":        "n_plus_one_clients",
+	"test-enum-vs-spec": "test_enum_spec",
+}
+
+// GateConfigAdvisory identifies one enabled gate class that lacks its
+// required gate_pack_config value.
+type GateConfigAdvisory struct {
+	Class string
+	Key   string
+}
+
 // gateRegionComment is the fixed header comment spine writes inside the
 // region. It is the only comment the canonical render emits, so any other
 // comment line inside the region is a local edit.
@@ -104,6 +122,30 @@ func parseList(v string) []string {
 // and prove the pin still renders its own list (I098); nothing but a test
 // ever replaces it.
 var packClassesFor = gate.PackClassesFor
+
+// gateConfigAdvisories derives the missing required inputs for a shipped,
+// pinned pack. Rendering remains a separate projection: an advisory never
+// disables or omits a class.
+func gateConfigAdvisories(s gatePackSettings) []GateConfigAdvisory {
+	classes, shipped := packClassesFor(s.pack)
+	if !shipped {
+		return nil
+	}
+	seen := map[string]bool{}
+	var advisories []GateConfigAdvisory
+	for _, class := range classes {
+		key := requiredGateConfig[class]
+		if key == "" || s.disabled[class] || s.config[key] != "" || seen[class] {
+			continue
+		}
+		seen[class] = true
+		advisories = append(advisories, GateConfigAdvisory{Class: class, Key: key})
+	}
+	slices.SortFunc(advisories, func(a, b GateConfigAdvisory) int {
+		return strings.Compare(a.Class, b.Class)
+	})
+	return advisories
+}
 
 // renderGateRegion is the canonical region for (pack, disabled, config): a
 // pure function of its inputs, byte-deterministic, ending in a newline.
