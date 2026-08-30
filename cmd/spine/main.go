@@ -1605,19 +1605,14 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 	return cmdModelWithHostPath(args, stdout, stderr, "", nil)
 }
 
+const modelValidateUsage = `usage: spine model [--dir D] validate [--expect MODEL_ID] <flavor> <tier>`
+
 // cmdModelWithHostPath keeps host-config location and executable discovery as
 // argument seams. Production supplies neither, so there is no CLI path or
 // environment override for the local host authority.
 func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath string, lookup func(string) (string, error)) int {
-	if len(args) > 0 && args[0] == "validate" {
-		return cmdModelValidateWithHostPath(args[1:], ".", stdout, stderr, hostPath, lookup)
-	}
-	if len(args) >= 3 && (args[0] == "--dir" || args[0] == "-dir") && args[2] == "validate" {
-		return cmdModelValidateWithHostPath(args[3:], args[1], stdout, stderr, hostPath, lookup)
-	}
-	if len(args) >= 2 && (strings.HasPrefix(args[0], "--dir=") || strings.HasPrefix(args[0], "-dir=")) && args[1] == "validate" {
-		_, dir, _ := strings.Cut(args[0], "=")
-		return cmdModelValidateWithHostPath(args[2:], dir, stdout, stderr, hostPath, lookup)
+	if isModelValidateInvocation(args) {
+		return cmdModelValidateInvocation(args, stdout, stderr, hostPath, lookup)
 	}
 	fs := flag.NewFlagSet("model", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "repo root")
@@ -1716,6 +1711,62 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 	return 0
 }
 
+// isModelValidateInvocation recognizes validate only while scanning the
+// leading flag region. A later "validate" used as a regular model flavor or
+// tier remains owned by the legacy model command and keeps its diagnostics.
+func isModelValidateInvocation(args []string) bool {
+	for i := 0; i < len(args); {
+		switch arg := args[i]; {
+		case arg == "validate":
+			return true
+		case arg == "--dir" || arg == "-dir" || arg == "--expect" || arg == "-expect":
+			i += 2
+		case strings.HasPrefix(arg, "-"):
+			i++
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// cmdModelValidateInvocation parses only the outer validation grammar. Its
+// FlagSet intentionally knows only --dir, so legacy model flags and a misplaced
+// --expect fail as validation usage errors without changing other model calls.
+func cmdModelValidateInvocation(args []string, stdout, stderr io.Writer, hostPath string, lookup func(string) (string, error)) int {
+	fs := flag.NewFlagSet("model validate", flag.ContinueOnError)
+	dir := fs.String("dir", ".", "repo root")
+	var diagnostics bytes.Buffer
+	fs.SetOutput(&diagnostics)
+	if err := fs.Parse(args); err != nil {
+		writeModelValidateDiagnostic(stderr, diagnostics.String())
+		return 2
+	}
+	pos := fs.Args()
+	if len(pos) == 0 || pos[0] != "validate" {
+		fmt.Fprintf(stderr, "model validate: expected validate after outer flags\n%s\n", modelValidateUsage)
+		return 2
+	}
+	return cmdModelValidateWithHostPath(pos[1:], *dir, stdout, stderr, hostPath, lookup)
+}
+
+func parseModelValidateArgs(fs *flag.FlagSet, args []string, stderr io.Writer) ([]string, bool) {
+	var diagnostics bytes.Buffer
+	pos, ok := parseArgs(fs, args, "model validate", modelValidateUsage, 2, &diagnostics)
+	if !ok {
+		writeModelValidateDiagnostic(stderr, diagnostics.String())
+	}
+	return pos, ok
+}
+
+func writeModelValidateDiagnostic(stderr io.Writer, diagnostic string) {
+	if strings.HasPrefix(diagnostic, "model validate:") {
+		fmt.Fprint(stderr, diagnostic)
+		return
+	}
+	fmt.Fprint(stderr, "model validate: ", diagnostic)
+}
+
 // preflightHostConfig performs only the complete ratified hostconfig.Load
 // boundary. It leaves selection to model resolution and preserves an absent
 // file as the legacy host-blind path.
@@ -1749,13 +1800,12 @@ func cmdModelValidateWithHostPath(args []string, repoDir string, stdout, stderr 
 		expected = value
 		return nil
 	})
-	const validateUsage = `usage: spine model [--dir D] validate [--expect MODEL_ID] <flavor> <tier>`
-	pos, ok := parseArgs(fs, args, "model validate", validateUsage, 2, stderr)
+	pos, ok := parseModelValidateArgs(fs, args, stderr)
 	if !ok {
 		return 2
 	}
 	if expectSet && expected == "" {
-		fmt.Fprintf(stderr, "model validate: --expect must not be empty\n%s\n", validateUsage)
+		fmt.Fprintf(stderr, "model validate: --expect must not be empty\n%s\n", modelValidateUsage)
 		return 2
 	}
 	resolution, err := model.ValidateLaunchForHost(model.LaunchRequest{

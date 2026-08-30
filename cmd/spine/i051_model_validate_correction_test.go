@@ -40,3 +40,57 @@ func TestModelValidateQuotesControlBytesInRepositoryPathOnOneLine(t *testing.T) 
 		})
 	}
 }
+
+func TestI051ModelValidateUsageDiagnosticsArePrefixed(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "duplicate nested expect", args: []string{"model", "validate", "--expect", "gpt-5.6-sol", "--expect", "gpt-5.6-sol", "codex", "primary"}},
+		{name: "outer expect", args: []string{"model", "--expect", "gpt-5.6-sol", "validate", "codex", "primary"}},
+		{name: "outer equals expect", args: []string{"model", "--expect=gpt-5.6-sol", "validate", "codex", "primary"}},
+		{name: "trailing expect", args: []string{"model", "validate", "codex", "primary", "--expect", "gpt-5.6-sol"}},
+		{name: "nested dir", args: []string{"model", "validate", "--dir", ".", "codex", "primary"}},
+		{name: "nested equals dir", args: []string{"model", "validate", "--dir=.", "codex", "primary"}},
+		{name: "trailing dir", args: []string{"model", "validate", "codex", "primary", "--dir", "."}},
+		{name: "outer alternate", args: []string{"model", "--alternate", "validate", "codex", "primary"}},
+		{name: "nested alternate", args: []string{"model", "validate", "--alternate", "codex", "primary"}},
+		{name: "trailing alternate", args: []string{"model", "validate", "codex", "primary", "--alternate"}},
+		{name: "outer effort", args: []string{"model", "--effort", "validate", "codex", "primary"}},
+		{name: "nested effort", args: []string{"model", "validate", "--effort", "codex", "primary"}},
+		{name: "trailing effort", args: []string{"model", "validate", "codex", "primary", "--effort"}},
+		{name: "outer json", args: []string{"model", "--json", "validate", "codex", "primary"}},
+		{name: "nested json", args: []string{"model", "validate", "--json", "codex", "primary"}},
+		{name: "trailing json", args: []string{"model", "validate", "codex", "primary", "--json"}},
+		{name: "outer force", args: []string{"model", "--force", "validate", "codex", "primary"}},
+		{name: "nested force", args: []string{"model", "validate", "--force", "codex", "primary"}},
+		{name: "trailing force", args: []string{"model", "validate", "codex", "primary", "--force"}},
+		{name: "outer unknown", args: []string{"model", "--bogus", "validate", "codex", "primary"}},
+		{name: "nested unknown", args: []string{"model", "validate", "--bogus", "codex", "primary"}},
+		{name: "trailing unknown", args: []string{"model", "validate", "codex", "primary", "--bogus"}},
+		{name: "missing expect value", args: []string{"model", "validate", "--expect"}},
+		{name: "empty expect value", args: []string{"model", "validate", "--expect=", "codex", "primary"}},
+		{name: "missing flavor and tier", args: []string{"model", "validate"}},
+		{name: "missing tier", args: []string{"model", "validate", "codex"}},
+		{name: "extra positional", args: []string{"model", "validate", "codex", "primary", "extra"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errs := runCmd(t, tc.args...)
+			if code != 2 || out != "" || !strings.HasPrefix(errs, "model validate:") {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+			}
+		})
+	}
+}
+
+func TestI051ModelValidateDiagnosticAdapterDoesNotRewritePlainModelErrors(t *testing.T) {
+	code, out, errs := runCmd(t, "model", "--bogus", "codex", "primary")
+	if code != 2 || out != "" || !strings.HasPrefix(errs, "flag provided but not defined: -bogus\n") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	if strings.HasPrefix(errs, "model validate:") {
+		t.Fatalf("plain model diagnostic was rewritten: %q", errs)
+	}
+}
