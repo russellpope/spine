@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -79,5 +80,110 @@ func TestWorkflowCodeReviewerRemainsExcluded(t *testing.T) {
 	row := rowsByID(t, rep)["I053"]
 	if row.Verdict != VerdictNoTranscript {
 		t.Fatalf("I053 verdict = %s (%s), workflow code-reviewer must stay excluded", row.Verdict, row.Detail)
+	}
+}
+
+func TestWorkflowUsesOnlyFirstUserMessageAndRejectsMultiTicketOpening(t *testing.T) {
+	for _, tc := range []struct {
+		name, first, later string
+		wantWarning        bool
+	}{
+		{name: "later ticket is not opening evidence", first: "General task with no ticket", later: "Implement I052"},
+		{name: "multi-ticket opening is ambiguous", first: "Implement I052 and I053", wantWarning: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I052": "routine", "I053": "routine"})
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, tc.first, "claude-sonnet-5", "workflow-subagent", false)
+			if tc.later != "" {
+				path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+				raw := fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":%q}}`+"\n", repo, tc.first) +
+					fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":%q}}`+"\n", repo, tc.later) +
+					fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"done"}]}}`+"\n", repo)
+				if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := rowsByID(t, rep)
+			for _, id := range []string{"I052", "I053"} {
+				if got := rows[id].Verdict; got != VerdictNoTranscript {
+					t.Errorf("%s verdict = %s (%s), want no-transcript", id, got, rows[id].Detail)
+				}
+			}
+			warningFound := false
+			for _, warning := range rep.Warnings {
+				warningFound = warningFound || strings.Contains(warning, "workflow opening line names multiple tickets")
+			}
+			if warningFound != tc.wantWarning {
+				t.Errorf("multi-ticket warning = %v, want %v; warnings=%q", warningFound, tc.wantWarning, rep.Warnings)
+			}
+		})
+	}
+}
+
+func TestWorkflowOpeningTextBlockAndTranscriptModelTakePrecedence(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I054": "routine"})
+	transcripts := t.TempDir()
+	writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "unused", "claude-haiku-4-5", "workflow-subagent", true)
+	base := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker")
+	raw := fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":[{"type":"text","text":"Implement I054\nDetails"}]}}`+"\n", repo) +
+		fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"done"}]}}`+"\n", repo)
+	if err := os.WriteFile(base+".jsonl", []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I054"]
+	if row.Verdict != VerdictMatch {
+		t.Fatalf("I054 verdict = %s (%s), transcript model must outrank metadata fallback", row.Verdict, row.Detail)
+	}
+}
+
+func TestWorkflowMalformedMissingUnknownAndDeeperMetadataStayExcluded(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I055": "routine"})
+	transcripts := t.TempDir()
+	for _, agent := range []string{"missing", "malformed", "unknown", "deeper"} {
+		writeWorkflowAgent(t, transcripts, "session-1", "wf_1", agent, repo,
+			"Implement I055", "claude-sonnet-5", "workflow-subagent", false)
+	}
+	dir := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1")
+	if err := os.Remove(filepath.Join(dir, "agent-missing.meta.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent-malformed.meta.json"), []byte(`{"agentType":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent-unknown.meta.json"), []byte(`{"agentType":"unknown","spawnDepth":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent-deeper.meta.json"), []byte(`{"agentType":"workflow-subagent","spawnDepth":2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I055"]
+	if row.Verdict != VerdictNoTranscript {
+		t.Fatalf("I055 verdict = %s (%s), invalid workflow metadata must stay excluded", row.Verdict, row.Detail)
+	}
+	var missing, malformed bool
+	for _, warning := range rep.Warnings {
+		missing = missing || strings.Contains(warning, "agent-missing.meta.json: workflow metadata unreadable")
+		malformed = malformed || strings.Contains(warning, "agent-malformed.meta.json: malformed workflow metadata")
+	}
+	if !missing || !malformed {
+		t.Fatalf("workflow metadata warnings missing=%v malformed=%v: %q", missing, malformed, rep.Warnings)
 	}
 }

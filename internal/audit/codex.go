@@ -741,7 +741,7 @@ func firstLineTicketMatches(text string, tokens []string) []string {
 		if tok == "" || seen[tok] {
 			continue
 		}
-		if ticketref.Contains(upper, strings.ToUpper(tok)) {
+		if ticketref.ContainsStandalone(upper, strings.ToUpper(tok)) {
 			seen[tok] = true
 			matches = append(matches, tok)
 		}
@@ -998,7 +998,13 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 				// attributes to NONE of them, degrading to a near miss
 				// for each matched ticket instead of guessing which one
 				// the session actually served.
-				if matches := firstLineTicketMatches(firstLine(res.openingUserMessage), tokens); len(matches) > 1 {
+				openingLine := firstLine(res.openingUserMessage)
+				matches := firstLineTicketMatches(openingLine, tokens)
+				referenceCount := ticketref.ReferenceCount(openingLine, tokens)
+				if len(matches) == 0 {
+					continue
+				}
+				if referenceCount != 1 {
 					if text := res.searchText(); strings.TrimSpace(text) != "" {
 						nearMisses = append(nearMisses, codexNearMiss{
 							text:   text,
@@ -1008,7 +1014,7 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 					}
 				} else {
 					agents = append(agents, subagent{
-						description: firstLine(res.openingUserMessage),
+						description: openingLine,
 						models:      res.turnModels,
 						source:      "codex",
 						sourceFile:  path,

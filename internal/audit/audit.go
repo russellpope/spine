@@ -348,12 +348,16 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 	rep.Warnings = append(rep.Warnings, ledger.warnings...)
 	var dispatches []dispatch
 	var agents []subagent
+	ticketTokens := make([]string, len(tickets))
+	for i, ticket := range tickets {
+		ticketTokens[i] = ticket.id
+	}
 	sessionMatched := false
 	for _, transcriptsDir := range transcriptsDirs {
 		if discloseTranscriptDirs {
 			rep.Warnings = append(rep.Warnings, "scanning transcript dir: "+transcriptsDir)
 		}
-		moreDispatches, moreAgents, matched := readTranscripts(transcriptsDir, sourceFlavor, since, opts.Session, &rep.Warnings)
+		moreDispatches, moreAgents, matched := readTranscripts(transcriptsDir, sourceFlavor, since, opts.Session, ticketTokens, &rep.Warnings)
 		dispatches = append(dispatches, moreDispatches...)
 		agents = append(agents, moreAgents...)
 		sessionMatched = sessionMatched || matched
@@ -370,10 +374,6 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 		// I049: the discovery pre-filter's token set is every audited
 		// ticket's id, already read above (line 238) — well before this
 		// call, so no extra pass over docs/issues is needed.
-		ticketTokens := make([]string, len(tickets))
-		for i, t := range tickets {
-			ticketTokens[i] = t.id
-		}
 		codexDispatches, codexAgents, codexNM, codexSessionMatched := readCodexSessions(opts.CodexSessionsDir, repoDir, since, opts.Session, ticketTokens, &rep.Warnings)
 		dispatches = append(dispatches, codexDispatches...)
 		agents = append(agents, codexAgents...)
@@ -1416,7 +1416,7 @@ func sessionInScope(sf sessionFiles, mtime func(string) (time.Time, bool), since
 // whether --since then excluded it — the diagnostic input for M3's
 // "matched no sessions" warning; always true when sessionID is empty (no
 // filter to fail to match). All trouble becomes warnings.
-func readTranscripts(dir, source string, since time.Time, sessionID string, warnings *[]string) ([]dispatch, []subagent, bool) {
+func readTranscripts(dir, source string, since time.Time, sessionID string, ticketTokens []string, warnings *[]string) ([]dispatch, []subagent, bool) {
 	des, err := os.ReadDir(dir)
 	if err != nil {
 		*warnings = append(*warnings, "transcript dir unreadable — all tickets will report no-transcript: "+err.Error())
@@ -1500,7 +1500,16 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, warn
 				if !ok || meta.AgentType != "workflow-subagent" || meta.SpawnDepth != 1 {
 					continue
 				}
-				a := subagent{source: source, description: workflowOpeningUserLine(sub)}
+				openingLine := workflowOpeningUserLine(sub)
+				referenceCount := ticketref.ReferenceCount(openingLine, ticketTokens)
+				if referenceCount == 0 {
+					continue
+				}
+				if referenceCount > 1 {
+					*warnings = append(*warnings, sub+": workflow opening line names multiple tickets — skipped")
+					continue
+				}
+				a := subagent{source: source, description: openingLine}
 				more, models, cwd := scanJSONL(sub, warnings)
 				if len(models) == 0 && meta.Model != "" {
 					models = []string{meta.Model}
@@ -1559,9 +1568,7 @@ func workflowOpeningUserLine(path string) string {
 				} `json:"message"`
 			}
 			if json.Unmarshal(line, &event) == nil && (event.Type == "user" || event.Message.Role == "user") {
-				if text := workflowMessageText(event.Message.Content); text != "" {
-					return firstLine(text)
-				}
+				return firstLine(workflowMessageText(event.Message.Content))
 			}
 		}
 		if readErr != nil {

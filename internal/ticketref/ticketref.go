@@ -10,7 +10,7 @@ import (
 
 var idRe = regexp.MustCompile(`^I\d+$`)
 var rangeRe = regexp.MustCompile(`^I(\d+)-I(\d+)$`)
-var rangeInTextRe = regexp.MustCompile(`(^|[^A-Za-z0-9])(I\d+-I\d+)([^A-Za-z0-9]|$)`)
+var referenceInTextRe = regexp.MustCompile(`(^|[^A-Za-z0-9_-])(I\d+(?:-I\d+)?)([^A-Za-z0-9_-]|$)`)
 
 // IsID reports whether raw is one canonical I-prefixed ticket id.
 func IsID(raw string) bool { return idRe.MatchString(raw) }
@@ -42,13 +42,75 @@ func Contains(text, id string) bool {
 	if err != nil {
 		return false
 	}
-	for _, match := range rangeInTextRe.FindAllStringSubmatch(text, -1) {
-		start, end, width, ok := Range(match[2])
+	for _, reference := range References(text) {
+		start, end, width, ok := Range(reference)
 		if ok && len(id)-1 == width && want >= start && want <= end {
 			return true
 		}
 	}
 	return false
+}
+
+// ContainsStandalone applies the strict standalone reference boundary to both
+// literal IDs and ranges. It is used for D21 opening-line attribution, where
+// a ticket-looking substring inside a larger hyphenated token is not a claim.
+func ContainsStandalone(text, id string) bool {
+	for _, reference := range References(text) {
+		if reference == id {
+			return true
+		}
+		start, end, width, ok := Range(reference)
+		if !ok || len(id)-1 != width || !IsID(id) {
+			continue
+		}
+		want, err := strconv.Atoi(strings.TrimPrefix(id, "I"))
+		if err == nil && want >= start && want <= end {
+			return true
+		}
+	}
+	return false
+}
+
+// References returns distinct standalone ticket IDs and valid inclusive range
+// tokens in first-occurrence order.
+func References(text string) []string {
+	seen := map[string]bool{}
+	var references []string
+	for _, match := range referenceInTextRe.FindAllStringSubmatch(text, -1) {
+		reference := match[2]
+		_, _, _, isRange := Range(reference)
+		if !IsID(reference) && !isRange || seen[reference] {
+			continue
+		}
+		seen[reference] = true
+		references = append(references, reference)
+	}
+	return references
+}
+
+// ReferenceCount returns the number of distinct standalone reference groups
+// that claim at least one audited ticket ID. One range is one group even when
+// it expands to several IDs.
+func ReferenceCount(text string, auditedIDs []string) int {
+	count := 0
+	for _, reference := range References(text) {
+		for _, id := range auditedIDs {
+			if reference == id {
+				count++
+				break
+			}
+			start, end, width, ok := Range(reference)
+			if !ok || !IsID(id) || len(id)-1 != width {
+				continue
+			}
+			want, err := strconv.Atoi(strings.TrimPrefix(id, "I"))
+			if err == nil && want >= start && want <= end {
+				count++
+				break
+			}
+		}
+	}
+	return count
 }
 
 func containsToken(text, token string) bool {

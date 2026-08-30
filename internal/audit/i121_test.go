@@ -58,3 +58,30 @@ func TestHyphenatedNonRangeDoesNotAttributeInteriorIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexWorkerRangeIsOneOpeningLineReference(t *testing.T) {
+	repo := t.TempDir()
+	tickets := map[string]string{}
+	for _, id := range []string{"I051", "I052", "I053", "I054", "I055", "I056"} {
+		tickets[id] = "routine"
+	}
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, tickets)
+	claudeDir := t.TempDir()
+	codexDir := t.TempDir()
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker", "worker", "", repo, "user", topLevelSource),
+		codexUserMessageLine("tickets I051-I056"),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: claudeDir, CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	for _, id := range []string{"I051", "I052", "I053", "I054", "I055", "I056"} {
+		if got := rows[id].Verdict; got != VerdictMatch {
+			t.Errorf("%s verdict = %s (%s), want range-attributed match", id, got, rows[id].Detail)
+		}
+	}
+}
