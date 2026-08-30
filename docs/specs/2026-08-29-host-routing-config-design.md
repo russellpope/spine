@@ -207,29 +207,35 @@ file, unavailable harness, missing executable, unreachable requested pair, or
 unreachable pin makes every `spine model` mode exit 2, print one diagnostic to
 stderr, and print no fallback ID or effort to stdout.
 
-### I051 compatibility: validated final launch pair
+### I051 compatibility: fail-closed controlled launch validation
 
-`spine model validate [--dir REPO] [--expect MODEL_ID] <flavor> <tier>` keeps
+`spine model [--dir REPO] validate [--expect MODEL_ID] <flavor> <tier>` keeps
 I051's strict repository read and launch policy. In one process it reads one
 strict repository snapshot and one host-config snapshot, validates the
-requested repository route under I051, then applies this document's host
-constraint to that validated request. The returned internal result is the
-final host pair, never a separately resolved model and effort.
+requested repository route under I051, then inspects this document's host
+constraint against that validated request.
 
 For an absent host file, I051's current stdout, stderr, and exit behavior stay
-byte-compatible. For a present file, an exact pin may replace the validated
-repository ID only after its model passes I051's positive-ID and deny policy.
-The pinned ID need not be a repository mirror override. A forbidden or
-syntactically unsafe pin refuses before stdout. `--expect` compares its value
-with the final ID, so an expectation for the requested ID fails when a safe
-divergent pin supplies another final ID. The command returns the final ID and
-final effort from one resolution result; I075 still owns recording or auditing
-dispatch effort.
+byte-compatible. For a present file, a pin whose model ID is byte-identical to
+the validated repository active ID may validate after its model passes I051's
+positive-ID and deny policy. A forbidden or syntactically unsafe pin refuses
+before stdout.
+
+A safe divergent pin remains valid host configuration and may replace the
+preference in plain host-aware `spine model`, `--effort`, and `--json` output.
+Doctor diagnoses that divergence. Controlled `model validate` must refuse it
+with exit 2 and no stdout because audit remains preference-only and cannot yet
+prove the launched host ID conforms. Neither `--expect` value can bypass this
+refusal. I074 is the gate that may later enable divergent pins by adding host
+conformance to audit's active vocabulary. Until then, `--expect` compares only
+after the host pin passes this identity gate. I075 still owns recording or
+auditing dispatch effort.
 
 The implementation must not fall back from `model validate` to plain
-`spine model` after a validation failure. Tests cover a safe divergent pin, a
-forbidden pin, requested-versus-final `--expect`, one-result model-and-effort
-consumption, and no-host byte/exit compatibility.
+`spine model` after a validation failure. Tests cover plain inspection and
+doctor diagnosis of a safe divergent pin, controlled refusal of that pin, an
+identical pin that validates, a forbidden pin, `--expect` after the identity
+gate, and no-host byte/exit compatibility.
 
 ## Portable mirrors and update behavior
 
@@ -260,15 +266,18 @@ deterministic: for each available declared harness, in lexical harness order,
 and each tier in `model.Tiers` order, resolve that harness's repository
 preference without host substitution. For every unpinned exact pair absent
 from that harness's declared routes, emit one finding. Do not inspect absent or
-unavailable harnesses. A valid divergent pin suppresses the corresponding
-preference reachability warning because the pin supplies the final route.
+unavailable harnesses. A valid divergent pin replaces the plain-output route
+but produces a warning that controlled validation cannot launch it until I074
+makes it auditable. A byte-identical pin suppresses the corresponding
+preference reachability warning because it supplies the same active model ID.
 
 | Condition | I072 allocated finding result |
 | --- | --- |
 | File absent | Silent. Existing unconfigured hosts remain healthy. |
 | Unreadable file, malformed JSON, duplicate key, unsupported schema, prohibited member, invalid declared executable, unavailable pinned harness, missing pinned model, or unsupported pinned effort | The allocated I072 finding reports one or more `error` results on the host-config path. Existing doctor exit handling returns 1. |
 | Valid config, an available declared harness, an unpinned tier, and an unreachable repository preference | One allocated-ID `warn` per harness-tier, naming repository, harness, tier, and requested pair. Existing doctor exit handling returns 1. |
-| Valid pin without `evidence_refs` | No I072 finding. |
+| Valid divergent pin | One allocated-ID `warn` naming the harness-tier and stating that controlled validation refuses the host model until I074 makes it auditable. |
+| Valid byte-identical pin without `evidence_refs` | No I072 finding. |
 
 `spine audit routing` adds only a structural Claude-harness preflight before
 transcript discovery and ticket verdict construction. It loads a present file,
@@ -285,7 +294,8 @@ Those questions wait for I074.
 Until I074, a valid divergent host pin plus an `observed_ids` value is not
 evidence that an existing source-derived transcript token conforms. I072 leaves
 existing audit interpretation untouched; it neither adds conformance nor
-creates a new silent-descent result.
+creates a new silent-descent result. This is why `model validate` refuses a
+divergent pin even though plain host-aware model output may display it.
 
 ## Migration and compatibility
 
@@ -295,8 +305,10 @@ Deployment is opt-in and reversible:
 2. Fleet management may provision a version-1 file for one host.
 3. The owner runs `spine doctor --dir <repo>` and representative
    `spine model --dir <repo> --json <flavor> <tier>` checks.
-4. A dispatcher uses the final pair only after I071's launch contract is
-   owner-verified.
+4. A controlled dispatcher uses the host pair only when `model validate`
+   accepts it. Before I074, that means no divergent model ID even after I071's
+   launch contract is owner-verified. Plain host-aware output remains an
+   inspection path, not launch authorization.
 5. Removing the local file restores the legacy result without a repository
    rollback or estate sweep.
 
@@ -309,8 +321,9 @@ may report its label and configuration status but must never dump the JSON.
   CLI/output/document migration, and estate sweep. I072 only uses `harnesses`
   in new local configuration.
 - **I074:** owns declared-versus-observed heterogeneous audit correlation and
-  verdicts such as confirmed, mismatch, and unconfirmable. I072 only provides
-  validated final resolution and exact raw observed-ID data.
+  verdicts such as confirmed, mismatch, and unconfirmable. I072 provides plain
+  host-aware resolution and exact raw observed-ID data, but keeps divergent
+  controlled launch validation closed until I074 supplies conformance.
 - **I077:** owns interpretation of `evidence_refs`, eval lookup, mutation
   evidence, and any no-evidence advisory. I072 stores opaque references and
   does not require an eval record for a valid owner pin.
@@ -328,6 +341,7 @@ requires each host route and pin to carry an exact effort string.
 | A configuration file could become a credential or shell-injection channel. | The closed schema forbids secrets, endpoints, env, args, and unknown fields. Validation never executes a command or makes a network call. |
 | Rendering a host pin into WORKFLOW would make update and estate results machine-dependent. | Mirror, render, init, adopt, and update never load host state. `spine model --json` carries the visible local trail instead. |
 | Host preflight could overwrite audit's preference-only judgment. | Audit checks only declared config and pins before Claude transcript discovery. It leaves mappings and verdict bytes unchanged; I074 owns heterogeneous confirmation. |
+| A safe divergent pin could pass launch validation even though unchanged audit policy would call it unmapped. | Plain host-aware output may inspect the pin and doctor diagnoses it, but controlled validation refuses it until I074 adds the same host-active ID to audit. A byte-identical pin remains launchable. |
 | Treating effort as decoration would turn one route into several indistinguishable choices. | Every route and pin carries the exact model@effort pair. I072 keeps strings opaque; I075 owns transport semantics. |
 | I108 has stale D11 text, I050 also adds a doctor check, and implementation order is not fixed. | I108 takes D14. I072 allocates only after both integrations by reading the current source. D16 is expected when both precede I072, but not reserved. |
 
@@ -363,11 +377,14 @@ requires each host route and pin to carry an exact effort string.
    constraint or pin. A valid pin supplies the final pair while preserving the
    requested pair and provenance. Without a pin, only the exact reachable
    requested pair succeeds; no automatic substitution occurs.
-5. `model validate` strictly validates the requested repository route under
-   I051, then applies the host constraint in the same process and returns a
-   consistent final model@effort pair. Safe divergent pins pass I051 ID policy
-   without being repository overrides; forbidden pins fail; `--expect`
-   compares the final ID; and no-host output and exits remain byte-compatible.
+5. `spine model [--dir REPO] validate [--expect MODEL_ID] <flavor> <tier>`
+   strictly validates the requested repository route under I051, then checks
+   the host constraint in the same process. A byte-identical pin may validate.
+   A safe divergent pin remains inspectable in plain host-aware model output
+   but controlled validation refuses it as not yet auditable, regardless of
+   `--expect`; forbidden pins fail; and no-host output and exits remain
+   byte-compatible. I074 is the only gate that may later enable divergent
+   launch validation.
 6. Missing host config preserves current text output and existing JSON field
    meanings. A valid pin changes text and `--effort` to the final pair and
    adds a JSON trail without breaking existing fields.
@@ -381,7 +398,9 @@ requires each host route and pin to carry an exact effort string.
 9. At code time, doctor rechecks the first unclaimed ID, currently expected
    D16. It reports config errors and deterministically reports one warning for
    every unreachable unpinned tier of every available declared harness. It
-   ignores absent or unavailable harnesses and remains silent without a file.
+   also diagnoses each divergent pin that controlled validation refuses until
+   I074. It ignores absent or unavailable harnesses and remains silent without
+   a file.
 10. Audit preflight validates only declared host config and pins before Claude
     transcript discovery. Bad configuration exits 2. Existing mappings,
     verdicts, and output bytes remain unchanged; unpinned reachability and

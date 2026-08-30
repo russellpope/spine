@@ -120,9 +120,10 @@ Validation follows this order against one in-memory snapshot:
    configuration error. Do not fall back to the embedded value.
 5. Select the dotted `<flavor>.<tier>` row when present. For Claude only, use
    the legacy bare `<tier>` row when no dotted row exists.
-6. Classify the selected ID. The embedded current ID is active. An ID in the
-   requested cell's shipped history is retired. Any other ID is a deliberate
-   repository override.
+6. Classify the selected ID current-first across the complete flavor. An ID
+   that is current for any tier of the flavor is active. Otherwise an ID in
+   any tier's shipped history for that flavor is retired, including history
+   from a different cell. Any other ID is a deliberate repository override.
 7. Apply the positive ID syntax and deny policy to the active ID. A safe
    deliberate override remains valid.
 8. If `--expect` is absent, return that validated active ID.
@@ -146,11 +147,19 @@ The validation reader is intentionally stricter than `RoutingKeys` and
 - A missing `template_version` is accepted for legacy repositories. A present
   value must be one decimal integer no greater than the binary's compiled
   generation. Empty, duplicate, malformed, or newer values refuse.
-- More than one `model_routing:` block refuses. The validator must not guess
-  which block controls a launch.
+- More than one `model_routing:` block refuses. A column-zero
+  `model_routing:` prefix with a nonempty, non-comment suffix is malformed,
+  not a missing block. A comment-only suffix is legal. The validator must not
+  guess which block controls a launch.
 - The exact dotted requested key may occur at most once. The selected legacy
   bare Claude key may occur at most once. One dotted row plus one bare row is
-  legal and the dotted row wins.
+  legal and the dotted row wins before any shadowed bare-row duplicate or
+  malformed check. Bare-row strictness applies only when the bare row is
+  selected.
+- Parsing preserves each raw key spelling. A selected-looking key whose
+  trimmed spelling equals the requested dotted or selected bare key but whose
+  raw bytes are not exact, including whitespace before the colon, is malformed
+  configuration. It cannot silently default or override another row.
 - An exact-key line with no colon, an empty value, multiple model IDs,
   repeated effort separators, or malformed alternate syntax refuses. A
   malformed unrelated row does not block another requested key.
@@ -158,12 +167,17 @@ The validation reader is intentionally stricter than `RoutingKeys` and
   parses model, effort, and alternate fields. A `#` inside an ID remains data;
   the safe-ID grammar later rejects it for launch.
 - The selected row uses the existing model/effort/alternate grammar only when
-  that grammar is unambiguous. Existing effort-vocabulary errors still
-  refuse. Validation does not compare the later launch effort.
+  that grammar is unambiguous. Only the exact bytes ` alt:` introduce an
+  alternate. Safe IDs containing other `alt:` substrings, including
+  `salt:model` and `vault:autoencoder`, remain model IDs. Repeated exact
+  delimiters and empty alternate values refuse. Existing effort-vocabulary
+  errors still refuse. Validation does not compare the later launch effort.
 - A selected row whose ID equals the embedded current ID is active even when
   its effort or alternate makes existing provenance report `Override`.
-- A selected row whose ID equals any historical ID for the requested cell is
-  `retired-model`, regardless of an edited effort or alternate.
+- A selected row whose ID equals a current ID for any tier of the flavor is
+  active. Otherwise a selected row whose ID equals any historical ID for any
+  tier of the flavor is `retired-model`, regardless of an edited effort,
+  alternate, or the historical cell in which it appeared.
 - Any other selected ID is a deliberate override. It passes only when it
   satisfies the safe-ID and deny rules.
 - A safe custom candidate passed only through `--expect` is not an override.
@@ -228,7 +242,9 @@ rule rather than being softened into audit compatibility.
 
 The object accepts exactly `idPattern`, `forbiddenTokens`, and
 `forbiddenPatterns`. Each pattern object accepts exactly `name` and `re`.
-Unknown members are invalid embedded policy.
+Unknown members are invalid embedded policy. Duplicate JSON member names are
+also invalid before typed decoding, recursively throughout the root,
+`modelValidation`, pattern, flavor, tier, and entry objects.
 
 The ASCII allowlist runs first. It admits 1 through 128 bytes and rejects
 whitespace, control bytes, quotes, dollar signs, backticks, semicolons,
@@ -295,7 +311,10 @@ Every diagnostic begins `model validate: <reason>:` for exit 1 or
 `model validate:` for exit 2. It names the `<flavor>.<tier>` key. Deny
 failures name either `token:<value>` or the configured pattern name.
 Untrusted values use Go `%q`, so newline and control bytes cannot forge log
-lines. No refusal prints an offending value to stdout.
+lines. File errors extract a `PathError` path and quote that path separately
+from its underlying error so newline, tab, and carriage-return bytes cannot
+create another physical diagnostic line. No refusal prints an offending value
+to stdout.
 
 Examples:
 
@@ -327,6 +346,21 @@ The binding invariant is state-scoped: an ID that passes validation cannot
 later receive `unmapped-dispatch` for the same flavor when audit reads the
 same repository policy. The invariant does not promise a particular audit
 tier verdict and does not span a policy change.
+
+The active leg must therefore use the same strict selected-route result for
+validation and audit. Same-file fixtures cover malformed headers, exact and
+raw-whitespace keys, comments, duplicates, legacy bare rows, and safe
+overrides. Audit may layer compatibility aliases and history only after that
+shared active result.
+
+I072 may later parse a host pin, expose it through plain host-aware
+`spine model` output, and diagnose it through doctor. Until I074 defines how
+audit proves host conformance, controlled `model validate` fails closed on a
+host pin whose model ID differs from the repository active ID because that
+launch is not yet auditable under this invariant. A host pin whose model ID is
+byte-identical to the repository active ID may validate. I074 is the gate that
+may later admit divergent host pins after audit learns the same active
+vocabulary.
 
 Validation must not call audit. Audit must not copy a third active-ID matcher.
 `resolvedTier.matches` retains its alias and history loops, but delegates its
@@ -508,20 +542,25 @@ and a historical bare value refuses.
    keys, malformed selected rows, malformed template versions, and newer
    generations exit 2 with no stdout.
 3. Embedded current rows and exact current mirror rows pass. A safe deliberate
-   mirror override passes. A historical requested-cell row refuses with
-   `retired-model`, including legacy bare Claude history and history with an
-   edited effort.
+   mirror override passes. Current IDs win across every tier of a flavor.
+   Otherwise any historical ID anywhere in that flavor refuses with
+   `retired-model`, including cross-cell history, legacy bare Claude history,
+   and history with an edited effort.
 4. `--expect` uses byte equality with the active requested ID. Current aliases
    refuse, historical IDs refuse, another active tier reports
    `route-mismatch`, and an otherwise safe unknown reports
    `unmapped-dispatch`.
 5. `models/defaults.json` carries the exact closed `modelValidation` schema.
-   Build-time tests reject bad regexes, duplicate tokens or names, unsafe
-   current/history IDs, deny overlap with a current ID, unknown schema fields,
-   and any shorthand alias omitted from the exact token inventory.
-6. Empty IDs, overlength IDs, whitespace, control bytes, quotes, backticks,
-   dollar signs, `$()`, semicolons, backslashes, and shell operators refuse as
-   `invalid-model-id`. Stderr is one escaped line and stdout is empty.
+   Build-time tests reject bad regexes, duplicate tokens or names, recursively
+   duplicated JSON object members, unsafe current/history IDs, deny overlap
+   with a current ID, unknown schema fields, and any shorthand alias omitted
+   from the exact token inventory.
+6. An empty selected repository value is an exit-2 configuration error, and
+   an explicitly empty `--expect` is an exit-2 usage error. Nonempty
+   overlength IDs, whitespace, control bytes, quotes, backticks, dollar signs,
+   `$()`, semicolons, backslashes, and shell operators refuse as
+   `invalid-model-id` on exit 1. Stderr is one escaped physical line and
+   stdout is empty.
 7. Exact forbidden tokens and all named pattern classes refuse as
    `forbidden-model` and name the rule. `automatic-model` is not rejected by
    an `auto` substring check when declared as the active override.
@@ -534,8 +573,11 @@ and a historical bare value refuses.
    `--json` outputs remain unchanged.
 10. Audit uses the shared exact active-ID matcher, keeps its public verdicts,
     aliases, history, shared-ID rules, escalation, and fallback behavior, and
-    proves that a validated default or safe override cannot become
-    `unmapped-dispatch` for the same flavor under unchanged policy.
+    proves with same-file strict-parser fixtures that a validated default or
+    safe override cannot become `unmapped-dispatch` for the same flavor under
+    unchanged policy. Until I074 adds host conformance, a divergent host pin
+    is inspectable by plain host-aware output but is not launch-validatable;
+    an identical host pin may validate.
 11. A failed validator, including one that prints an ID before exit 1, causes
     zero calls to fake cmux, herdr, Claude, or Codex launchers.
 12. Each of the eight named deepthought sites has a guarded assignment local
@@ -553,8 +595,12 @@ and a historical bare value refuses.
     templates and generation remain unchanged.
 16. The finished Spine diff receives a fresh primary-tier requirements-attack
     spec review and independent verification before shipment. Focused tests,
-    full uncached tests, race tests for model/audit, vet, build, CLI fixtures,
-    `make verify`, doctor, and routing/stage audits pass with recorded output.
+    full uncached tests, race tests for model/audit/CLI, `go vet ./...`,
+    `go build -o bin/spine ./cmd/spine`, CLI and same-file validation-to-audit
+    fixtures, `./bin/spine doctor --dir .`, `./bin/spine audit routing --dir
+    .`, `./bin/spine audit stages --dir .`, formatting and diff checks, and a
+    final `maipipe run full --wait` at the exact candidate SHA pass with
+    recorded output.
 17. The exact verified Spine binary is installed at both `~/bin/spine` and
     `~/.local/bin/spine`, and both paths pass a valid `model validate` smoke
     before deepthought changes begin.

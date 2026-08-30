@@ -40,6 +40,9 @@ expressions, POSIX shell regression tests, Markdown skill sources.
   compatible.
 - Validation accepts only the active requested ID. Audit keeps aliases and
   history as evidence.
+- Active and retired classification is current-first across a flavor. Any ID
+  current in any tier wins; otherwise any historical ID in any tier of that
+  flavor is retired, including cross-cell history.
 - I119's flags-first contract applies at both parser layers. Outer `model`
   flags, including `--dir`, precede the `validate` positional. Nested
   `--expect` follows `validate` and precedes flavor/tier. Never accept an outer
@@ -192,6 +195,10 @@ any runtime validation call.
   current-ID syntax failure, current-ID deny overlap, historical-ID syntax
   failure, and a shorthand alias absent from `forbiddenTokens`.
 
+  Add pre-decode mutation fixtures for duplicate member names at the root
+  `modelValidation`, `idPattern`, pattern object, flavor, tier, and entry
+  levels. Every named mutation must fail before last-member-wins typed decode.
+
 - [ ] **Step 2: Run the focused tests red.**
 
   Run:
@@ -264,15 +271,20 @@ and audit tasks.
 
 - [ ] **Step 2: Write failing strict-input tests.** Assert ordinary errors,
   not `LaunchRefusal`, for unreadable present input; empty, duplicate,
-  malformed, non-decimal, and newer `template_version`; duplicate
-  `model_routing` blocks; duplicate requested dotted key; duplicate selected
-  bare key; missing colon on the exact requested key; empty ID; repeated `@`;
-  malformed `alt:`; and existing invalid Pi effort vocabulary. Assert a
-  malformed unrelated row does not block a valid requested row. Assert one
-  dotted plus one bare Claude row is legal and dotted wins.
+  malformed, non-decimal, and newer `template_version`; malformed
+  `model_routing:` headers; duplicate blocks; duplicate requested dotted key;
+  duplicate selected bare key; missing colon on the exact requested key;
+  raw-key whitespace; empty selected ID; repeated `@`; repeated or empty exact
+  ` alt:` delimiters; and existing invalid Pi effort vocabulary. Assert
+  comment-only headers and values behave consistently. Assert safe IDs such as
+  `salt:model` and `vault:autoencoder` pass when active. Assert a malformed
+  unrelated row does not block a valid requested row. Assert one valid dotted
+  Claude row wins before duplicate or malformed shadowed bare rows, while the
+  same bare defects fail when the bare row is selected.
 
 - [ ] **Step 3: Write failing policy-refusal tests.** Cover a historical
-  requested-cell mirror ID, the same historical ID with a changed effort,
+  mirror ID from the requested cell, a historical ID from another cell in the
+  same flavor, the same historical ID with a changed effort,
   an unsafe active custom override, every exact token, case variants matched
   by the named patterns, separator-bound `vendor-auto` values, and
   `automatic-model` as the no-substring negative control. Check exact
@@ -304,9 +316,10 @@ and audit tasks.
 
 - [ ] **Step 7: Implement active route classification.** Resolve the requested
   cell and the other tiers from the same snapshot. Preserve existing
-  effort-vocabulary validation. Classify requested-cell history by model ID
-  even when effort or alternate differs. Treat every other selected ID as a
-  deliberate override, then apply syntax and deny policy. Build the
+  effort-vocabulary validation. Classify current IDs before history across all
+  tiers of the flavor. If no current ID matches, classify any flavor-wide
+  history by model ID even when effort or alternate differs. Treat every other
+  selected ID as a deliberate override, then apply syntax and deny policy. Build the
   other-tier active set only from rows that parse unambiguously; malformed
   unrelated rows remain non-blocking and add no route-mismatch candidate.
 
@@ -365,7 +378,9 @@ and audit tasks.
   deny rule, empty stdout, and exit 1. Assert unreadable input, malformed row,
   unknown flavor, unknown tier, and unsupported generation exit 2 with empty
   stdout. Run a refusal with `SPINE_MODEL_VALIDATE_BYPASS=1` and prove it still
-  refuses.
+  refuses. Add newline, tab, and carriage-return `--dir` cases. Each extracts
+  and quotes the `PathError` path, exposes only the underlying OS error, and
+  emits exactly one physical stderr line.
 
 - [ ] **Step 3: Pin old CLI compatibility.** Re-run existing tests and add one
   byte comparison fixture for each of plain ID, `--json`, `--effort`, and
@@ -451,6 +466,12 @@ changing retained evidence behavior.
   the returned ID into audit under the unchanged fixture and assert it is not
   `unmapped-dispatch`. Keep flavor explicit in the test so the state-scoped
   invariant is unambiguous.
+
+  Add same-file fixtures for malformed `model_routing:` headers, raw-key
+  whitespace, comments, duplicates, selected and shadowed legacy bare rows,
+  and safe overrides. Run validation first and then audit the exact same file;
+  no validated ID may produce `unmapped-dispatch`, and malformed selected-like
+  syntax must fail closed rather than default differently between consumers.
 
 - [ ] **Step 2: Add compatibility tests.** Assert a rejected shorthand alias
   and historical ID still receive their pre-I051 audit treatment. Pin shared

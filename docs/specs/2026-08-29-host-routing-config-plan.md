@@ -11,10 +11,12 @@ mirrors or updates host-dependent.
 **Architecture:** `internal/hostconfig` owns parsing, default-path lookup, and
 closed-schema validation. `internal/model` retains `Resolve` for estate plus
 repository preference and adds a host-aware result carrying requested and
-final pairs. `model validate` validates its strict I051 repository route and
-then consumes that same host result. Doctor checks declared available
-harnesses deterministically. Audit performs structural config preflight only.
-Update and template rendering stay outside every host-aware call path.
+final pairs. Plain model output may consume that host-aware result. Controlled
+`model validate` validates its strict I051 repository route, then permits only
+an absent host pin or a pin whose model ID is byte-identical to that active
+route. Doctor checks declared available harnesses and diagnoses divergent pins
+deterministically. Audit performs structural config preflight only. Update and
+template rendering stay outside every host-aware call path.
 
 **Tech stack:** Go standard library only. JSON uses `encoding/json`; default
 path uses `os.UserConfigDir`; executable presence uses an injected
@@ -54,6 +56,11 @@ path uses `os.UserConfigDir`; executable presence uses an injected
 - Audit validates declared config and pins before Claude transcript discovery,
   but retains its preference-only mappings and every verdict/output byte. It
   does not test unpinned reachability or host-to-observed conformance.
+- Until I074 adds host conformance to audit, a safe divergent pin is valid for
+  plain host-aware model inspection but is not a controlled launch route.
+  `spine model [--dir REPO] validate ...` refuses it with exit 2 and no stdout.
+  A pin whose model ID is byte-identical to the repository active ID may
+  validate. No `--expect` value bypasses this gate.
 - Do not change templates or template generation.
 - Stage explicit paths only. Do not stage `.cache/`,
   `docs/research/2026-08-26-fusion-harness-borrow-hitlist.md`, concurrent code,
@@ -65,7 +72,7 @@ path uses `os.UserConfigDir`; executable presence uses an injected
 | --- | --- |
 | `internal/hostconfig/hostconfig.go` | Schema-v1 types; default-path helper, `Load`, and validation for a trusted local host file. |
 | `internal/hostconfig/hostconfig_test.go` | Parser, nested closed-schema, security boundary, route, observed-ID, and injected executable/path tests. |
-| `internal/model/model.go` | Existing `Resolve` stays preference-only; host-aware resolution and I051-compatible final launch resolution return requested and final pairs. |
+| `internal/model/model.go` | Existing `Resolve` stays preference-only; host-aware plain resolution returns requested and final pairs, while I051 controlled validation refuses divergent pins until I074. |
 | `internal/model/model_test.go` | Precedence, I051 compatibility, one-result consumption, no-substitution, pi, and alternate negative controls. |
 | `cmd/spine/main.go` | `cmdModel` and `cmdModelValidate` print or consume the final pair; audit CLI keeps its existing output path. |
 | `cmd/spine/main_test.go` | CLI success, compatibility, final-ID expectation, error, stdout, and doctor exit tests. |
@@ -113,12 +120,16 @@ remain race-safe. `ErrNotConfigured` is the only absent-file result and causes
 the legacy result, not an error. All present files are fully validated before a
 final pair is returned.
 
-`ValidateLaunchForHost` is the only host-aware path for `model validate`. It
-reads I051's strict repository snapshot once, reads the host file once, applies
-the I051 safe-ID and deny policy to both the requested and pinned final IDs,
-and returns one `Resolution`. `cmdModelValidate` prints `Resolution.Entry.ID`;
-a launcher that needs effort reads `Resolution.Entry.Effort` from that same
-value. Existing `ValidateLaunch` stays the no-host I051 compatibility path.
+`ValidateLaunchForHost` is the only host-aware path for controlled
+`spine model [--dir REPO] validate`. It reads I051's strict repository
+snapshot once, reads the host file once, applies the I051 safe-ID and deny
+policy to both the requested and pinned IDs, and returns one `Resolution` only
+when the pin's model ID is absent or byte-identical to the repository active
+ID. A divergent pin returns a configuration error before `cmdModelValidate`
+prints stdout. Plain `ResolveForHost` may still return that divergent final
+pair for inspection. Existing `ValidateLaunch` stays the no-host I051
+compatibility path. I074 may later relax only this identity gate after it
+supplies an auditable host-active vocabulary.
 
 The exact exported field layout may gain JSON tags or small nested types, but
 it must represent: final `Entry`; requested ID, effort, and provenance; host
@@ -212,13 +223,14 @@ trail, while `Resolve` and all mirror callers remain preference-only.
     cell-only behavior.
 
 - [ ] **Step 2: Write failing I051 compatibility tests.** Start from a strict
-  I051 repository snapshot, then apply a host fixture. Assert a safe divergent
-  pin returns a final pair even though its ID is not a repository override; a
-  forbidden pin fails the I051 positive-ID/deny policy; an expectation for the
-  requested ID fails when the final ID differs; an expectation for the final
-  ID passes; and a mock launcher consumes the model and effort from one
-  `Resolution`, not separate resolver calls. Assert the no-host result keeps
-  I051's current output and exit behavior byte-for-byte.
+  I051 repository snapshot, then apply host fixtures. Assert plain
+  `ResolveForHost` returns a safe divergent final pair for inspection even
+  though its ID is not a repository override, while `ValidateLaunchForHost`
+  refuses that same pin as not yet auditable. Assert neither requested nor
+  final `--expect` semantics can bypass the refusal. Assert a pin whose model
+  ID is byte-identical to the repository active ID validates, a forbidden pin
+  fails the I051 positive-ID/deny policy, and the no-host result keeps I051's
+  current output and exit behavior byte-for-byte.
 
 - [ ] **Step 3: Add host-blind negative controls.** Use a valid host fixture
   with a divergent Claude pin, then prove `MirrorRows()`,
@@ -236,9 +248,10 @@ trail, while `Resolve` and all mirror callers remain preference-only.
   existing `Resolve` to obtain the ordinary requested entry. For validation,
   first use I051's strict one-snapshot repository reader and policy, then
   apply the host constraint to that validated requested entry in the same
-  process. Validate a final pin under the same I051 ID policy, return its
-  model and effort in the same `Resolution`, and compare `--expect` to final
-  ID. Never require a valid host pin to be a repository override. Map
+  process. Validate a pin under the same I051 ID policy. Return it to plain
+  host-aware resolution, but make controlled validation reject it as not yet
+  auditable when its model ID differs from the repository active ID. Permit an
+  identical pin and compare `--expect` only after that gate. Map
   `ErrNotConfigured` to an `unconfigured` trail and retain exact I051 no-host
   behavior. For a present config, require the selected flavor-named harness
   and executable, apply an exact tier pin when present, otherwise require the
@@ -280,12 +293,13 @@ requested/host/pin trail.
   writes no stdout, and has one safe stderr diagnostic. Keep the existing
   flags-before-positionals and `--alternate` tests green unchanged.
 
-- [ ] **Step 3: Add final-ID validation command tests.** Through
-  `spine model validate`, assert a safe divergent pin prints the final ID and
-  its paired effort reaches the fake launcher from the same result. Assert
-  `--expect` rejects the requested ID and accepts the final ID, a forbidden
-  pin returns the I051 refusal with no stdout, and an absent file preserves
-  I051 bytes and exits. Do not permit fallback to plain `spine model`.
+- [ ] **Step 3: Add controlled validation command tests.** Through
+  `spine model [--dir REPO] validate`, assert a safe divergent pin exits 2,
+  prints no stdout, names the not-yet-auditable host divergence, and never
+  reaches the fake launcher. Assert both requested and final `--expect` values
+  still refuse. Assert a byte-identical pin validates, a forbidden pin returns
+  the I051 refusal with no stdout, and an absent file preserves I051 bytes and
+  exits. Do not permit fallback to plain `spine model`.
 
 - [ ] **Step 4: Run the focused tests red.**
 
@@ -340,9 +354,10 @@ integration point, not pre-reserved in this plan.
   all four Claude tiers and produces one warning per unreachable unpinned pair.
   Assert a two-harness config checks every tier of both available harnesses in
   lexical-harness then `model.Tiers` order. Assert an unavailable declared
-  harness produces no preference warnings, a divergent valid pin suppresses
-  only its matching tier warning, and a valid pin without evidence refs is
-  silent. Use explicit paths through the private helper; run the cases in
+  harness produces no preference warnings, a divergent valid pin produces a
+  not-yet-auditable warning for its matching tier, a byte-identical pin
+  suppresses only its matching preference warning, and a valid identical pin
+  without evidence refs is silent. Use explicit paths through the private helper; run the cases in
   parallel to prove the path seam has no global-state race.
 
 - [ ] **Step 3: Write the command-level result test.** `spine doctor` must
@@ -456,29 +471,36 @@ ticket evidence verdict for bad local routing state.
 
 - [ ] **Step 2: Run functional command simulations with a disposable config
   location injected by the test seam.** Prove: unconfigured resolution matches
-  the prior ID/effort and I051 validation bytes; a safe divergent pin returns
-  its final pair and JSON trail; a forbidden pin refuses; final-ID `--expect`
-  passes while requested-ID `--expect` fails; doctor reports all reachable and
-  unreachable available-harness tiers with one warning per unpinned failure;
+  the prior ID/effort and I051 validation bytes; plain model output exposes a
+  safe divergent pin and its JSON trail; controlled validation refuses that
+  pin for both requested and final `--expect`; an identical pin validates; a
+  forbidden pin refuses; doctor reports all reachable and unreachable
+  available-harness tiers with one warning per unpinned failure and diagnoses
+  divergent pins;
   audit refuses a malformed pin before a Claude transcript read but proceeds
   for a valid unreachable unpinned preference without changing verdict bytes.
   Record commands and output in the implementation evidence.
 
-- [ ] **Step 3: Run the repository gates.**
+- [ ] **Step 3: Run the repository gates.** Run the actual repository
+  sequence, since this Makefile has no `verify` target:
 
-  Run: `make verify`
+  ```bash
+  go test ./internal/hostconfig ./internal/model ./internal/doctor ./internal/audit ./cmd/spine -count=1
+  go test -race ./internal/hostconfig ./internal/model ./internal/doctor ./internal/audit ./cmd/spine -count=1
+  go test ./... -count=1
+  go vet ./...
+  go build -o bin/spine ./cmd/spine
+  ./bin/spine doctor --dir .
+  ./bin/spine audit routing --dir .
+  ./bin/spine audit stages --dir .
+  gofmt -l internal/hostconfig internal/model internal/doctor internal/audit cmd/spine
+  git diff --check
+  maipipe run full --wait
+  ```
 
-  Expected: PASS.
-
-  Run: `spine doctor --dir .`
-
-  Expected: record expected pre-existing findings separately from I072's
-  integration-allocated doctor finding.
-
-  Run: `spine audit routing --dir .`
-
-  Expected: no new I072 configuration error in the unconfigured developer
-  environment.
+  Expected: Go tests, race tests, vet, build, routing and stage audits, format,
+  diff, and the final exact-SHA maipipe lane pass. Record expected pre-existing
+  doctor findings separately from I072's integration-allocated finding.
 
 - [ ] **Step 4: Perform a fresh spec review.** A fresh primary-tier reviewer
   reads the finished diff and this PRD, attacks every requirement first, then
@@ -487,8 +509,9 @@ ticket evidence verdict for bad local routing state.
   matrix, I051 final-pair/expect behavior, no implicit substitution, nested
   schema closure, injected-path race safety, exact observed-ID behavior,
   secret-free output, host-blind update/mirror paths, no template change, no
-  public rename, and no I074/I077 behavior. Resolve findings and rerun affected
-  tests before approval.
+  public rename, controlled refusal of divergent pins before I074, identical
+  pin validation, and no I074/I077 behavior. Resolve findings and rerun
+  affected tests before approval.
 
 - [ ] **Step 5: Perform independent verification.** A fresh primary-tier
   verifier reruns focused and full tests, static checks, functional probes,
