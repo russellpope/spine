@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -45,7 +46,7 @@ commands:
   gate       run a gate-pack check class (gate [--dir D] <pack>[@<v>] <check>)
   checkpoint write or replay a session checkpoint (new, latest, list)
   cursor     print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
-  model      resolve the model table for a (flavor, tier) pair (read-only)
+	model      resolve or validate the model table for a (flavor, tier) pair (read-only)
   version    print the compiled template generation
 `
 
@@ -1564,6 +1565,16 @@ func flagAmongPositionals(args []string) (tok, prev string) {
 // or unknown one is reported via model.Resolve's own error rather than a
 // second validation path here.
 func cmdModel(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "validate" {
+		return cmdModelValidate(args[1:], ".", stdout, stderr)
+	}
+	if len(args) >= 3 && (args[0] == "--dir" || args[0] == "-dir") && args[2] == "validate" {
+		return cmdModelValidate(args[3:], args[1], stdout, stderr)
+	}
+	if len(args) >= 2 && (strings.HasPrefix(args[0], "--dir=") || strings.HasPrefix(args[0], "-dir=")) && args[1] == "validate" {
+		_, dir, _ := strings.Cut(args[0], "=")
+		return cmdModelValidate(args[2:], dir, stdout, stderr)
+	}
 	fs := flag.NewFlagSet("model", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "repo root")
 	effort := fs.Bool("effort", false, "print the resolved effort instead of the bare id")
@@ -1629,6 +1640,68 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, entry.ID)
 	}
 	return 0
+}
+
+func cmdModelValidate(args []string, repoDir string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("model validate", flag.ContinueOnError)
+	var expected string
+	var expectSet bool
+	fs.Func("expect", "exact model id the launcher will use", func(value string) error {
+		if expectSet {
+			return fmt.Errorf("--expect may be supplied only once")
+		}
+		expectSet = true
+		expected = value
+		return nil
+	})
+	const validateUsage = `usage: spine model [--dir D] validate [--expect MODEL_ID] <flavor> <tier>`
+	pos, ok := parseArgs(fs, args, "model validate", validateUsage, 2, stderr)
+	if !ok {
+		return 2
+	}
+	if expectSet && expected == "" {
+		fmt.Fprintf(stderr, "model validate: --expect must not be empty\n%s\n", validateUsage)
+		return 2
+	}
+	entry, err := model.ValidateLaunch(model.LaunchRequest{
+		RepoDir:            repoDir,
+		Flavor:             pos[0],
+		Tier:               pos[1],
+		Expected:           expected,
+		MaxTemplateVersion: tmpl.Version(),
+	})
+	if err != nil {
+		var refusal *model.LaunchRefusal
+		if errors.As(err, &refusal) {
+			printModelLaunchRefusal(stderr, refusal, repoDir, expectSet)
+			return 1
+		}
+		fmt.Fprintln(stderr, "model validate:", err)
+		return 2
+	}
+	fmt.Fprintln(stdout, entry.ID)
+	return 0
+}
+
+func printModelLaunchRefusal(stderr io.Writer, refusal *model.LaunchRefusal, repoDir string, expected bool) {
+	subject := "resolves"
+	if expected {
+		subject = "candidate"
+	}
+	switch refusal.Reason {
+	case model.ReasonForbiddenModel:
+		fmt.Fprintf(stderr, "model validate: %s: %s %s %q (rule: %s)\n", refusal.Reason, refusal.Key, subject, refusal.Value, refusal.Rule)
+	case model.ReasonInvalidModelID:
+		fmt.Fprintf(stderr, "model validate: %s: %s %s %q (allowed: ASCII letters, digits, '.', '_', '/', ':', '+', '-')\n", refusal.Reason, refusal.Key, subject, refusal.Value)
+	case model.ReasonRetiredModel:
+		fmt.Fprintf(stderr, "model validate: %s: %s resolves historical id %q; refresh WORKFLOW.md with 'spine update --dir %q --write'\n", refusal.Reason, refusal.Key, refusal.Value, repoDir)
+	case model.ReasonRouteMismatch:
+		fmt.Fprintf(stderr, "model validate: %s: %s candidate %q is active for %s\n", refusal.Reason, refusal.Key, refusal.Value, refusal.Detail)
+	case model.ReasonUnmappedDispatch:
+		fmt.Fprintf(stderr, "model validate: %s: %s does not map candidate %q\n", refusal.Reason, refusal.Key, refusal.Value)
+	default:
+		fmt.Fprintf(stderr, "model validate: %s: %s %s %q\n", refusal.Reason, refusal.Key, subject, refusal.Value)
+	}
 }
 
 func cmdAdopt(args []string, stdout, stderr io.Writer) int {

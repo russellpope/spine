@@ -2317,6 +2317,156 @@ func TestModelClaudeBareIDRowStillInheritsGlobalTierDefault(t *testing.T) {
 	}
 }
 
+func TestModelValidateSuccessAndGrammar(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"no expect", []string{"model", "--dir", dir, "validate", "codex", "primary"}},
+		{"exact expect", []string{"model", "--dir", dir, "validate", "--expect", "gpt-5.6-sol", "codex", "primary"}},
+		{"equals expect", []string{"model", "--dir", dir, "validate", "--expect=gpt-5.6-sol", "codex", "primary"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errs := runCmd(t, tc.args...)
+			if code != 0 || out != "gpt-5.6-sol\n" || errs != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+			}
+		})
+	}
+
+	customDir := writeModelWorkflow(t, "model_routing:\n  codex.primary: custom-safe\n")
+	code, out, errs := runCmd(t, "model", "--dir", customDir, "validate", "codex", "primary")
+	if code != 0 || out != "custom-safe\n" || errs != "" {
+		t.Fatalf("custom route: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"missing flavor and tier", []string{"model", "validate"}},
+		{"missing tier", []string{"model", "validate", "codex"}},
+		{"explicit empty expect", []string{"model", "validate", "--expect=", "codex", "primary"}},
+		{"dir after validate positional", []string{"model", "validate", "--dir", dir, "codex", "primary"}},
+		{"unsupported outer flag", []string{"model", "--effort", "validate", "codex", "primary"}},
+		{"flag after positionals", []string{"model", "validate", "codex", "primary", "--expect", "gpt-5.6-sol"}},
+		{"alternate rejected", []string{"model", "validate", "--alternate", "codex", "primary"}},
+		{"effort rejected", []string{"model", "validate", "--effort", "codex", "primary"}},
+		{"json rejected", []string{"model", "validate", "--json", "codex", "primary"}},
+		{"force rejected", []string{"model", "validate", "--force", "codex", "primary"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errs := runCmd(t, tc.args...)
+			if code != 2 || out != "" || errs == "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+			}
+		})
+	}
+}
+
+func TestModelValidateRefusalReasonsAndOutputSeparation(t *testing.T) {
+	for _, tc := range []struct {
+		name, workflow, expect, reason, rule string
+	}{
+		{"forbidden", "model_routing:\n  codex.primary: auto\n", "", "forbidden-model", "token:auto"},
+		{"invalid", "model_routing:\n  codex.primary: bad;id\n", "", "invalid-model-id", ""},
+		{"retired", "model_routing:\n  claude.routine: claude-sonnet-5\n", "", "retired-model", ""},
+		{"route mismatch", "", "gpt-5.6-terra", "route-mismatch", ""},
+		{"unmapped", "", "bespoke-safe", "unmapped-dispatch", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			flavor, tier := "codex", "primary"
+			if tc.workflow != "" {
+				dir = writeModelWorkflow(t, tc.workflow)
+			}
+			if tc.name == "retired" {
+				flavor, tier = "claude", "routine"
+			}
+			args := []string{"model", "--dir", dir, "validate"}
+			if tc.expect != "" {
+				args = append(args, "--expect", tc.expect)
+			}
+			args = append(args, flavor, tier)
+			code, out, errs := runCmd(t, args...)
+			if code != 1 || out != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+			}
+			if !strings.HasPrefix(errs, "model validate: "+tc.reason+": ") || strings.Count(errs, "\n") != 1 {
+				t.Fatalf("stderr=%q, want one %s diagnostic line", errs, tc.reason)
+			}
+			if tc.rule != "" && !strings.Contains(errs, "rule: "+tc.rule) {
+				t.Fatalf("stderr=%q, want deny rule %q", errs, tc.rule)
+			}
+		})
+	}
+}
+
+func TestModelValidateEscapesUntrustedCandidateOnOneLine(t *testing.T) {
+	candidate := "line\nbreak"
+	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "validate", "--expect", candidate, "codex", "primary")
+	if code != 1 || out != "" || strings.Count(errs, "\n") != 1 || !strings.Contains(errs, `"line\nbreak"`) {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+}
+
+func TestModelValidateConfigurationErrorsExitTwo(t *testing.T) {
+	newer := writeModelWorkflow(t, "template_version: 13\n")
+	malformed := writeModelWorkflow(t, "model_routing:\n  codex.primary: one @ high @ low\n")
+	repoFile := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(repoFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"malformed row", []string{"model", "--dir", malformed, "validate", "codex", "primary"}},
+		{"unknown flavor", []string{"model", "validate", "bogus", "primary"}},
+		{"unknown tier", []string{"model", "validate", "codex", "bogus"}},
+		{"newer generation", []string{"model", "--dir", newer, "validate", "codex", "primary"}},
+		{"unreadable present input", []string{"model", "--dir", repoFile, "validate", "codex", "primary"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errs := runCmd(t, tc.args...)
+			if code != 2 || out != "" || !strings.HasPrefix(errs, "model validate:") {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+			}
+		})
+	}
+}
+
+func TestModelValidateHasNoEnvironmentBypass(t *testing.T) {
+	t.Setenv("SPINE_MODEL_VALIDATE_BYPASS", "1")
+	dir := writeModelWorkflow(t, "model_routing:\n  codex.primary: auto\n")
+	code, out, errs := runCmd(t, "model", "--dir", dir, "validate", "codex", "primary")
+	if code != 1 || out != "" || !strings.Contains(errs, "forbidden-model") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+}
+
+func TestModelBareJSONEffortAlternateLegacyOutputsRemainByteCompatible(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"bare", []string{"model", "--dir", dir, "claude", "primary"}, "claude-fable-5\n"},
+		{"json", []string{"model", "--dir", dir, "--json", "claude", "primary"}, "{\"flavor\":\"claude\",\"tier\":\"primary\",\"id\":\"claude-fable-5\",\"effort\":\"high\",\"aliases\":[\"claude-fable-5\",\"fable\"],\"provenance\":\"default\"}\n"},
+		{"effort", []string{"model", "--dir", dir, "--effort", "claude", "primary"}, "high\n"},
+		{"alternate", []string{"model", "--dir", dir, "--alternate", "pi", "routine"}, "qwen3.8-27b-q8_0\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errs := runCmd(t, tc.args...)
+			if code != 0 || out != tc.want || errs != "" {
+				t.Fatalf("code=%d stdout=%q stderr=%q want=%q", code, out, errs, tc.want)
+			}
+		})
+	}
+}
+
 // AC (I085): docs/remediation/README.md is scaffolded by init, restored by
 // update when missing, and states the remediation convention.
 func TestRemediationReadmeScaffolded(t *testing.T) {
