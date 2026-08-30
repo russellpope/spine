@@ -34,26 +34,71 @@ func TestGateConfigAdvisories(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name string
-		edit func(gatePackSettings)
-		want []GateConfigAdvisory
+		name      string
+		edit      func(gatePackSettings)
+		want      []GateConfigAdvisory
+		wantBytes string
 	}{
 		{
-			name: "one configured key removes only its class",
-			edit: func(s gatePackSettings) { s.config["fixture_manifest"] = "docs/fixtures.md" },
-			want: allMissing[1:],
+			name:      "configured fixture_manifest removes only fixture-manifest",
+			edit:      func(s gatePackSettings) { s.config["fixture_manifest"] = "docs/fixtures.md" },
+			want:      []GateConfigAdvisory{allMissing[1], allMissing[2], allMissing[3]},
+			wantBytes: "gitignore-control\x00build_outputs\nn-plus-one\x00n_plus_one_clients\ntest-enum-vs-spec\x00test_enum_spec\n",
 		},
 		{
-			name: "one disabled class removes only its class",
-			edit: func(s gatePackSettings) { s.disabled["gitignore-control"] = true },
-			want: []GateConfigAdvisory{allMissing[0], allMissing[2], allMissing[3]},
+			name:      "configured build_outputs removes only gitignore-control",
+			edit:      func(s gatePackSettings) { s.config["build_outputs"] = "bin/spine" },
+			want:      []GateConfigAdvisory{allMissing[0], allMissing[2], allMissing[3]},
+			wantBytes: "fixture-manifest\x00fixture_manifest\nn-plus-one\x00n_plus_one_clients\ntest-enum-vs-spec\x00test_enum_spec\n",
+		},
+		{
+			name:      "configured n_plus_one_clients removes only n-plus-one",
+			edit:      func(s gatePackSettings) { s.config["n_plus_one_clients"] = "List" },
+			want:      []GateConfigAdvisory{allMissing[0], allMissing[1], allMissing[3]},
+			wantBytes: "fixture-manifest\x00fixture_manifest\ngitignore-control\x00build_outputs\ntest-enum-vs-spec\x00test_enum_spec\n",
+		},
+		{
+			name:      "configured test_enum_spec removes only test-enum-vs-spec",
+			edit:      func(s gatePackSettings) { s.config["test_enum_spec"] = "docs/spec.md" },
+			want:      []GateConfigAdvisory{allMissing[0], allMissing[1], allMissing[2]},
+			wantBytes: "fixture-manifest\x00fixture_manifest\ngitignore-control\x00build_outputs\nn-plus-one\x00n_plus_one_clients\n",
+		},
+		{
+			name:      "disabled fixture-manifest removes only fixture-manifest",
+			edit:      func(s gatePackSettings) { s.disabled["fixture-manifest"] = true },
+			want:      []GateConfigAdvisory{allMissing[1], allMissing[2], allMissing[3]},
+			wantBytes: "gitignore-control\x00build_outputs\nn-plus-one\x00n_plus_one_clients\ntest-enum-vs-spec\x00test_enum_spec\n",
+		},
+		{
+			name:      "disabled gitignore-control removes only gitignore-control",
+			edit:      func(s gatePackSettings) { s.disabled["gitignore-control"] = true },
+			want:      []GateConfigAdvisory{allMissing[0], allMissing[2], allMissing[3]},
+			wantBytes: "fixture-manifest\x00fixture_manifest\nn-plus-one\x00n_plus_one_clients\ntest-enum-vs-spec\x00test_enum_spec\n",
+		},
+		{
+			name:      "disabled n-plus-one removes only n-plus-one",
+			edit:      func(s gatePackSettings) { s.disabled["n-plus-one"] = true },
+			want:      []GateConfigAdvisory{allMissing[0], allMissing[1], allMissing[3]},
+			wantBytes: "fixture-manifest\x00fixture_manifest\ngitignore-control\x00build_outputs\ntest-enum-vs-spec\x00test_enum_spec\n",
+		},
+		{
+			name:      "disabled test-enum-vs-spec removes only test-enum-vs-spec",
+			edit:      func(s gatePackSettings) { s.disabled["test-enum-vs-spec"] = true },
+			want:      []GateConfigAdvisory{allMissing[0], allMissing[1], allMissing[2]},
+			wantBytes: "fixture-manifest\x00fixture_manifest\ngitignore-control\x00build_outputs\nn-plus-one\x00n_plus_one_clients\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := gatePackSettings{pack: base.pack, disabled: map[string]bool{}, config: map[string]string{}}
 			tc.edit(s)
+			regionBefore := renderGateRegion(s)
 			if got := gateConfigAdvisories(s); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("advisories = %#v, want %#v", got, tc.want)
+			} else if got := gateConfigAdvisoryBytes(got); got != tc.wantBytes {
+				t.Fatalf("advisory bytes = %q, want %q", got, tc.wantBytes)
+			}
+			if regionAfter := renderGateRegion(s); regionAfter != regionBefore {
+				t.Fatalf("advisory calculation changed rendered region:\n--- before\n%s--- after\n%s", regionBefore, regionAfter)
 			}
 		})
 	}
@@ -84,6 +129,17 @@ func TestGateConfigAdvisories(t *testing.T) {
 	if got := gateConfigAdvisories(gatePackSettings{pack: "go@99", disabled: map[string]bool{}, config: map[string]string{}}); len(got) != 0 {
 		t.Fatalf("unknown pack advisories = %#v, want none", got)
 	}
+}
+
+func gateConfigAdvisoryBytes(advisories []GateConfigAdvisory) string {
+	var b strings.Builder
+	for _, advisory := range advisories {
+		b.WriteString(advisory.Class)
+		b.WriteByte(0)
+		b.WriteString(advisory.Key)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // gateRepo is a gen-11 repo that has opted into the pack: WORKFLOW.md is
