@@ -102,6 +102,7 @@ package audit
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1587,7 +1588,9 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 			workflowSubs, _ := filepath.Glob(filepath.Join(subDir, "workflows", "*", "agent-*.jsonl"))
 			sort.Strings(workflowSubs)
 			for _, sub := range workflowSubs {
-				meta, ok := loadWorkflowMeta(strings.TrimSuffix(sub, ".jsonl")+".meta.json", warnings)
+				workflowID := filepath.Base(filepath.Dir(sub))
+				agentID := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(sub), "agent-"), ".jsonl")
+				meta, ok := loadWorkflowMeta(dir, id, workflowID, agentID, warnings)
 				if !ok || meta.AgentType != "workflow-subagent" || meta.SpawnDepth != 1 {
 					continue
 				}
@@ -1603,12 +1606,10 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 				a := subagent{source: source, description: openingLine}
 				more, models, cwd := scanJSONL(sub, warnings)
 				if len(models) == 0 {
-					workflowID := filepath.Base(filepath.Dir(sub))
-					agentID := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(sub), "agent-"), ".jsonl")
 					if agentID == "" {
 						*warnings = append(*warnings, sub+": workflow agent filename has no agent id — model fallback skipped")
 					} else if model, found := workflowRunModel(
-						filepath.Join(sf.dirPath, "workflows", workflowID+".json"), id, workflowID, agentID, warnings,
+						dir, id, workflowID, agentID, warnings,
 					); found {
 						models = []string{model}
 					}
@@ -1634,53 +1635,179 @@ type workflowMeta struct {
 	SpawnDepth int    `json:"spawnDepth"`
 }
 
-func loadWorkflowMeta(path string, warnings *[]string) (workflowMeta, bool) {
-	raw, err := os.ReadFile(path)
+// Workflow run metadata is a separate, sibling artifact from the per-agent
+// sidecar. The sidecar admits only the precise workflow-subagent/depth shape;
+// when the transcript itself carries no model, workflowProgress is the only
+// accepted fallback source. In particular, defaultModel and entries for any
+// other worker must never become evidence for this worker.
+const workflowMetadataMaxBytes = 1 << 20
+
+// workflowMetadataBeforeOpen is a deterministic replacement-attack seam for
+// tests. Production leaves it nil. Every selected file is checked both before
+// and after the open, so an atomic replacement cannot substitute another
+// session or workflow's metadata.
+var workflowMetadataBeforeOpen func(string)
+
+type workflowMetadataReadKind uint8
+
+const (
+	workflowMetadataUnavailable workflowMetadataReadKind = iota
+	workflowMetadataUnsafe
+	workflowMetadataOversized
+)
+
+type workflowMetadataReadError struct {
+	kind workflowMetadataReadKind
+	err  error
+}
+
+func (e *workflowMetadataReadError) Error() string {
+	if e.err == nil {
+		return "workflow metadata read failed"
+	}
+	return e.err.Error()
+}
+
+// readWorkflowMetadataFile resolves each named component under transcriptDir
+// with descriptor-relative opens. Lstat plus SameFile checks reject symlinks,
+// non-regular targets, and path replacement between inspection and open.
+func readWorkflowMetadataFile(transcriptDir string, components []string, name string) ([]byte, error) {
+	root, err := os.OpenRoot(transcriptDir)
 	if err != nil {
-		*warnings = append(*warnings, path+": workflow metadata unreadable — transcript skipped: "+err.Error())
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
+	}
+	for _, component := range components {
+		if !workflowMetadataComponent(component) {
+			_ = root.Close()
+			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+		}
+		info, err := root.Lstat(component)
+		if err != nil {
+			_ = root.Close()
+			return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			_ = root.Close()
+			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+		}
+		child, err := root.OpenRoot(component)
+		if err != nil {
+			_ = root.Close()
+			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe, err: err}
+		}
+		opened, statErr := child.Stat(".")
+		current, currentErr := root.Lstat(component)
+		if statErr != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !opened.IsDir() || !os.SameFile(info, opened) || !os.SameFile(info, current) {
+			_ = child.Close()
+			_ = root.Close()
+			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+		}
+		_ = root.Close()
+		root = child
+	}
+	defer func() { _ = root.Close() }()
+
+	if !workflowMetadataComponent(name) {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
+	info, err := root.Lstat(name)
+	if err != nil {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
+	if workflowMetadataBeforeOpen != nil {
+		workflowMetadataBeforeOpen(filepath.Join(transcriptDir, filepath.Join(append(append([]string(nil), components...), name)...)))
+	}
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe, err: err}
+	}
+	defer func() { _ = file.Close() }()
+	opened, statErr := file.Stat()
+	current, currentErr := root.Lstat(name)
+	if statErr != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || !os.SameFile(info, current) {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, workflowMetadataMaxBytes+1))
+	if err != nil {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
+	}
+	if len(raw) > workflowMetadataMaxBytes {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataOversized}
+	}
+	return raw, nil
+}
+
+func workflowMetadataComponent(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\\`) && filepath.Base(name) == name
+}
+
+func loadWorkflowMeta(transcriptDir, session, workflow, agentID string, warnings *[]string) (workflowMeta, bool) {
+	path := filepath.Join(transcriptDir, session, "subagents", "workflows", workflow, "agent-"+agentID+".meta.json")
+	raw, err := readWorkflowMetadataFile(transcriptDir, []string{session, "subagents", "workflows", workflow}, "agent-"+agentID+".meta.json")
+	if err != nil {
+		if readErr, ok := err.(*workflowMetadataReadError); ok {
+			switch readErr.kind {
+			case workflowMetadataUnsafe:
+				*warnings = append(*warnings, path+": workflow metadata unsafe — transcript skipped")
+			case workflowMetadataOversized:
+				*warnings = append(*warnings, path+": workflow metadata exceeds 1048576 bytes — transcript skipped")
+			default:
+				*warnings = append(*warnings, path+": workflow metadata unreadable — transcript skipped: "+err.Error())
+			}
+		} else {
+			*warnings = append(*warnings, path+": workflow metadata unreadable — transcript skipped: "+err.Error())
+		}
 		return workflowMeta{}, false
 	}
 	var meta workflowMeta
-	if err := json.Unmarshal(raw, &meta); err != nil {
+	duplicate, err := unmarshalUniqueJSON(raw, &meta)
+	if duplicate {
+		*warnings = append(*warnings, path+": ambiguous workflow metadata — transcript skipped")
+		return workflowMeta{}, false
+	}
+	if err != nil {
 		*warnings = append(*warnings, path+": malformed workflow metadata — transcript skipped")
 		return workflowMeta{}, false
 	}
 	return meta, true
 }
 
-// Workflow run metadata is a separate, sibling artifact from the per-agent
-// sidecar. The sidecar admits only the precise workflow-subagent/depth shape;
-// when the transcript itself carries no model, workflowProgress is the only
-// accepted fallback source. In particular, defaultModel and entries for any
-// other worker must never become evidence for this worker.
-const workflowRunMetadataMaxBytes = 1 << 20
-
 type workflowRunProgress struct {
 	AgentID string `json:"agentId"`
 	Model   string `json:"model"`
 }
 
-func workflowRunModel(path, session, workflow, agentID string, warnings *[]string) (string, bool) {
-	f, err := os.Open(path)
+func workflowRunModel(transcriptDir, session, workflow, agentID string, warnings *[]string) (string, bool) {
+	path := filepath.Join(transcriptDir, session, "workflows", workflow+".json")
+	data, err := readWorkflowMetadataFile(transcriptDir, []string{session, "workflows"}, workflow+".json")
 	if err != nil {
-		*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata unavailable for session %q workflow %q — model fallback skipped", path, session, workflow))
-		return "", false
-	}
-	data, readErr := io.ReadAll(io.LimitReader(f, workflowRunMetadataMaxBytes+1))
-	closeErr := f.Close()
-	if readErr != nil || closeErr != nil {
-		*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata unavailable for session %q workflow %q — model fallback skipped", path, session, workflow))
-		return "", false
-	}
-	if len(data) > workflowRunMetadataMaxBytes {
-		*warnings = append(*warnings, path+": workflow run metadata exceeds 1048576 bytes — model fallback skipped")
+		if readErr, ok := err.(*workflowMetadataReadError); ok {
+			switch readErr.kind {
+			case workflowMetadataUnsafe:
+				*warnings = append(*warnings, path+": workflow run metadata unsafe — model fallback skipped")
+			case workflowMetadataOversized:
+				*warnings = append(*warnings, path+": workflow run metadata exceeds 1048576 bytes — model fallback skipped")
+			default:
+				*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata unavailable for session %q workflow %q — model fallback skipped", path, session, workflow))
+			}
+		} else {
+			*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata unavailable for session %q workflow %q — model fallback skipped", path, session, workflow))
+		}
 		return "", false
 	}
 
 	var envelope struct {
 		WorkflowProgress json.RawMessage `json:"workflowProgress"`
 	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
+	duplicate, err := unmarshalUniqueJSON(data, &envelope)
+	if duplicate {
+		*warnings = append(*warnings, path+": ambiguous workflow run metadata — model fallback skipped")
+		return "", false
+	}
+	if err != nil {
 		*warnings = append(*warnings, path+": malformed workflow run metadata — model fallback skipped")
 		return "", false
 	}
@@ -1690,7 +1817,12 @@ func workflowRunModel(path, session, workflow, agentID string, warnings *[]strin
 	}
 
 	var progress []workflowRunProgress
-	if err := json.Unmarshal(envelope.WorkflowProgress, &progress); err != nil {
+	duplicate, err = unmarshalUniqueJSON(envelope.WorkflowProgress, &progress)
+	if duplicate {
+		*warnings = append(*warnings, path+": ambiguous workflow run metadata — model fallback skipped")
+		return "", false
+	}
+	if err != nil {
 		*warnings = append(*warnings, path+": malformed workflow run metadata — model fallback skipped")
 		return "", false
 	}
@@ -1718,6 +1850,68 @@ func workflowRunModel(path, session, workflow, agentID string, warnings *[]strin
 		*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata has multiple entries for agent %q — model fallback skipped", path, agentID))
 		return "", false
 	}
+}
+
+// unmarshalUniqueJSON rejects duplicate member names in every object before
+// decoding, so untrusted metadata never inherits encoding/json's last-value-
+// wins behavior.
+func unmarshalUniqueJSON(data []byte, dst any) (bool, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	duplicate, err := jsonHasDuplicateMembers(decoder)
+	if err != nil || duplicate {
+		return duplicate, err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return false, errors.New("multiple JSON values")
+		}
+		return false, err
+	}
+	return false, json.Unmarshal(data, dst)
+}
+
+func jsonHasDuplicateMembers(decoder *json.Decoder) (bool, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return false, err
+	}
+	switch token := token.(type) {
+	case json.Delim:
+		switch token {
+		case '{':
+			seen := map[string]bool{}
+			for decoder.More() {
+				key, err := decoder.Token()
+				if err != nil {
+					return false, err
+				}
+				name, ok := key.(string)
+				if !ok {
+					return false, errors.New("object member is not a string")
+				}
+				if seen[name] {
+					return true, nil
+				}
+				seen[name] = true
+				duplicate, err := jsonHasDuplicateMembers(decoder)
+				if duplicate || err != nil {
+					return duplicate, err
+				}
+			}
+			_, err := decoder.Token()
+			return false, err
+		case '[':
+			for decoder.More() {
+				duplicate, err := jsonHasDuplicateMembers(decoder)
+				if duplicate || err != nil {
+					return duplicate, err
+				}
+			}
+			_, err := decoder.Token()
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 func workflowOpeningUserLine(path string) string {
