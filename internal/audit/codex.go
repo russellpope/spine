@@ -448,10 +448,19 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 				// but must still exclude this session's own turns.
 				st.res.dispatched = true
 				if m := args["model"]; m != "" {
+					effort, effortSource := args["reasoning_effort"], ""
+					if effort != "" {
+						effortSource = "reasoning_effort"
+					} else if effort = args["effort"]; effort != "" {
+						effortSource = "effort"
+					}
 					st.res.dispatches = append(st.res.dispatches, dispatch{
-						model:       m,
-						description: args["task_name"],
-						identity:    evidenceIdentity{dispatch: item.CallID},
+						model:        m,
+						harness:      args["harness"],
+						effort:       effort,
+						effortSource: effortSource,
+						description:  args["task_name"],
+						identity:     evidenceIdentity{dispatch: item.CallID},
 					})
 				}
 				return true

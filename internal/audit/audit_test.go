@@ -613,3 +613,48 @@ func TestDefaultTranscriptsDir(t *testing.T) {
 		t.Errorf("DefaultTranscriptsDir = %q", got)
 	}
 }
+
+func TestReadLedgerParsesOnlyExactEffortAuthorizationPairs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "progress.md")
+	content := strings.Join([]string{
+		"ESCALATION I075 effort low->xhigh reason: retry budget",
+		"ESCALATION I075 effort xhigh ->low reason: spaced arrow",
+		"ESCALATION I075 effort low->xhigh reason: one reason: duplicate",
+		"ESCALATION I076 effort low->xhigh reason: other ticket",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l := readLedger(path)
+	got := l.effortEscalations["I075"]
+	if len(got) != 1 || got[0].from != "low" || got[0].to != "xhigh" || got[0].reason != "retry budget" {
+		t.Fatalf("effort ledger = %+v, want one exact I075 low->xhigh record", got)
+	}
+	if effortAuthorized(l, "I075", "xhigh", "low") {
+		t.Fatal("reversed pair was authorized")
+	}
+	if effortAuthorized(l, "I077", "low", "xhigh") {
+		t.Fatal("other ticket pair was authorized")
+	}
+}
+
+func TestEffortDeclarationsKeepRetriesAndNeverChangeObservedEffort(t *testing.T) {
+	ticket := ticket{id: "I075", tier: "primary"}
+	dispatches := []dispatch{
+		{harness: "claude", model: "claude-fable-5", effort: "high", effortSource: "--effort"},
+		{harness: "claude", model: "claude-fable-5", effort: "low", effortSource: "--effort"},
+	}
+	l := ledger{effortEscalations: map[string][]effortEscalation{
+		"I075": {{from: "high", to: "low", reason: "retry budget"}},
+	}}
+	expected, declared, status, observed := summarizeEffortDeclarations(t.TempDir(), ticket, dispatches, l)
+	if expected != "high,high" || declared != "high,low" {
+		t.Fatalf("expected/declaration = %q/%q, want high,high/high,low", expected, declared)
+	}
+	if status != "target-match,exact-authorized-deviation" {
+		t.Fatalf("status = %q", status)
+	}
+	if observed != "-" {
+		t.Fatalf("observed effort = %q, want declared-only '-'", observed)
+	}
+}

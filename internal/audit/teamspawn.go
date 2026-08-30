@@ -37,9 +37,10 @@ import (
 // its effort when the command declares one, and the worker handle (herdr
 // agent name / cmux pane) a following prompt command is paired by.
 type teamSpawn struct {
-	model  string
-	effort string
-	target string
+	harness string
+	model   string
+	effort  string
+	target  string
 }
 
 // teamPrompt is one recognized follow-up prompt command: the worker handle
@@ -459,7 +460,7 @@ func herdrStart(seg string) (teamSpawn, bool) {
 	if model == "" {
 		return teamSpawn{}, false
 	}
-	return teamSpawn{model: model, effort: flagValue(f, "--effort"), target: positional(f, 3)}, true
+	return teamSpawn{harness: "claude", model: model, effort: flagValue(f, "--effort"), target: positional(f, 3)}, true
 }
 
 // cmuxClaudeSend recognizes a `cmux send` whose payload invokes claude with
@@ -477,7 +478,7 @@ func cmuxClaudeSend(seg string) (teamSpawn, bool) {
 	if model == "" {
 		return teamSpawn{}, false
 	}
-	return teamSpawn{model: model, effort: flagValue(f[i:], "--effort"), target: flagValue(f, "--surface", "--pane", "--target")}, true
+	return teamSpawn{harness: "claude", model: model, effort: flagValue(f[i:], "--effort"), target: flagValue(f, "--surface", "--pane", "--target")}, true
 }
 
 // isTool reports whether the segment's first fields are the named tool

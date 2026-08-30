@@ -152,23 +152,29 @@ var severity = map[Verdict]int{
 
 // TicketRow is one ticket's audit outcome.
 type TicketRow struct {
-	ID      string
-	Tier    string // declared tier annotation; "" if absent
-	Actuals []string
-	Verdict Verdict
-	Detail  string
+	ID                string
+	Tier              string // declared tier annotation; "" if absent
+	Actuals           []string
+	Verdict           Verdict
+	Detail            string
+	ExpectedEffort    string
+	DeclaredEffort    string
+	DeclarationStatus string
+	ObservedEffort    string
 }
 
 // DispatchInfo is an informational, never-judged dispatch record.
 type DispatchInfo struct {
 	Description string
+	Harness     string
 	Model       string
 	// Effort is the worker effort a claude-team spawn declared (I090); ""
 	// for every other dispatch shape. It is reported, never judged: the
 	// routing contract's enforcement is model-vs-tier, and comparing effort
 	// against a ticket's effort: frontmatter would be a second, separate
 	// contract. Out of scope for I090 by design, not an oversight.
-	Effort string
+	Effort       string
+	EffortSource string
 	// TeamSpawn marks a claude-team worker spawn (I090). An unmatched one
 	// is the residual blind spot the ticket's footer clause was written
 	// for: the spawn was recognized but could not be attributed to any
@@ -394,6 +400,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 	}
 
 	evidence := map[string][]evidenceToken{}    // ticket id -> flavor-tagged model tokens
+	declarations := map[string][]dispatch{}     // ticket id -> raw controller declarations, one per retry
 	briefSources := map[string][]string{}       // ticket id -> resolved recorded brief paths (I101 D35)
 	claimed := map[int]bool{}                   // dispatch index -> matched a ticket
 	linked := map[string]bool{}                 // coarse-linkage disclosure only (I044)
@@ -466,6 +473,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 				continue
 			}
 			claimed[i] = true
+			declarations[t.id] = append(declarations[t.id], d)
 			if d.briefPath != "" {
 				briefSources[t.id] = append(briefSources[t.id], d.briefPath)
 			}
@@ -523,7 +531,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 	for i, d := range dispatches {
 		if !claimed[i] {
 			rep.Unmatched = appendUnmatched(rep.Unmatched, DispatchInfo{
-				Description: d.description, Model: d.model, Effort: d.effort, TeamSpawn: d.teamSpawn})
+				Description: d.description, Harness: d.harness, Model: d.model, Effort: d.effort, EffortSource: d.effortSource, TeamSpawn: d.teamSpawn})
 		}
 	}
 
@@ -531,6 +539,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 	for _, t := range tickets {
 		tokens := evidence[t.id]
 		row := TicketRow{ID: t.id, Tier: t.tier, Actuals: dedupSorted(tokenValues(tokens))}
+		row.ExpectedEffort, row.DeclaredEffort, row.DeclarationStatus, row.ObservedEffort = summarizeEffortDeclarations(repoDir, t, declarations[t.id], ledger)
 		row.Verdict, row.Detail = judge(t, tokens, mappings, ledger)
 		// D24 (ticket I044): a ticket that landed on no-transcript — zero
 		// attributed evidence — upgrades to unattributed-transcript when
@@ -833,8 +842,9 @@ func pickTier(tiers []string, declared string, recordedFallback bool) string {
 // --- repo inputs ---
 
 type ticket struct {
-	id   string
-	tier string
+	id     string
+	tier   string
+	effort string
 }
 
 // anyAnnotated reports whether at least one ticket carries a tier:
@@ -871,7 +881,7 @@ func readTickets(dir string) ([]ticket, error) {
 		if fm["id"] == "" {
 			continue
 		}
-		tickets = append(tickets, ticket{id: fm["id"], tier: fm["tier"]})
+		tickets = append(tickets, ticket{id: fm["id"], tier: fm["tier"], effort: fm["effort"]})
 	}
 	return tickets, nil
 }
@@ -1038,12 +1048,23 @@ type escRecord struct {
 	reason string
 }
 
+// effortEscalation is a raw effort-deviation authorization. Its tokens carry
+// no cross-harness ordering; it authorizes only its exact ticket/from/to
+// tuple and never participates in model-tier judgement.
+type effortEscalation struct {
+	from   string
+	to     string
+	reason string
+	line   int
+}
+
 type ledger struct {
-	escalation map[string][]escRecord // ticket id -> model-tier escalation records
-	fallback   map[string]string      // ticket id -> fallback reason
-	discarded  map[discardedKey]discardedRecord
-	pending    []discardedRecord
-	warnings   []string
+	escalation        map[string][]escRecord // ticket id -> model-tier escalation records
+	effortEscalations map[string][]effortEscalation
+	fallback          map[string]string // ticket id -> fallback reason
+	discarded         map[discardedKey]discardedRecord
+	pending           []discardedRecord
+	warnings          []string
 }
 
 type discardedKey struct {
@@ -1071,7 +1092,7 @@ type discardedRecord struct {
 // model tier. A model-tier record keeps its to-tier — it excuses dispatches
 // on that tier only.
 func readLedger(path string) ledger {
-	l := ledger{escalation: map[string][]escRecord{}, fallback: map[string]string{}, discarded: map[discardedKey]discardedRecord{}}
+	l := ledger{escalation: map[string][]escRecord{}, effortEscalations: map[string][]effortEscalation{}, fallback: map[string]string{}, discarded: map[discardedKey]discardedRecord{}}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return l
@@ -1104,7 +1125,10 @@ func readLedger(path string) ledger {
 		case "ESCALATION":
 			rest = strings.TrimSpace(rest)
 			if strings.HasPrefix(rest, "effort ") {
-				continue // effort record: not model evidence
+				if rec, ok := parseEffortEscalation(line, lineNo+1); ok {
+					l.effortEscalations[id] = append(l.effortEscalations[id], rec)
+				}
+				continue // effort records never become model evidence
 			}
 			fromTo, _, _ := strings.Cut(rest, " ")
 			_, to, ok := strings.Cut(fromTo, "->")
@@ -1133,6 +1157,37 @@ func readLedger(path string) ledger {
 		l.discarded[key] = rec
 	}
 	return l
+}
+
+// parseEffortEscalation accepts exactly the ordered I075 authorization
+// grammar. Raw endpoints are retained byte-for-byte; malformed records are
+// ignored and authorize nothing.
+func parseEffortEscalation(line string, lineNo int) (effortEscalation, bool) {
+	if strings.Count(line, "reason:") != 1 {
+		return effortEscalation{}, false
+	}
+	fields := strings.SplitN(line, " reason: ", 2)
+	if len(fields) != 2 || fields[1] == "" || strings.TrimSpace(fields[1]) == "" {
+		return effortEscalation{}, false
+	}
+	parts := strings.Split(fields[0], " ")
+	if len(parts) != 4 || parts[0] != "ESCALATION" || parts[2] != "effort" {
+		return effortEscalation{}, false
+	}
+	from, to, ok := strings.Cut(parts[3], "->")
+	if !ok || from == "" || to == "" || strings.ContainsAny(from, " \t") || strings.ContainsAny(to, " \t") {
+		return effortEscalation{}, false
+	}
+	return effortEscalation{from: from, to: to, reason: fields[1], line: lineNo}, true
+}
+
+func effortAuthorized(l ledger, ticketID, expected, declared string) bool {
+	for _, rec := range l.effortEscalations[ticketID] {
+		if rec.from == expected && rec.to == declared {
+			return true
+		}
+	}
+	return false
 }
 
 // parseDiscarded accepts only the published, ordered one-line grammar. The
@@ -1231,19 +1286,21 @@ func discardEligible(tok evidenceToken, t ticket, mappings map[string]map[string
 // --- transcript inputs (undocumented harness format; degrade, never fail) ---
 
 type dispatch struct {
-	toolUseID   string
-	description string
-	prompt      string
-	briefText   string // I101: body recorded in the lead transcript, never read from disk
-	briefPath   string // normalized transcript path; disclosure is added in Task 3
-	briefCutoff int    // I101 D32: evidence available when this spawn occurred
-	model       string
-	effort      string // declared worker effort, claude-team spawns only (I090); reported, never judged — see DispatchInfo.Effort
-	flavor      string // observed-model flavor, with source as D15 tiebreaker (I111)
-	source      string // transcript layout/source; distinct from model-derived flavor (I111)
-	sourceFile  string // source transcript file (D24, codex only); "" for claude
-	cwd         string // D28 (I047): the event line's own cwd, claude only; "" for codex (D22 scopes it separately)
-	identity    evidenceIdentity
+	toolUseID    string
+	description  string
+	prompt       string
+	briefText    string // I101: body recorded in the lead transcript, never read from disk
+	briefPath    string // normalized transcript path; disclosure is added in Task 3
+	briefCutoff  int    // I101 D32: evidence available when this spawn occurred
+	model        string
+	harness      string // raw controller declaration; never inferred from source
+	effort       string // declared worker effort, claude-team spawns only (I090); reported, never judged — see DispatchInfo.Effort
+	effortSource string
+	flavor       string // observed-model flavor, with source as D15 tiebreaker (I111)
+	source       string // transcript layout/source; distinct from model-derived flavor (I111)
+	sourceFile   string // source transcript file (D24, codex only); "" for claude
+	cwd          string // D28 (I047): the event line's own cwd, claude only; "" for codex (D22 scopes it separately)
+	identity     evidenceIdentity
 
 	// teamSpawn marks this record as a claude-team worker spawn (I090) —
 	// see DispatchInfo.TeamSpawn for what an unmatched one means.
@@ -1781,7 +1838,14 @@ func parseLine(line []byte, briefs *briefTable, position *int) (dispatches []dis
 					// the two can never disagree about what was run.
 					description: segment,
 					model:       s.model,
+					harness:     s.harness,
 					effort:      s.effort,
+					effortSource: func() string {
+						if s.effort != "" {
+							return "--effort"
+						}
+						return ""
+					}(),
 					cwd:         cwd,
 					teamSpawn:   true,
 					teamTarget:  s.target,
@@ -1854,6 +1918,48 @@ func appendUnmatched(list []DispatchInfo, d DispatchInfo) []DispatchInfo {
 		}
 	}
 	return append(list, d)
+}
+
+// summarizeEffortDeclarations reports controller-declared effort alongside
+// the existing model judgement. It never reads worker actuals or changes a
+// Verdict: observed effort is intentionally unavailable in I075.
+func summarizeEffortDeclarations(repoDir string, t ticket, dispatches []dispatch, l ledger) (expected, declared, status, observed string) {
+	if len(dispatches) == 0 {
+		return "-", "-", "unconfirmable", "-"
+	}
+	expectedValues := make([]string, 0, len(dispatches))
+	declaredValues := make([]string, 0, len(dispatches))
+	statuses := make([]string, 0, len(dispatches))
+	for _, d := range dispatches {
+		expectedEffort := "-"
+		if d.harness != "" && t.tier != "" {
+			entry, err := model.ResolveDispatchTarget(model.DispatchTargetRequest{
+				RepoDir: repoDir, Flavor: d.harness, Tier: t.tier, RequestedEffort: t.effort,
+			})
+			if err == nil {
+				expectedEffort = entry.Effort
+			}
+		}
+		declaredEffort := d.effort
+		if declaredEffort == "" {
+			declaredEffort = "-"
+		}
+		declarationStatus := "unconfirmable"
+		if d.harness != "" && d.model != "" && expectedEffort != "-" && declaredEffort != "-" {
+			switch {
+			case declaredEffort == expectedEffort:
+				declarationStatus = "target-match"
+			case effortAuthorized(l, t.id, expectedEffort, declaredEffort):
+				declarationStatus = "exact-authorized-deviation"
+			default:
+				declarationStatus = "unauthorized-declaration"
+			}
+		}
+		expectedValues = append(expectedValues, expectedEffort)
+		declaredValues = append(declaredValues, declaredEffort)
+		statuses = append(statuses, declarationStatus)
+	}
+	return strings.Join(expectedValues, ","), strings.Join(declaredValues, ","), strings.Join(statuses, ","), "-"
 }
 
 // DefaultTranscriptsDir derives the harness's exact-repo transcript dir

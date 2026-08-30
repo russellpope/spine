@@ -315,32 +315,32 @@ func TestParseTeamSpawn(t *testing.T) {
 		{
 			name:    "herdr agent start",
 			command: "herdr agent start impl-1 --kind claude --pane %3 -- claude --model claude-opus-5 --effort low",
-			want:    teamSpawn{model: "claude-opus-5", effort: "low", target: "impl-1"},
+			want:    teamSpawn{harness: "claude", model: "claude-opus-5", effort: "low", target: "impl-1"},
 		},
 		{
 			name:    "herdr agent start without effort",
 			command: "herdr agent start rev-1 --kind claude --pane %5 -- claude --model claude-fable-5",
-			want:    teamSpawn{model: "claude-fable-5", target: "rev-1"},
+			want:    teamSpawn{harness: "claude", model: "claude-fable-5", target: "rev-1"},
 		},
 		{
 			name:    "cmux send quoted claude payload",
 			command: "cmux send --pane %7 'claude --model claude-opus-5 --effort high'",
-			want:    teamSpawn{model: "claude-opus-5", effort: "high", target: "%7"},
+			want:    teamSpawn{harness: "claude", model: "claude-opus-5", effort: "high", target: "%7"},
 		},
 		{
 			name:    "cmux send addressing a surface",
 			command: "cmux send --surface surface:19 'claude --model claude-opus-5 --effort low'",
-			want:    teamSpawn{model: "claude-opus-5", effort: "low", target: "surface:19"},
+			want:    teamSpawn{harness: "claude", model: "claude-opus-5", effort: "low", target: "surface:19"},
 		},
 		{
 			name:    "cmux send after a payload separator",
 			command: "cmux send --pane %7 -- claude --model=claude-opus-5 --effort=high",
-			want:    teamSpawn{model: "claude-opus-5", effort: "high", target: "%7"},
+			want:    teamSpawn{harness: "claude", model: "claude-opus-5", effort: "high", target: "%7"},
 		},
 		{
 			name:    "spawn after a shell separator",
 			command: "cd /tmp && herdr agent start impl-2 --kind claude -- claude --model claude-opus-5",
-			want:    teamSpawn{model: "claude-opus-5", target: "impl-2"},
+			want:    teamSpawn{harness: "claude", model: "claude-opus-5", target: "impl-2"},
 		},
 		{name: "herdr query", command: "herdr agent get impl-1 --json"},
 		{name: "herdr pane list", command: "herdr pane list"},
@@ -355,7 +355,7 @@ func TestParseTeamSpawn(t *testing.T) {
 		{
 			name:    "trailing comment still carries the ticket for a real spawn",
 			command: "herdr agent start impl-2 --kind claude -- claude --model claude-opus-5 # I402",
-			want:    teamSpawn{model: "claude-opus-5", target: "impl-2"},
+			want:    teamSpawn{harness: "claude", model: "claude-opus-5", target: "impl-2"},
 		},
 		{
 			name:    "spawn quoted in a heredoc body",

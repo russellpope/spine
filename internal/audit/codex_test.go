@@ -175,6 +175,26 @@ func TestCodexDiscardedDirectDispatch(t *testing.T) {
 	}
 }
 
+func TestCodexSpawnAgentRetainsDeclaredReasoningEffortWithoutInferringHarness(t *testing.T) {
+	data := []byte(strings.Join([]string{
+		codexSessionMetaLine("root", "root", "", "/repo", "user", topLevelSource),
+		codexFunctionCallLineWithID("spawn_agent", "call-effort", map[string]string{
+			"task_name": "I075 implementation", "model": "gpt-5.6-terra", "reasoning_effort": "medium",
+		}),
+	}, "\n"))
+	got, ok := parseCodexBytes("fixture.jsonl", data, new([]string))
+	if !ok || len(got.dispatches) != 1 {
+		t.Fatalf("parseCodexBytes() = %+v, %v", got, ok)
+	}
+	d := got.dispatches[0]
+	if d.effort != "medium" || d.effortSource != "reasoning_effort" {
+		t.Fatalf("dispatch effort = %q source=%q, want medium/reasoning_effort", d.effort, d.effortSource)
+	}
+	if d.harness != "" {
+		t.Fatalf("dispatch harness = %q, want no inferred harness", d.harness)
+	}
+}
+
 func TestCodexDiscardedDoesNotExcuseRootOnlyWorker(t *testing.T) {
 	codexDir := t.TempDir()
 	repo := t.TempDir()
