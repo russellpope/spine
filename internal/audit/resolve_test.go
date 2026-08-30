@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/russellpope/spine/internal/model"
 )
 
 // writeAuditRepo lays down a minimal auditable repo: WORKFLOW.md (skipped
@@ -130,6 +133,86 @@ func writeDispatchTranscript(t *testing.T, repoDir, transcriptsDir string, dispa
 	}
 	if err := os.WriteFile(filepath.Join(transcriptsDir, "s1.jsonl"), []byte(b.String()), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestValidatedLaunchIDsRemainMappedInAudit(t *testing.T) {
+	for _, tc := range []struct {
+		name, workflow, id, flavor, tier string
+	}{
+		{"embedded current", "template_version: 12\n", "claude-fable-5", "claude", "primary"},
+		{"safe deliberate override", "template_version: 12\nmodel_routing:\n  claude.primary: bespoke-audit-safe\n", "bespoke-audit-safe", "claude", "primary"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeAuditRepo(t, dir, tc.workflow, map[string]string{"I951": tc.tier})
+			validated, err := model.ValidateLaunch(model.LaunchRequest{
+				RepoDir: dir, Flavor: tc.flavor, Tier: tc.tier, MaxTemplateVersion: 12,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if validated.ID != tc.id {
+				t.Fatalf("validated ID = %q, want %q", validated.ID, tc.id)
+			}
+			transcripts := t.TempDir()
+			writeDispatchTranscript(t, dir, transcripts, map[string]string{"I951": validated.ID})
+			report, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := rowsByID(t, report)["I951"]
+			if row.Verdict == VerdictUnmappedDispatch {
+				t.Fatalf("validated %s ID %q became unmapped under unchanged policy: %s", tc.flavor, validated.ID, row.Detail)
+			}
+		})
+	}
+}
+
+func TestAliasAndHistoryRemainAuditEvidenceButNotLaunchIDs(t *testing.T) {
+	dir := t.TempDir()
+	writeAuditRepo(t, dir, "template_version: 12\n", map[string]string{
+		"I952": "routine",
+		"I953": "routine",
+	})
+	for _, tc := range []struct {
+		id     string
+		reason model.LaunchReason
+	}{
+		{"opus", model.ReasonForbiddenModel},
+		{"claude-sonnet-5", model.ReasonRetiredModel},
+	} {
+		_, err := model.ValidateLaunch(model.LaunchRequest{
+			RepoDir: dir, Flavor: "claude", Tier: "routine", Expected: tc.id, MaxTemplateVersion: 12,
+		})
+		var refusal *model.LaunchRefusal
+		if !errors.As(err, &refusal) || refusal.Reason != tc.reason {
+			t.Fatalf("launch candidate %q error = %#v, want %s", tc.id, err, tc.reason)
+		}
+	}
+	transcripts := t.TempDir()
+	writeDispatchTranscript(t, dir, transcripts, map[string]string{
+		"I952": "opus",
+		"I953": "claude-sonnet-5",
+	})
+	report, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"I952", "I953"} {
+		if row := rowsByID(t, report)[id]; row.Verdict != VerdictMatch {
+			t.Errorf("%s verdict = %s (%s), want retained audit match", id, row.Verdict, row.Detail)
+		}
+	}
+}
+
+func TestValidatedActiveLegUsesSharedMatcher(t *testing.T) {
+	raw, err := os.ReadFile("audit.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "if model.ActiveIDMatches(rt.id, token) {") {
+		t.Fatal("resolvedTier.matches active leg does not delegate to model.ActiveIDMatches")
 	}
 }
 

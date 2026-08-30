@@ -848,7 +848,7 @@ type resolvedTier struct {
 }
 
 func (rt resolvedTier) matches(token string) bool {
-	if token == rt.id {
+	if model.ActiveIDMatches(rt.id, token) {
 		return true
 	}
 	for _, a := range rt.aliases {
