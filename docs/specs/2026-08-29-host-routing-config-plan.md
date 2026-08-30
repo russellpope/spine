@@ -35,8 +35,9 @@ path uses `os.UserConfigDir`; executable presence uses an injected
   first; otherwise record the actual allocation in the implementation report,
   ticket, tests, and changelog.
 - Read the local config only from `os.UserConfigDir()/spine/routing-host.json`.
-  Its platform lookup may read standard configuration environment state; JSON
-  values never expand environment input, execute, or make a network request.
+  Its platform lookup may read standard configuration environment state, and
+  executable lookup may consult `PATH`; JSON values never expand environment
+  input, execute anything, or make a network request.
   Tests use private argument-based directory-provider helpers or absolute
   fixture paths. Never mutate a package global in a test. Do not add a normal
   path flag or environment override.

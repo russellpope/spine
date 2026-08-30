@@ -128,11 +128,12 @@ This file declares capability. It is not a gateway installer, shell-command
 template, or credential transport.
 
 The parser may read the JSON and check whether `executable` resolves on the
-host. It must never execute that executable, expand a JSON value as an
-environment variable or shell expression, make a network request, or write the
-file. The only environment consultation allowed here is the platform behavior
-inside `os.UserConfigDir` while locating the default file. JSON values never
-expand environment references, execute, or trigger network activity. The field
+host. That executable lookup may consult the host `PATH`; it must never execute
+the resolved executable. JSON values never expand environment references,
+execute, or trigger network activity. Apart from executable lookup and the
+platform behavior inside `os.UserConfigDir` while locating the default file,
+the parser does not consult environment state, make a network request, or write
+the file. The field
 names are intentionally narrow. URLs, base endpoints, tokens, auth
 headers, credentials or credential-file references, `modelOverrides` values,
 arbitrary `args`, environment maps, shell fragments, and unknown fields are
