@@ -46,6 +46,7 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Added
 
+- **Pinned routes can cite exact repo-local eval evidence, with warning-only doctor advice.** `evidence_refs` may point to the pinned model's `docs/evals/.../runs/...` record; D17 warns on missing, malformed, stale, mismatched, missing-battery, or failing evidence. Reads are bounded and physically contained under the repository, including symlink/atomic-replacement defenses. No advisory de-ratifies, blocks, or gates an owner pin or changes model, validation, or routing audit behavior. (I077)
 - **`spine update --force-file PATH` scopes overwrite authority to exact managed files.** The repeatable flag accepts canonical paths in the current plan, preserves unselected local edits, and keeps standalone `--force` global. Malformed, duplicate, unknown, unmanaged, or mixed requests fail deterministically before writes; selected marker damage still requires manual repair, and candidate-preflight refusal remains whole-plan no-write. (I124)
 - **Host-scoped routing capability and equivalence pins.** An owner-local,
   closed JSON file can constrain repository preferences to available harnesses
