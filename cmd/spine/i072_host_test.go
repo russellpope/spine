@@ -120,6 +120,63 @@ func TestAuditRoutingHostPreflightReturnsUsageErrorBeforeOutput(t *testing.T) {
 	}
 }
 
+func TestAuditRoutingPreflightsHostConfigBeforeDefaultDiscovery(t *testing.T) {
+	// This is deliberately a non-git fixture: default Claude discovery would
+	// fail on git worktree inspection if it ran before the host preflight.
+	repo := t.TempDir()
+	writeAuditFixtureRepo(t, repo, map[string]string{"I072": "routine"})
+	path := writeModelHostConfig(t, `{"schema_version":1,"host_id":"host","harnesses":{"claude":{"available":true,"executable":"claude","launch_contract_ref":"fleet:x","models":{"m":{"efforts":["high"],"token":"secret"}}}},"pins":{}}`)
+	var out, errs bytes.Buffer
+	code := cmdAuditRoutingWithHostPathAndDefaults(
+		[]string{"--dir", repo}, &out, &errs, path, func(string) (string, error) { return "/bin/tool", nil },
+		func(string) ([]string, error) {
+			t.Fatal("default Claude transcript discovery ran before host preflight")
+			return nil, nil
+		},
+		func() (string, error) {
+			t.Fatal("default Codex session discovery ran before host preflight")
+			return "", nil
+		},
+	)
+	if code != 2 || out.Len() != 0 || !strings.Contains(errs.String(), "host routing configuration") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
+	}
+}
+
+func TestModelValidateHostCommandMatrix(t *testing.T) {
+	repo := writeModelHostWorkflow(t, "template_version: 13\nmodel_routing:\n  codex.primary: repository-safe\n")
+	noHost := filepath.Join(t.TempDir(), "routing-host.json")
+	code, out, errs := runModelWithHostPath(t, noHost, "--dir", repo, "validate", "codex", "primary")
+	if code != 0 || out != "repository-safe\n" || errs != "" {
+		t.Fatalf("no host: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+
+	identical := writeModelHostConfig(t, `{
+  "schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:x","models":{"repository-safe":{"efforts":["high"]}}}},
+  "pins":{"codex.primary":{"model":"repository-safe","effort":"high"}}}`)
+	for _, args := range [][]string{
+		{"--dir", repo, "validate", "--expect", "repository-safe", "codex", "primary"},
+		{"--dir", repo, "validate", "--expect", "wrong-safe", "codex", "primary"},
+	} {
+		code, out, errs = runModelWithHostPath(t, identical, args...)
+		if args[4] == "repository-safe" {
+			if code != 0 || out != "repository-safe\n" || errs != "" {
+				t.Fatalf("identical pin %v: code=%d stdout=%q stderr=%q", args, code, out, errs)
+			}
+		} else if code != 1 || out != "" || !strings.Contains(errs, "unmapped-dispatch") {
+			t.Fatalf("post-identity expect %v: code=%d stdout=%q stderr=%q", args, code, out, errs)
+		}
+	}
+
+	forbidden := writeModelHostConfig(t, `{
+  "schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:x","models":{"repository-safe":{"efforts":["high"]},"unsafe pin":{"efforts":["high"]}}}},
+  "pins":{"codex.primary":{"model":"unsafe pin","effort":"high"}}}`)
+	code, out, errs = runModelWithHostPath(t, forbidden, "--dir", repo, "validate", "--expect", "repository-safe", "codex", "primary")
+	if code != 1 || out != "" || !strings.Contains(errs, "invalid-model-id") {
+		t.Fatalf("forbidden pin: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+}
+
 func runModelWithHostPath(t *testing.T, hostPath string, args ...string) (int, string, string) {
 	t.Helper()
 	var out, errs bytes.Buffer

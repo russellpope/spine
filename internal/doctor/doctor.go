@@ -89,6 +89,10 @@ func runWithHostPath(dir, hostPath string, lookup func(string) (string, error)) 
 // alternate routes. A host pin is trusted local authority, but a divergent
 // ID remains non-launchable under controlled validation until I074.
 func hostRoutingCheck(repoDir, hostPath string, lookup func(string) (string, error)) []Finding {
+	normalizedRepo, err := filepath.Abs(repoDir)
+	if err != nil {
+		normalizedRepo = filepath.Clean(repoDir)
+	}
 	path := hostPath
 	if path == "" {
 		var err error
@@ -125,13 +129,13 @@ func hostRoutingCheck(repoDir, hostPath string, lookup func(string) (string, err
 			key := flavor + "." + tier
 			if pin, pinned := config.Pins[key]; pinned {
 				if pin.Model != requested.ID {
-					findings = append(findings, Finding{"D16", "warn", path, fmt.Sprintf("%s host pin %q differs from repository active ID %q and is not auditable until I074", key, pin.Model, requested.ID)})
+					findings = append(findings, Finding{"D16", "warn", path, fmt.Sprintf("repository %s %s requested %s@%s has a divergent host pin and is not auditable until I074", normalizedRepo, key, requested.ID, requested.Effort)})
 				}
 				continue
 			}
 			route, reachable := harness.Models[requested.ID]
 			if !reachable || !hostRouteContains(route.Efforts, requested.Effort) {
-				findings = append(findings, Finding{"D16", "warn", path, fmt.Sprintf("%s repository preference %q @ %q is not reachable on available harness %q", key, requested.ID, requested.Effort, flavor)})
+				findings = append(findings, Finding{"D16", "warn", path, fmt.Sprintf("repository %s %s requested %s@%s is not reachable on available harness", normalizedRepo, key, requested.ID, requested.Effort)})
 			}
 		}
 	}

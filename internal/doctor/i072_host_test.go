@@ -29,7 +29,7 @@ func TestHostRoutingCheckCoversEveryTierOfEveryAvailableHarness(t *testing.T) {
 		t.Fatalf("D16 findings = %#v, want one unreachable warning for each Claude tier", hostFindings)
 	}
 	for _, finding := range hostFindings {
-		if finding.Severity != "warn" || finding.Path != path || !strings.Contains(finding.Message, "claude.") {
+		if finding.Severity != "warn" || finding.Path != path || !strings.Contains(finding.Message, "claude.") || !strings.Contains(finding.Message, filepath.Clean(repo)) || !strings.Contains(finding.Message, "requested ") || !strings.Contains(finding.Message, "@") {
 			t.Fatalf("finding = %#v", finding)
 		}
 	}

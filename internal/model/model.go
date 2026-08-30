@@ -526,22 +526,6 @@ func ResolveForHost(repoDir, configPath, flavor, tier string, lookup func(string
 	return resolveForHost(requested, configPath, lookup)
 }
 
-// ValidateHostConfig checks a present local host configuration without
-// selecting a harness route. It preserves the absent-file compatibility path
-// for callers whose behavior is intentionally host-blind, such as legacy
-// alternate selection.
-func ValidateHostConfig(configPath string, lookup func(string) (string, error)) error {
-	path, err := hostConfigPath(configPath)
-	if err != nil {
-		return err
-	}
-	_, err = hostconfig.Load(path, Flavors(), hostLookup(lookup))
-	if errors.Is(err, hostconfig.ErrNotConfigured) {
-		return nil
-	}
-	return err
-}
-
 func resolveForHost(requested Entry, configPath string, lookup func(string) (string, error)) (Resolution, error) {
 	path, err := hostConfigPath(configPath)
 	if err != nil {
@@ -665,10 +649,7 @@ func ValidateHostPinForLaunch(key, repositoryActiveID, hostPinnedID string) erro
 	if ActiveIDMatches(repositoryActiveID, hostPinnedID) {
 		return nil
 	}
-	return fmt.Errorf(
-		"%s host pin %q differs from repository active ID %q and is not auditable until I074",
-		key, hostPinnedID, repositoryActiveID,
-	)
+	return fmt.Errorf("%s host pin differs from the repository active ID and is not auditable until I074", key)
 }
 
 type launchSnapshot struct {

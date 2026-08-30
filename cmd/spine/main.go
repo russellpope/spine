@@ -24,6 +24,7 @@ import (
 	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/gate"
 	"github.com/russellpope/spine/internal/handoff"
+	"github.com/russellpope/spine/internal/hostconfig"
 	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/stages"
@@ -841,6 +842,13 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdAuditRoutingWithHostPath(args []string, stdout, stderr io.Writer, hostPath string, lookup func(string) (string, error)) int {
+	return cmdAuditRoutingWithHostPathAndDefaults(args, stdout, stderr, hostPath, lookup, audit.DefaultTranscriptsDirs, audit.DefaultCodexSessionsDir)
+}
+
+// cmdAuditRoutingWithHostPathAndDefaults makes default discovery injectable
+// without mutating package globals. Host preflight intentionally runs before
+// either default can inspect Claude or Codex session locations.
+func cmdAuditRoutingWithHostPathAndDefaults(args []string, stdout, stderr io.Writer, hostPath string, lookup func(string) (string, error), defaultTranscriptsDirs func(string) ([]string, error), defaultCodexSessionsDir func() (string, error)) int {
 	fs := flag.NewFlagSet("audit routing", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "repo root")
 	transcripts := fs.String("transcripts", "", "harness transcript dir (default: repo, git-worktree, and matching project dirs under ~/.claude/projects)")
@@ -850,9 +858,13 @@ func cmdAuditRoutingWithHostPath(args []string, stdout, stderr io.Writer, hostPa
 	if _, ok := parseArgs(fs, args, "audit routing", `usage: spine audit routing [--dir D] [--transcripts DIR] [--codex-sessions DIR] [--since TIME] [--session ID]`, 0, stderr); !ok {
 		return 2
 	}
+	if err := preflightHostConfig(hostPath, lookup); err != nil {
+		fmt.Fprintln(stderr, "audit routing:", err)
+		return 2
+	}
 	auditOpts := audit.Options{RepoDir: *dir, Since: *since, Session: *session, HostConfigPath: hostPath, HostExecutableLookup: lookup}
 	if *transcripts == "" {
-		derived, err := audit.DefaultTranscriptsDirs(*dir)
+		derived, err := defaultTranscriptsDirs(*dir)
 		if err != nil {
 			fmt.Fprintln(stderr, "audit routing:", err)
 			return 2
@@ -871,7 +883,7 @@ func cmdAuditRoutingWithHostPath(args []string, stdout, stderr io.Writer, hostPa
 	// readCodexSessions same as before.
 	cdir := *codexSessions
 	if cdir == "" {
-		derived, err := audit.DefaultCodexSessionsDir()
+		derived, err := defaultCodexSessionsDir()
 		if err != nil {
 			fmt.Fprintln(stderr, "audit routing:", err)
 			return 2
@@ -1610,7 +1622,7 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 		// deliberately do not apply to the legacy cell alternate. In particular,
 		// a valid config must not require this flavor, its executable, or its
 		// primary route to be reachable before returning the critic pair.
-		if err := model.ValidateHostConfig(hostPath, lookup); err != nil {
+		if err := preflightHostConfig(hostPath, lookup); err != nil {
 			fmt.Fprintln(stderr, "model:", err)
 			return 2
 		}
@@ -1684,6 +1696,27 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 		fmt.Fprintln(stdout, entry.ID)
 	}
 	return 0
+}
+
+// preflightHostConfig performs only the complete ratified hostconfig.Load
+// boundary. It leaves selection to model resolution and preserves an absent
+// file as the legacy host-blind path.
+func preflightHostConfig(path string, lookup func(string) (string, error)) error {
+	if path == "" {
+		var err error
+		path, err = hostconfig.DefaultPath()
+		if err != nil {
+			return err
+		}
+	}
+	if lookup == nil {
+		lookup = exec.LookPath
+	}
+	_, err := hostconfig.Load(path, model.Flavors(), lookup)
+	if errors.Is(err, hostconfig.ErrNotConfigured) {
+		return nil
+	}
+	return err
 }
 
 func cmdModelValidateWithHostPath(args []string, repoDir string, stdout, stderr io.Writer, hostPath string, lookup func(string) (string, error)) int {
