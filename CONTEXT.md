@@ -52,11 +52,28 @@ declares exactly one.
   effort mapping. Spine ships its defaults and remembers every default it has
   ever shipped, which is what makes an inherited value distinguishable from a
   deliberate override.
+- **active launch ID** (decided 2026-08-29, I051) — the one model ID a new
+  launch may use for a requested `(flavor, tier)` under the current repository
+  snapshot: the embedded current ID, an exact current mirror value, or a safe
+  deliberate mirror override. Matching is byte-for-byte. No trimming, case
+  folding, family inference, alias expansion, or historical lookup can make a
+  candidate active. Aliases and historical IDs are **audit evidence**: they
+  keep old transcripts interpretable but never authorize a new launch.
+- **model launch validation** (decided 2026-08-29, I051) — the fail-closed,
+  model-ID-only check exposed as `spine model [--dir D] validate [--expect
+  MODEL_ID] <flavor> <tier>`. Outer `--dir` precedes the `validate` positional;
+  nested `--expect` precedes flavor/tier. It reads and classifies one
+  `WORKFLOW.md` snapshot, rejects unsafe, forbidden, retired, mismatched, and
+  unmapped IDs, and has no bypass. It does not validate or transport the
+  resolved **effort** (I075 owns that dispatch parameter) and does not validate
+  a cell's **alternate**. Atomicity ends when the command returns: a later
+  repository edit may change what audit sees, and the local checkout writer
+  and launcher remain trusted. I051 adds no receipt, lock, or policy digest.
 - **mirror** — the rendered copy of the resolved model table in a repo's
-  WORKFLOW.md, marked spine-managed. Read by humans, not by dispatch:
-  authoritative only where a value has been edited to differ from a shipped
-  default. A value matching a shipped default is **inherited** and refreshed
-  automatically; any other value is an **override** and is preserved.
+  WORKFLOW.md, marked spine-managed. Read by humans and by Spine's resolver and
+  launch validator; vendor launchers do not interpret it directly. A value
+  matching a shipped default is **inherited** and refreshed automatically; any
+  other value is an **override** and is preserved.
 - **reviewer floor** (decided 2026-07-09) — a task's reviewer is never a
   lower tier than its implementer; plan-time risk triggers (cross-task
   integration, concurrency/subtle state, security surfaces, plan-flagged

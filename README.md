@@ -55,7 +55,7 @@ spine adopt --write
 | `gate` | Run a gate-pack check class (`gate [--dir D] <pack>[@<v>] <check>`) |
 | `checkpoint` | Write or replay a session checkpoint (`new`, `latest`, `list`) |
 | `cursor` | Print or update the stage cursor (`start`, `tick`, `here`, `set`) |
-| `model` | Resolve the model table for a (harness, tier) pair (read-only) |
+| `model` | Resolve or validate the model table for a (harness, tier) pair (read-only) |
 | `version` | Print the compiled template generation |
 
 Flags precede positionals on every subcommand. A flag after a positional, a stray positional, or an unknown sub-subcommand errors naming the rule (exit 2) — input is never silently discarded.
@@ -81,6 +81,26 @@ Two rules make this workable:
 
 1. Escalation is free with a record. Moving a ticket up or down a tier requires an `ESCALATION` or `FALLBACK` line in the progress ledger. Running below the declared tier without one ("silent descent") is a blocking audit failure.
 2. Overrides survive updates. spine keeps a history of every default it has ever shipped, so `spine update` can tell an inherited default (refresh it) from a deliberate per-repo override (keep it).
+
+Before a launcher uses a resolved ID, it can validate the active route atomically:
+
+```sh
+spine model [--dir D] validate [--expect MODEL_ID] <flavor> <tier>
+```
+
+`--dir` is an outer `model` flag and therefore precedes `validate`; `--expect`
+belongs to `validate` and precedes flavor/tier. Thus `spine model --dir D
+validate --expect ID codex primary` is valid, while `spine model validate
+--dir D ...` is a usage error. Success prints only the active ID. Policy
+refusals exit 1; invocation or repository-configuration errors exit 2; every
+failure leaves stdout empty. There is no bypass flag or environment switch.
+The existing plain, `--json`, `--effort`, and `--alternate` resolver modes are
+unchanged.
+
+Launch validation accepts only the exact active ID for the requested cell: an
+embedded current value or a safe deliberate repository override. Aliases and
+historical IDs remain useful to `spine audit routing` as evidence about old
+dispatches, but cannot authorize a new launch.
 
 `spine audit routing` closes the loop. It reads the actual agent transcripts on disk, reconstructs which model ran which ticket, including subagent dispatches, and checks the result against the declared tiers. Nothing is taken on the agent's word.
 

@@ -45,6 +45,19 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Added
 
+- **Fail-closed active model validation.** `spine model [--dir D] validate
+  [--expect MODEL_ID] <flavor> <tier>` reads one repository snapshot and emits
+  only the exact active ID. It refuses forbidden, unsafe, retired,
+  wrong-tier, and unmapped IDs with stable exit-1 reasons; malformed
+  invocation or repository policy exits 2; failures write no stdout. I119's
+  flags-first contract remains binding: outer `--dir` precedes `validate`, so
+  `spine model validate --dir ...` is a usage error. There is no bypass, and
+  existing plain, JSON, effort, alternate, audit-alias, and audit-history
+  behavior is unchanged. Rollout is binary-first: controlled team skills may
+  adopt the command only after this exact Spine build is reviewed, shipped,
+  and installed; that separately authorized integration is not part of this
+  change. (I051)
+
 - **Ticket-local `APPROVED-UNTESTED` acceptance records.** An applicable
   criterion may stay unchecked while recording a dated approver token,
   repository-local Markdown reference, and reason. Doctor D15 warns on
