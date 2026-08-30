@@ -1,6 +1,7 @@
 package stages_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -556,11 +557,12 @@ func TestTickedMissingNamesPartialMissingIDs(t *testing.T) {
 func TestTickedMissingTruncatesLongMissingSet(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "WORKFLOW.md", "profile: library-cli\ntemplate_version: 8\nstages: [grill, prd, issues, implement]\n")
-	// Only I004 exists; the much larger range keeps this fixture independent
-	// of ordinary changes to maxNamedMissingIDs while still exceeding the cap.
-	writeFile(t, dir, "docs/issues/I004-d.md", "---\nid: I004\n---\nx\n")
+	// Only I001 exists; derive the range from the production naming cap so the
+	// missing set is always exactly one larger than that cap.
+	rangeEnd := stages.MaxNamedMissingIDsForTest + 2
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\n---\nx\n")
 	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
-		"effort: x\nprd: docs/specs/x.md\ntickets: I001-I100\nstages: grill[x] prd[x] issues[x] implement[<]\n"+
+		fmt.Sprintf("effort: x\nprd: docs/specs/x.md\ntickets: I001-I%03d\nstages: grill[x] prd[x] issues[x] implement[<]\n", rangeEnd)+
 		"<!-- /spine:cursor -->\n")
 	rep, err := stages.Derive(dir)
 	if err != nil {
@@ -576,8 +578,9 @@ func TestTickedMissingTruncatesLongMissingSet(t *testing.T) {
 	if !strings.Contains(issues.Detail, "more") {
 		t.Errorf("Detail = %q, want a truncated \"+N more\" tail for a long missing set", issues.Detail)
 	}
-	if strings.Contains(issues.Detail, "I100") {
-		t.Errorf("Detail = %q, want the tail id folded into the +N more count, not named", issues.Detail)
+	lastID := fmt.Sprintf("I%03d", rangeEnd)
+	if strings.Contains(issues.Detail, lastID) {
+		t.Errorf("Detail = %q, want the tail id %s folded into the +N more count, not named", issues.Detail, lastID)
 	}
 }
 
