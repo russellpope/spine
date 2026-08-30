@@ -1,8 +1,10 @@
 package doctor
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -54,11 +56,96 @@ func TestHostRoutingCheckTreatsPinsAsAuditableOnlyWhenIDsMatch(t *testing.T) {
 	}
 }
 
-func TestHostRoutingCheckReportsInvalidConfigAsD16Error(t *testing.T) {
-	path := writeDoctorHostConfig(t, `{"schema_version":1,"host_id":"host","harnesses":{"claude":{"available":true,"executable":"claude","launch_contract_ref":"fleet:x","models":{"m":{"efforts":["high"],"auth_header":"secret"}}}},"pins":{}}`)
-	findings := hostRoutingCheck(t.TempDir(), path, func(string) (string, error) { return "/bin/tool", nil })
-	if len(findings) != 1 || findings[0].ID != "D16" || findings[0].Severity != "error" || findings[0].Path != path {
-		t.Fatalf("findings = %#v", findings)
+func TestHostRoutingCheckReportsInvalidConfigMatrixAsDeterministicD16Errors(t *testing.T) {
+	validHarness := `"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:codex","models":{"gpt-5.6-sol":{"efforts":["xhigh"]}}}`
+	for _, tc := range []struct {
+		name, config, wantDetail, redacted string
+		lookup                             func(string) (string, error)
+	}{
+		{
+			name:       "malformed JSON",
+			config:     `{"schema_version":`,
+			wantDetail: "host routing configuration",
+			redacted:   `{"schema_version":`,
+		},
+		{
+			name:       "nested unknown member",
+			config:     `{"schema_version":1,"host_id":"host","harnesses":{` + validHarness[:len(validHarness)-1] + `,"nested_secret":"do-not-report"}},"pins":{}}`,
+			wantDetail: "harness has an unsupported member",
+			redacted:   "do-not-report",
+		},
+		{
+			name:       "unsupported schema version",
+			config:     `{"schema_version":2,"host_id":"host","harnesses":{` + validHarness + `},"pins":{}}`,
+			wantDetail: "schema_version must be integer 1",
+			redacted:   `"schema_version":2`,
+		},
+		{
+			name:       "prohibited security member",
+			config:     `{"schema_version":1,"host_id":"host","harnesses":{"claude":{"available":true,"executable":"claude","launch_contract_ref":"fleet:claude","models":{"model":{"efforts":["high"],"auth_header":"Bearer do-not-report"}}}},"pins":{}}`,
+			wantDetail: "model route has an unsupported member",
+			redacted:   "Bearer do-not-report",
+		},
+		{
+			name:       "unavailable pinned harness",
+			config:     `{"schema_version":1,"host_id":"host","harnesses":{"codex":{"available":false,"executable":"codex","launch_contract_ref":"fleet:codex"}},"pins":{"codex.primary":{"model":"gpt-5.6-sol","effort":"xhigh"}}}`,
+			wantDetail: "pin names an unavailable harness",
+			redacted:   "gpt-5.6-sol",
+		},
+		{
+			name:       "path-bearing executable",
+			config:     `{"schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"./do-not-report","launch_contract_ref":"fleet:codex","models":{"gpt-5.6-sol":{"efforts":["xhigh"]}}}},"pins":{}}`,
+			wantDetail: "harness executable must be a bare name",
+			redacted:   "./do-not-report",
+		},
+		{
+			name:       "unresolvable executable",
+			config:     `{"schema_version":1,"host_id":"host","harnesses":{` + validHarness + `},"pins":{}}`,
+			wantDetail: "available harness executable is not resolvable",
+			redacted:   "lookup detail",
+			lookup: func(string) (string, error) {
+				return "", errors.New("lookup detail must not be reported")
+			},
+		},
+		{
+			name:       "absent pinned model",
+			config:     `{"schema_version":1,"host_id":"host","harnesses":{` + validHarness + `},"pins":{"codex.primary":{"model":"do-not-report","effort":"xhigh"}}}`,
+			wantDetail: "pin model@effort is not declared by its harness",
+			redacted:   "do-not-report",
+		},
+		{
+			name:       "unsupported pin effort",
+			config:     `{"schema_version":1,"host_id":"host","harnesses":{` + validHarness + `},"pins":{"codex.primary":{"model":"gpt-5.6-sol","effort":"do-not-report"}}}`,
+			wantDetail: "pin model@effort is not declared by its harness",
+			redacted:   "do-not-report",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeDoctorHostConfig(t, tc.config)
+			lookup := tc.lookup
+			if lookup == nil {
+				lookup = func(string) (string, error) { return "/bin/tool", nil }
+			}
+
+			first := hostRoutingCheck(t.TempDir(), path, lookup)
+			second := hostRoutingCheck(t.TempDir(), path, lookup)
+			if !reflect.DeepEqual(first, second) {
+				t.Fatalf("findings are not deterministic: first=%#v second=%#v", first, second)
+			}
+			if len(first) != 1 {
+				t.Fatalf("findings = %#v, want one D16 error", first)
+			}
+			finding := first[0]
+			if finding.ID != "D16" || finding.Severity != "error" || finding.Path != path {
+				t.Fatalf("finding = %#v, want D16 error on %q", finding, path)
+			}
+			if !strings.Contains(finding.Message, tc.wantDetail) {
+				t.Errorf("message = %q, want safe detail %q", finding.Message, tc.wantDetail)
+			}
+			if strings.Contains(finding.Message, tc.redacted) {
+				t.Errorf("message leaked raw configuration detail %q: %q", tc.redacted, finding.Message)
+			}
+		})
 	}
 }
 

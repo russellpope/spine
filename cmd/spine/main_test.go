@@ -14,6 +14,7 @@ import (
 
 	"github.com/russellpope/spine/internal/audit"
 	"github.com/russellpope/spine/internal/handoff"
+	"github.com/russellpope/spine/internal/hostconfig"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
 )
@@ -433,6 +434,57 @@ func TestDoctorCleanAndJSON(t *testing.T) {
 	if code != 1 || !strings.Contains(out, "D1") {
 		t.Fatalf("empty-dir code=%d out=%q", code, out)
 	}
+}
+
+// I072: doctor reads only the default owner-local host config path. The
+// command has no host-path flag, so this uses an isolated HOME and proves the
+// exact warning and error exit contract at the public boundary.
+func TestDoctorReportsDefaultHostRoutingConfigD16Contracts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	path, err := hostconfig.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", repo, "--profile", "go-service", "--name", "doctor-host"); code != 0 {
+		t.Fatalf("init code=%d stderr=%q", code, errs)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("valid unreachable route warns and exits one", func(t *testing.T) {
+		config := `{"schema_version":1,"host_id":"doctor-host","harnesses":{"codex":{"available":true,"executable":"go","launch_contract_ref":"fleet:codex","models":{"host-only":{"efforts":["high"]}}}},"pins":{}}`
+		if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, out, errs := runCmd(t, "doctor", "--dir", repo)
+		if code != 1 || errs != "" {
+			t.Fatalf("doctor code=%d stdout=%q stderr=%q", code, out, errs)
+		}
+		for _, want := range []string{
+			"D16 warn", path + ":", filepath.Clean(repo), "codex.primary", "gpt-5.6-sol@xhigh",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("doctor output missing %q: %q", want, out)
+			}
+		}
+	})
+
+	t.Run("malformed config errors and exits one", func(t *testing.T) {
+		if err := os.WriteFile(path, []byte(`{"schema_version":`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, out, errs := runCmd(t, "doctor", "--dir", repo)
+		if code != 1 || errs != "" || !strings.Contains(out, "D16 error") || !strings.Contains(out, path+":") {
+			t.Fatalf("doctor code=%d stdout=%q stderr=%q", code, out, errs)
+		}
+		if strings.Contains(out, `{"schema_version":`) {
+			t.Fatalf("doctor leaked malformed config: %q", out)
+		}
+	})
 }
 
 func TestDoctorD15TextAndExitContract(t *testing.T) {
