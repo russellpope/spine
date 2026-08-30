@@ -25,8 +25,24 @@ func TestNewAndAddRunAndList(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "docs", "evals", "README.md")); err != nil {
+	readmePath := filepath.Join(dir, "docs", "evals", "README.md")
+	if _, err := os.Stat(readmePath); err != nil {
 		t.Fatal("README must be created on first eval new")
+	}
+	readme, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"eval:<eval-dir>/runs/<run>.md",
+		"battery_version: 1",
+		"battery_verdict: pass",
+		"battery_results: invocation=KILLED",
+		"advisory pin-evidence profile",
+	} {
+		if !strings.Contains(string(readme), want) {
+			t.Errorf("README missing %q", want)
+		}
 	}
 	if _, err := New(dir, "govmomi cli"); err == nil {
 		t.Fatal("duplicate eval must error")
@@ -40,7 +56,7 @@ func TestNewAndAddRunAndList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"name: qwen-3.6-27b", "stage:", "score:", "## Rescore"} {
+	for _, want := range []string{"name: qwen-3.6-27b", "stage:", "score:", "battery_version:", "battery_verdict:", "battery_results:", "## Rescore"} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("missing %q", want)
 		}
