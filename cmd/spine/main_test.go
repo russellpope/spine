@@ -445,6 +445,7 @@ func TestUpdateForceFileCLIUsesExactScopedAuthorityAndChannels(t *testing.T) {
 func TestUpdateForceFileCLIRejectsBadAuthorityWithoutWrites(t *testing.T) {
 	tests := []struct {
 		name      string
+		profile   string
 		args      []string
 		wantError string
 	}{
@@ -452,28 +453,77 @@ func TestUpdateForceFileCLIRejectsBadAuthorityWithoutWrites(t *testing.T) {
 		{name: "unknown", args: []string{"--force-file", "README.md"}, wantError: `update: --force-file "README.md" must name a managed file in this update plan`},
 		{name: "absolute", args: []string{"--force-file", "/WORKFLOW.md"}, wantError: `update: --force-file "/WORKFLOW.md" must be repository-relative and must not contain ".."`},
 		{name: "traversal", args: []string{"--force-file", "docs/../WORKFLOW.md"}, wantError: `update: --force-file "docs/../WORKFLOW.md" must be repository-relative and must not contain ".."`},
+		{name: "backslash traversal", args: []string{"--force-file", "docs\\..\\WORKFLOW.md"}, wantError: `update: --force-file "docs\\..\\WORKFLOW.md" must be repository-relative and must not contain ".."`},
 		{name: "empty value", args: []string{"--force-file", ""}, wantError: `update: --force-file "" must be repository-relative and must not contain ".."`},
-		{name: "missing value", args: []string{"--force-file"}, wantError: "flag needs an argument"},
+		{name: "profile absent", profile: "knowledge", args: []string{"--force-file", "docs/issues/README.md"}, wantError: `update: --force-file "docs/issues/README.md" must name a managed file in this update plan`},
+		{name: "plan absent", args: []string{"--force-file", "maipipe.toml"}, wantError: `update: --force-file "maipipe.toml" must name a managed file in this update plan`},
+		{name: "missing value", args: []string{"--force-file"}, wantError: "flag needs an argument: -force-file"},
 		{name: "mixed global scoped", args: []string{"--force", "--force-file", "WORKFLOW.md"}, wantError: "update: --force cannot be combined with --force-file; choose one overwrite authority"},
 		{name: "post positional flag", args: []string{"unexpected", "--force-file", "WORKFLOW.md"}, wantError: `update: flags must precede positionals (saw "--force-file" after "unexpected")`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
+			profile := tt.profile
+			if profile == "" {
+				profile = "go-service"
+			}
+			if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", profile, "--name", "demo"); code != 0 {
 				t.Fatal(errs)
 			}
 			workflowPath := filepath.Join(dir, "WORKFLOW.md")
 			before := readUpdateFile(t, workflowPath)
 			args := append([]string{"update", "--dir", dir, "--write"}, tt.args...)
 			code, out, errs := runCmd(t, args...)
-			if code != 2 || out != "" || !strings.Contains(errs, tt.wantError) {
-				t.Fatalf("code=%d stdout=%q stderr=%q, want exit 2 and %q", code, out, errs, tt.wantError)
+			wantStderr := tt.wantError + "\n"
+			if tt.name == "missing value" {
+				wantStderr = "update: flag needs an argument: -force-file\n" +
+					"Usage of update:\n" +
+					"  -dir string\n    \trepo root (default \".\")\n" +
+					"  -force\n    \tregenerate files with unrecognized local edits (diff shows what gets dropped)\n" +
+					"  -force-file value\n    \tregenerate only this managed file when it has unrecognized local edits (repeatable)\n" +
+					"  -write\n    \tapply changes (default: dry-run diff)\n"
+			}
+			if tt.name == "post positional flag" {
+				wantStderr += "usage: spine update [--dir D] [--write] [--force-file PATH]... [--force]\n"
+			}
+			if code != 2 || out != "" || errs != wantStderr {
+				t.Fatalf("code=%d stdout=%q stderr=%q, want exit 2 and exact %q", code, out, errs, wantStderr)
 			}
 			if got := readUpdateFile(t, workflowPath); got != before {
 				t.Fatal("rejected force-file invocation wrote WORKFLOW.md")
 			}
 		})
+	}
+}
+
+func TestUpdateForceFileSelectedDamagedReportRequiresManualRepair(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	path := filepath.Join(dir, "CLAUDE.md")
+	broken := strings.Replace(readUpdateFile(t, path), "<!-- spine:end -->", "", 1)
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCmd(t, "update", "--dir", dir, "--force-file", "CLAUDE.md")
+	wantOut := "up-to-date: WORKFLOW.md\n" +
+		"up-to-date: AGENTS.md\n" +
+		"up-to-date: docs/harness-interface.md\n" +
+		"up-to-date: docs/issues/README.md\n" +
+		"up-to-date: docs/issues/_template.md\n" +
+		"up-to-date: docs/adr/README.md\n" +
+		"up-to-date: docs/remediation/README.md\n" +
+		"up-to-date: docs/remediation/_hitlist.template.md\n" +
+		"up-to-date: docs/remediation/_round.template.md\n"
+	wantErr := "skipped CLAUDE.md — unrecognized local edits (manual repair required):\n" +
+		"  CLAUDE.md spine markers unbalanced; fix by hand\n"
+	if code != 1 || out != wantOut || errs != wantErr {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want selected damaged manual repair", code, out, errs)
+	}
+	if got := readUpdateFile(t, path); got != broken {
+		t.Fatal("selected damaged report changed")
 	}
 }
 

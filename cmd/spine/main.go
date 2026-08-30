@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -157,7 +156,9 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		forceFiles = append(forceFiles, path)
 		return nil
 	})
-	if _, ok := parseArgs(fs, args, "update", `usage: spine update [--dir D] [--write] [--force-file PATH]... [--force]`, 0, stderr); !ok {
+	var parseDiagnostic bytes.Buffer
+	if _, ok := parseArgs(fs, args, "update", `usage: spine update [--dir D] [--write] [--force-file PATH]... [--force]`, 0, &parseDiagnostic); !ok {
+		writeUpdateDiagnostic(stderr, parseDiagnostic.String())
 		return 2
 	}
 	if *write {
@@ -171,7 +172,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	}
 	reports, err := update.Run(opts)
 	if err != nil {
-		fmt.Fprintln(stderr, "update:", err)
+		writeUpdateDiagnostic(stderr, err.Error()+"\n")
 		return 2
 	}
 	if !*write {
@@ -238,15 +239,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	// values are safe to clean only for matching presentation to the exact
 	// planned path they authorized.
 	scopedAuthorization := func(r update.FileReport) bool {
-		if len(forceFiles) == 0 || r.State != update.Pending || len(r.Unrecognized) == 0 {
-			return false
-		}
-		for _, path := range forceFiles {
-			if filepath.Clean(path) == r.Path {
-				return true
-			}
-		}
-		return false
+		return r.SelectedByForceFile && r.State == update.Pending && len(r.Unrecognized) > 0
 	}
 	for _, r := range reports {
 		switch r.State {
@@ -282,7 +275,9 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 			}
 		case update.SkippedUnrecognized:
 			outstanding++
-			if len(forceFiles) > 0 {
+			if r.SelectedByForceFile {
+				fmt.Fprintf(stderr, "skipped %s — unrecognized local edits (manual repair required):\n", r.Path)
+			} else if len(forceFiles) > 0 {
 				fmt.Fprintf(stderr, "skipped %s — unrecognized local edits (use --force-file %s to drop only this file, or --force to drop all):\n", r.Path, r.Path)
 			} else {
 				fmt.Fprintf(stderr, "skipped %s — unrecognized local edits (use --force to drop):\n", r.Path)
@@ -298,6 +293,16 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// writeUpdateDiagnostic gives only update a stable one-prefix contract.
+// update.Run labels validation errors, while flag parsing does not.
+func writeUpdateDiagnostic(stderr io.Writer, diagnostic string) {
+	if strings.HasPrefix(diagnostic, "update:") {
+		fmt.Fprint(stderr, diagnostic)
+		return
+	}
+	fmt.Fprint(stderr, "update: ", diagnostic)
 }
 
 func printGateConfigAdvisories(stdout io.Writer, advisories []update.GateConfigAdvisory) {
