@@ -1671,10 +1671,6 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 	return 0
 }
 
-func cmdModelValidate(args []string, repoDir string, stdout, stderr io.Writer) int {
-	return cmdModelValidateWithHostPath(args, repoDir, stdout, stderr, "", nil)
-}
-
 func cmdModelValidateWithHostPath(args []string, repoDir string, stdout, stderr io.Writer, hostPath string, lookup func(string) (string, error)) int {
 	fs := flag.NewFlagSet("model validate", flag.ContinueOnError)
 	var expected string
