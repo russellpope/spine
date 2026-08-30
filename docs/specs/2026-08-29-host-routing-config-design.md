@@ -103,7 +103,7 @@ gateway or model.
 | Object | Members and rules |
 | --- | --- |
 | Root | `schema_version` is the integer `1`; `host_id` is an opaque non-empty label; `harnesses` is a non-empty object; `pins` may be empty. |
-| `harnesses.<name>` | `<name>` is one of the current model flavors. `available` is required and true for a usable harness. `executable` and `launch_contract_ref` are required non-empty strings. `models` is a non-empty object when `available` is true. |
+| `harnesses.<name>` | `<name>` is one of the current model flavors. `available` is required and true for a usable harness. `executable` and `launch_contract_ref` are required non-empty strings. `models` is required and a non-empty object when `available` is true; when `available` is false it may be omitted or be an empty object. A present `models` value is never `null`. |
 | `harnesses.<name>.models.<model>` | `efforts` is a non-empty, duplicate-free list of opaque non-empty strings. `observed_ids`, when present, is a duplicate-free list of non-empty strings. `gateway_ref`, when present, is a non-empty opaque reference. |
 | `pins.<harness>.<tier>` | The key has exactly one dot. `tier` is exactly one of `primary`, `routine`, `mechanical`, or `fallback`. The value contains non-empty `model` and `effort`, plus optional duplicate-free non-empty `evidence_refs`. The named harness must be available and its declared model route must include the exact effort. |
 
@@ -128,9 +128,12 @@ This file declares capability. It is not a gateway installer, shell-command
 template, or credential transport.
 
 The parser may read the JSON and check whether `executable` resolves on the
-host. That executable lookup may consult the host `PATH`; it must never execute
-the resolved executable. JSON values never expand environment references,
-execute, or trigger network activity. Apart from executable lookup and the
+host. `executable` is a bare host executable name: it has no path component or
+path separator under the current Go platform's path semantics. The lookup may
+consult the host `PATH`, but JSON cannot name `/bin/sh`, `./tool`, or any other
+filesystem path. That lookup must never execute the resolved executable. JSON
+values never expand environment references, execute, or trigger network
+activity. Apart from executable lookup and the
 platform behavior inside `os.UserConfigDir` while locating the default file,
 the parser does not consult environment state, make a network request, or write
 the file. The field
@@ -201,6 +204,16 @@ final pair. I072 may only add fields, never remove or reinterpret old ones:
   "pin": {"model": "gpt-5.6-sol", "effort": "high", "evidence_refs": ["owner-ratification:I068"]}
 }
 ```
+
+Final-entry metadata follows the final pair, not the requested pair. A pin
+whose `(model, effort)` is byte-identical to the requested pair returns that
+existing entry unchanged, including its `aliases`, `alternate`, and repository
+`provenance`. A divergent pin has no final-entry aliases or alternate: those
+values describe the requested table/repository entry and cannot be attached to
+another model or effort. Its top-level `provenance` is the new additive value
+`host`, meaning the final pair came from a validated local host pin; the
+additive `requested.provenance` retains the original `default`, `inherited`, or
+`override` repository meaning. This is the only I072 provenance extension.
 
 The unconfigured path retains today's text behavior and old JSON fields. Its
 additive host status must not change those fields. A malformed or unsupported

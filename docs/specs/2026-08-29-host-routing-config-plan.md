@@ -36,8 +36,11 @@ path uses `os.UserConfigDir`; executable presence uses an injected
   ticket, tests, and changelog.
 - Read the local config only from `os.UserConfigDir()/spine/routing-host.json`.
   Its platform lookup may read standard configuration environment state, and
-  executable lookup may consult `PATH`; JSON values never expand environment
-  input, execute anything, or make a network request.
+  executable lookup may consult `PATH`. `executable` is a bare host executable
+  name under the current Go platform's path semantics: reject an absolute name
+  or one with a path component or separator before invoking the lookup. JSON
+  values never expand environment input, execute anything, or make a network
+  request.
   Tests use private argument-based directory-provider helpers or absolute
   fixture paths. Never mutate a package global in a test. Do not add a normal
   path flag or environment override.
@@ -115,8 +118,11 @@ func ValidateLaunchForHost(req LaunchRequest, configPath string,
 accepts the current flavor vocabulary because closed-schema validation must
 reject a harness or pin for a flavor the embedded model table does not expose.
 For every present file, it detects duplicate JSON members; decodes the closed
-schema; validates semantic routes, pins, and safe strings; then resolves each
-available harness executable through `lookPath`. Its private decode, semantic,
+schema; validates semantic routes, pins, safe strings, and bare executable
+names; then resolves each available harness executable through `lookPath`.
+Unavailable harnesses may omit `models` or give it an empty object and do not
+invoke lookup or preference routing; available harnesses require a non-empty
+`models` object. Its private decode, semantic,
 and executable-validation helpers are not exported. This keeps callers from
 obtaining a parsed config that has bypassed any part of the validation boundary
 and avoids a model-package dependency cycle. `ErrNotConfigured` remains the
@@ -145,7 +151,11 @@ supplies an auditable host-active vocabulary.
 The exact exported field layout may gain JSON tags or small nested types, but
 it must represent: final `Entry`; requested ID, effort, and provenance; host
 ID/status/config path; and a pin's model, effort, and opaque evidence refs.
-The resolver must not expose endpoint or config-file contents.
+A byte-identical pinned pair preserves the requested entry's aliases,
+alternate, and repository provenance. A divergent final pair has no aliases or
+alternate from the requested entry and uses the explicitly added final-entry
+provenance `host`; the requested trail carries the original repository
+provenance. The resolver must not expose endpoint or config-file contents.
 
 ### Task 1: host config parser and validation
 
@@ -230,6 +240,9 @@ trail, while `Resolve` and all mirror callers remain preference-only.
   - embedded default followed by repository override followed by a reachable
     pin returns the pinned final pair and preserves the requested overridden
     pair and provenance;
+  - a byte-identical pin preserves all existing final-entry aliases, alternate,
+    and repository provenance, while a divergent model or effort pin has no
+    requested-entry aliases or alternate and declares final provenance `host`;
   - valid host with no pin returns a reachable requested pair unchanged;
   - absent file returns byte-equivalent existing `Resolve` ID, effort,
     aliases, alternate, and provenance;
@@ -302,6 +315,9 @@ requested/host/pin trail.
   `--effort` is the pin effort; JSON retains current `flavor`, `tier`, `id`,
   `effort`, `aliases`, `alternate`, and `provenance`, then adds requested,
   host, and pin fields; and no-file text/old fields stay unchanged.
+  Assert byte-identical pins preserve every final-entry metadata field; assert
+  divergent pins expose only their additive requested/host/pin trail, omit
+  requested-entry aliases and alternates, and use final provenance `host`.
 
 - [ ] **Step 2: Write failing error and compatibility tests.** For malformed
   config, unavailable harness, missing executable, unreachable preference,
