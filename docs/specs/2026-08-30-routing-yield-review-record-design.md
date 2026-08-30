@@ -98,6 +98,14 @@ non-identical valid lines for an identity, or a malformed candidate line, are
 not repaired by choosing the last line. The conflicted identity is excluded
 from its series and appears in ignored-record counts.
 
+A task ticket's valid review sequence is contiguous: it has exactly one
+unambiguous task record for every round from 1 through its maximum round. Every
+round after 1 must follow a `needs-fixes` verdict, and an `accepted` verdict
+ends the sequence. A missing predecessor, a gap, a round after acceptance, or
+a conflicting round invalidates the whole task sequence. Yield excludes that
+ticket's task records from all task cells, counts one ignored task sequence,
+and returns exit 1 rather than inventing a rework count.
+
 ## Parser ownership and compatibility
 
 `internal/yield` owns parsing of REVIEW records, their identity checks, and
@@ -165,10 +173,14 @@ formatting in both text and JSON.
 
 ## Counts, confidence, output, and exits
 
-For every task aggregate cell, `n` is the number of unambiguous `round:1`
-task records. `accepted_first_pass` and `needs_fixes_first_pass` partition
-`n`. `rework_verdicts` counts valid task records with `round > 1` in that
-cell. Separately, the report totals final attributable `accepted` and
+For every task aggregate cell, `n` is the number of complete, unambiguous
+`round:1` task sequences. `accepted_first_pass` and
+`needs_fixes_first_pass` partition `n`. `rework_rounds` is the sum of
+`max(round)-1` for those sequences, attributed to the cell of each ticket's
+round-1 record even if a later review used a different actual model or tier.
+This measures the rework caused by the initial reviewed dispatch without
+creating a second first-pass denominator. Separately, the report totals final
+attributable `accepted` and
 `needs-fixes` verdicts and unattributable final `needs-fixes` conditions.
 Final totals have no rate and never enter task cells. The command also prints
 totals for valid REVIEW lines, ignored REVIEW identities, valid model-tier
@@ -221,6 +233,7 @@ invented accepted outcome.
 | A new line says `flavor` while I073 is still in flight. | Use only `harness`; block code on I073's independently verified exact SHA. |
 | A model lookup can "correct" a mistyped actual ID. | Treat the recorded model ID as opaque and reject malformed syntax only. |
 | Replayed or contradictory lines can inflate a denominator. | Deduplicate exact repeats, exclude conflicting identities, count exclusions, and return exit 1. |
+| A round-two line appears without a complete review history. | Require a contiguous task sequence, stop after accepted, and count rework as max round minus one. |
 | Final review failures make task-gate acceptance look better than it is. | Report attributable and unattributable final outcomes separately beside task rates; never fold them into a task denominator. |
 | Existing ESCALATION/FALLBACK lines manufacture model-cell rates. | Count them only as report-wide totals. Do not assign them to cells. |
 | Fleet scans double-count linked worktrees or hide a bad repository. | Scan immediate primary `.git` directories only; print every eligible child's status and isolate failures. |
@@ -231,7 +244,8 @@ invented accepted outcome.
 
 1. REVIEW has the published canonical-harness, actual-model-ID, effective-tier,
    round, task, attributable-final, and bounded unattributable-final grammar;
-   malformed, legacy-flavor, duplicate, and conflicting inputs have
+   task sequences are contiguous and terminate on acceptance; malformed,
+   legacy-flavor, duplicate, conflicting, and noncontiguous inputs have
    deterministic visible treatment.
 2. `spine yield` reads only the selected repository progress ledger, and
    `--fleet` reads only immediate primary child repositories with isolated

@@ -107,13 +107,20 @@ ignored identities, bounded diagnostics, and report confidence state.
   partial-unattributable form, a missing condition, and `condition:` on a
   task or attributable-final record.
 - [ ] Add failing aggregation tests: exact duplicate counts once; a conflicting
-  `(scope, ticket, round)` excludes that identity; a conflicting
+  `(scope, ticket, round)` excludes the whole task sequence; a conflicting
   `(scope, condition, round)` excludes an unattributable final condition;
-  first-round task accepted and needs-fixes partition `n`; round two adds
-  `rework_verdicts`; final attributable accepted/needs-fixes and
-  unattributable needs-fixes stay separate; model IDs remain opaque keys; and
-  no defaults, ticket, transcript, or filename input is accepted by the package
-  API.
+  first-round task accepted and needs-fixes partition `n`; a valid
+  needs-fixes round one followed by accepted round two contributes one
+  `rework_round`; and a complete three-round sequence contributes two.
+- [ ] Add failing invalid-sequence tests for round two without round one, a
+  round-one/round-three gap, and a review after accepted. Assert each excludes
+  the ticket from all task denominators, increments ignored task sequences
+  once, and produces exit 1. Include a sequence whose later round uses another
+  model/tier; assert all `max(round)-1` rework rounds stay attributed to its
+  round-one task cell.
+- [ ] Add tests that final attributable accepted/needs-fixes and unattributable
+  needs-fixes stay separate; model IDs remain opaque keys; and no defaults,
+  ticket, transcript, or filename input is accepted by the package API.
 - [ ] Add failing threshold tests for `n=19`, `n=20`, `n=39`, and `n=40`.
   Assert `refused/insufficient`, `low-confidence`, `low-confidence`, and
   `stated` respectively, with a one-decimal first-pass percentage only when
@@ -122,8 +129,10 @@ ignored identities, bounded diagnostics, and report confidence state.
   Expected: FAIL because the package and parser do not exist.
 - [ ] Implement a column-zero ordered-token parser. Keep model IDs opaque.
   Deduplicate and exclude conflicts before sorting. Count only exact model-tier
-  ESCALATION/FALLBACK lines as report-wide totals. Add final totals with no
-  rate and no task-cell contribution. Do not change `internal/audit/readLedger`.
+  ESCALATION/FALLBACK lines as report-wide totals. Validate complete contiguous
+  task sequences, aggregate `max(round)-1` as `rework_rounds` on the
+  round-one cell, and add final totals with no rate or task-cell contribution.
+  Do not change `internal/audit/readLedger`.
 - [ ] Run `gofmt -w internal/yield` and `go test ./internal/yield -count=1`.
   Expected: PASS.
 - [ ] Request task review against the PRD grammar, no-inference boundary,
@@ -256,8 +265,9 @@ I076. Modify the I076 ticket only after all gates pass.
   `go test ./... -count=1`, `go vet ./...`, and `go build ./cmd/spine`.
 - [ ] Build an isolated candidate binary and run per-repo and fleet fixtures.
   Capture text/JSON output and exits for no ledger, malformed data, n=19, n=20,
-  n=40, duplicate/conflict, linked-worktree exclusion, and a failed fleet
-  child. Verify no transcript or filename changes alter output.
+  n=40, duplicate/conflict, noncontiguous task rounds, linked-worktree
+  exclusion, and a failed fleet child. Verify no transcript or filename changes
+  alter output.
 - [ ] Obtain a task-by-task review, then a fresh primary whole-branch
   requirements-attack review. It must test every acceptance criterion, I073
   sequencing, parser ownership, no flavor alias, no unsupported escalation
