@@ -1773,6 +1773,7 @@ func cmdModelValidateInvocation(args []string, stdout, stderr io.Writer, hostPat
 	dir := fs.String("dir", ".", "repo root")
 	var diagnostics bytes.Buffer
 	fs.SetOutput(&diagnostics)
+	fs.Usage = func() {}
 	if err := fs.Parse(args); err != nil {
 		writeModelValidateDiagnostic(stderr, diagnostics.String())
 		return 2
@@ -1787,6 +1788,7 @@ func cmdModelValidateInvocation(args []string, stdout, stderr io.Writer, hostPat
 
 func parseModelValidateArgs(fs *flag.FlagSet, args []string, stderr io.Writer) ([]string, bool) {
 	var diagnostics bytes.Buffer
+	fs.Usage = func() {}
 	pos, ok := parseArgs(fs, args, "model validate", modelValidateUsage, 2, &diagnostics)
 	if !ok {
 		writeModelValidateDiagnostic(stderr, diagnostics.String())
@@ -1799,7 +1801,12 @@ func writeModelValidateDiagnostic(stderr io.Writer, diagnostic string) {
 		fmt.Fprint(stderr, diagnostic)
 		return
 	}
-	fmt.Fprint(stderr, "model validate: ", diagnostic)
+	diagnostic = strings.TrimSuffix(diagnostic, "\n")
+	if diagnostic == modelValidateUsage {
+		fmt.Fprintf(stderr, "model validate: %s\n", diagnostic)
+		return
+	}
+	fmt.Fprintf(stderr, "model validate: %s\n%s\n", escapeModelValidateControlBytes(diagnostic), modelValidateUsage)
 }
 
 // preflightHostConfig performs only the complete ratified hostconfig.Load

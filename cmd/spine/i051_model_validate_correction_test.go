@@ -85,6 +85,44 @@ func TestI051ModelValidateUsageDiagnosticsArePrefixed(t *testing.T) {
 	}
 }
 
+func TestI051ModelValidateUnknownFlagsEscapeControlsAndUseCanonicalUsage(t *testing.T) {
+	controls := []struct {
+		name  string
+		flag  string
+		first string
+	}{
+		{name: "newline", flag: "--bad\nmodel validate: forged", first: `model validate: flag provided but not defined: -bad\nmodel validate: forged`},
+		{name: "tab", flag: "--bad\tforged", first: `model validate: flag provided but not defined: -bad\tforged`},
+		{name: "carriage return", flag: "--bad\rforged", first: `model validate: flag provided but not defined: -bad\rforged`},
+		{name: "other control byte", flag: "--bad\x01forged", first: `model validate: flag provided but not defined: -bad\u0001forged`},
+	}
+	layers := []struct {
+		name string
+		args func(string) []string
+	}{
+		{name: "outer", args: func(flag string) []string { return []string{"model", flag, "validate", "codex", "primary"} }},
+		{name: "nested", args: func(flag string) []string { return []string{"model", "validate", flag, "codex", "primary"} }},
+	}
+
+	for _, layer := range layers {
+		for _, control := range controls {
+			t.Run(layer.name+"/"+control.name, func(t *testing.T) {
+				code, out, errs := runCmd(t, layer.args(control.flag)...)
+				want := control.first + "\n" + modelValidateUsage + "\n"
+				if code != 2 || out != "" || errs != want {
+					t.Fatalf("code=%d stdout=%q stderr=%q, want code=2 stdout empty stderr=%q", code, out, errs, want)
+				}
+				if strings.Contains(errs, "Usage of model validate:") {
+					t.Fatalf("stderr contains Go-generated usage: %q", errs)
+				}
+				if strings.ContainsAny(strings.TrimSuffix(errs, "\n"), "\t\r\x01") {
+					t.Fatalf("stderr contains a raw control byte: %q", errs)
+				}
+			})
+		}
+	}
+}
+
 func TestI051ModelValidateKnownKeyConfigurationDiagnostics(t *testing.T) {
 	unreadable := filepath.Join(t.TempDir(), "codex.primary")
 	if err := os.Mkdir(unreadable, 0o755); err != nil {
