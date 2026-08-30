@@ -66,11 +66,12 @@ func TestInitCreatesAndStamps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 11",
+	for _, want := range []string{"# Workflow — demo", "profile: rust", "template_version: 12",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli",
 		"## Stage cursor (consistency rule)", "<!-- spine:cursor -->",
 		"**Sole-writer rule:** `spine` is the only legal cursor writer.",
-		"`spine handoff new` automatically embeds the current cursor block"} {
+		"`spine handoff new` automatically embeds the current cursor block",
+		"## Acceptance exceptions", "APPROVED-UNTESTED"} {
 		if !strings.Contains(string(wf), want) {
 			t.Errorf("WORKFLOW.md missing %q", want)
 		}
@@ -326,5 +327,15 @@ func TestInitKnowledgeManifest(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
 			t.Errorf("missing %s: %v", rel, err)
 		}
+	}
+	wf, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wf), "## Acceptance exceptions") {
+		t.Error("knowledge WORKFLOW.md must document acceptance exceptions")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "docs", "issues")); !os.IsNotExist(err) {
+		t.Error("knowledge profile must still omit docs/issues")
 	}
 }

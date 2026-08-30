@@ -39,13 +39,6 @@ every other doctor warn, sets a non-zero exit — when a value contradicts the l
 - `review` — written by the board, human verdict only; pending | approved |
   changes-requested. Absent ≡ pending
 
-## Acceptance criteria
-
-An applicable criterion approved without a test stays unchecked and carries an
-`APPROVED-UNTESTED` record. `WORKFLOW.md`'s `Acceptance exceptions` section is
-the only grammar authority; the record proves local provenance, not approval
-authenticity.
-
 ## Rationalize pass (before remediation)
 
 When the ledger has many items (e.g. dozens of deck slides or audit findings), build the

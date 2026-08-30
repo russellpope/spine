@@ -60,6 +60,9 @@ func TestGen1To2IsStampOnly(t *testing.T) {
 				if isGen11ContentDiffLine(line) { // gen 11's conscious content edit; see gen10to11_test.go
 					continue
 				}
+				if isGen12ContentDiffLine(line) { // gen 12's additive acceptance convention; see gen11to12_test.go
+					continue
+				}
 				if isI114ContentDiffLine(line) { // I114's conscious current-template edit; see cursor_hygiene_test.go
 					continue
 				}

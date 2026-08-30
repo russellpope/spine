@@ -120,6 +120,9 @@ func TestGen5To6IsStampPlusDeclaredContent(t *testing.T) {
 				if isGen11ContentDiffLine(line) { // gen 11's conscious content edit; see gen10to11_test.go
 					continue
 				}
+				if isGen12ContentDiffLine(line) { // gen 12's additive acceptance convention; see gen11to12_test.go
+					continue
+				}
 				if isI114ContentDiffLine(line) { // I114's conscious current-template edit; see cursor_hygiene_test.go
 					continue
 				}
@@ -160,7 +163,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"template_version: 11",
+		"template_version: 12",
 		"spine audit routing",
 	} {
 		if !strings.Contains(string(wf), want) {
@@ -184,7 +187,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(cl), "<!-- spine:begin v11 -->") {
+	if !strings.HasPrefix(string(cl), "<!-- spine:begin v12 -->") {
 		t.Error("migrated CLAUDE.md missing v11 marker")
 	}
 	if !strings.Contains(string(cl), "primary / routine / mechanical / fallback") {

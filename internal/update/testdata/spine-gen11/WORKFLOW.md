@@ -1,20 +1,35 @@
-# Workflow — {{PROJECT}}
+# Workflow — spine
 
-profile: {{PROFILE}}
-template_version: {{VERSION}}
-reviewers: [{{REVIEWERS}}]
-functional_harness: {{HARNESS}}    # cli | rest | framebuffer | none
+profile: library-cli
+template_version: 11
+reviewers: [go-reviewer, python-reviewer]
+functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
 model_routing:                     # spine-managed defaults; edit a value to override
-{{MODEL_ROUTING_ROWS}}
-gate_pack:                         # gate pack rendered into maipipe.toml (go@1); empty = no pack
-gate_pack_disabled: []             # check classes dropped from the rendered pipeline
+  claude.primary:         claude-fable-5
+  claude.routine:         claude-opus-5 @ low
+  claude.mechanical:      claude-haiku-4-5
+  claude.fallback:        claude-opus-5
+  codex.primary:          gpt-5.6-sol @ xhigh
+  codex.routine:          gpt-5.6-terra
+  codex.mechanical:       gpt-5.6-luna
+  codex.fallback:         gpt-5.6-terra @ xhigh
+  openweights.primary:    FW-Kimi-K3
+  openweights.routine:    DeepSeek-V4-Pro @ high
+  openweights.mechanical: FW-GLM-5.2 @ high
+  openweights.fallback:   FW-Kimi-K3
+  pi.primary:             qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh
+  pi.routine:             qwen3.8-27b-q8_0 alt: qwen3.8-27b-q8_0 @ xhigh
+  pi.mechanical:          qwen3.8-27b-q8_0 alt: qwen3.8-27b-q8_0 @ xhigh
+  pi.fallback:            qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh
+gate_pack: go@1    # gate pack rendered into maipipe.toml (go@1); empty = no pack
+gate_pack_disabled: [test-enum-vs-spec, n-plus-one, fixture-manifest]    # check classes dropped from the rendered pipeline
 gate_pack_config:                  # per-check inputs; a non-empty value reaches its stage as SPINE_GATE_<KEY>
   test_enum_spec:                  # spec file test-enum-vs-spec reads the enumerated values from
   fixture_manifest:                # manifest path fixture-manifest requires
-  build_outputs:                   # build output paths gitignore-control requires to be ignored
+  build_outputs: bin/spine    # build output paths gitignore-control requires to be ignored
   n_plus_one_clients:              # client method names n-plus-one looks for in loops
-  tskip_allow:                     # test files tskip tolerates a skip in
+  tskip_allow: cmd/spine/dogfood_test.go,internal/cursor/dogfood_test.go    # test files tskip tolerates a skip in
 stages: [grill, prd, issues, implement, functional-test, review, verify, ship, deploy, docs, handoff]
 
 See `docs/harness-interface.md` for the functional-test harness contract.
@@ -57,14 +72,6 @@ Escalation: dispatch may exceed a ticket's annotated tier or effort freely, WITH
     FALLBACK <ticket-id> reason: <one line>
 
 A record excuses exactly its to-tier, nothing else. Any record not matching the grammar exactly excuses nothing — spaced arrows, missing `reason:`, missing tokens, all of it.
-
-## Acceptance exceptions
-
-An applicable acceptance criterion that was consciously approved without a test stays unchecked and records the decision on one physical line under the ticket's exact column-0 `## Acceptance criteria` heading:
-
-    - [ ] <criterion> -- APPROVED-UNTESTED <YYYY-MM-DD> by <approver> ref: <docs/YYYY-MM-DD-artifact.md#anchor> reason: <one-line reason>
-
-The dated Markdown reference must be a clean repository-relative `docs/` path to a regular file. Spine verifies durable local provenance but does not authenticate the approver or resolve the fragment. A complete record is silent in `spine doctor`; an incomplete or invalid record is a D15 warning. `spine audit stages` scans only cursor-resolved tickets, keeps acceptance warnings nonblocking, and prints `acceptance: approved-untested=<valid-count> invalid=<invalid-count>` when the scoped tickets contain candidates. Ordinary unchecked criteria and tickets with no uppercase candidate keep their existing behavior.
 
 Reviewer floor: review-tier is never below tier; inline tickets carry `review-tier: n/a` — no per-task review cycle exists, verify-stage gates still apply. Risk triggers force primary-tier review — cross-task-integration, concurrency-subtle-state, security-surface, plan-flagged-ambiguity. The final whole-branch review and acceptance simulation always run primary. Reviewers re-run claims and demand raw transcripts at every tier.
 

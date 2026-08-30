@@ -1,7 +1,7 @@
 # Workflow — spine
 
 profile: library-cli
-template_version: 11
+template_version: 12
 reviewers: [go-reviewer, python-reviewer]
 functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
@@ -72,6 +72,14 @@ Escalation: dispatch may exceed a ticket's annotated tier or effort freely, WITH
     FALLBACK <ticket-id> reason: <one line>
 
 A record excuses exactly its to-tier, nothing else. Any record not matching the grammar exactly excuses nothing — spaced arrows, missing `reason:`, missing tokens, all of it.
+
+## Acceptance exceptions
+
+An applicable acceptance criterion that was consciously approved without a test stays unchecked and records the decision on one physical line under the ticket's exact column-0 `## Acceptance criteria` heading:
+
+    - [ ] <criterion> -- APPROVED-UNTESTED <YYYY-MM-DD> by <approver> ref: <docs/YYYY-MM-DD-artifact.md#anchor> reason: <one-line reason>
+
+The dated Markdown reference must be a clean repository-relative `docs/` path to a regular file. Spine verifies durable local provenance but does not authenticate the approver or resolve the fragment. A complete record is silent in `spine doctor`; an incomplete or invalid record is a D15 warning. `spine audit stages` scans only cursor-resolved tickets, keeps acceptance warnings nonblocking, and prints `acceptance: approved-untested=<valid-count> invalid=<invalid-count>` when the scoped tickets contain candidates. Ordinary unchecked criteria and tickets with no uppercase candidate keep their existing behavior.
 
 Reviewer floor: review-tier is never below tier; inline tickets carry `review-tier: n/a` — no per-task review cycle exists, verify-stage gates still apply. Risk triggers force primary-tier review — cross-task-integration, concurrency-subtle-state, security-surface, plan-flagged-ambiguity. The final whole-branch review and acceptance simulation always run primary. Reviewers re-run claims and demand raw transcripts at every tier.
 

@@ -104,6 +104,9 @@ func TestGen7To8PristineUpdatesCleanly(t *testing.T) {
 				if isGen11ContentDiffLine(line) { // gen 11's conscious content edit; see gen10to11_test.go
 					continue
 				}
+				if isGen12ContentDiffLine(line) { // gen 12's additive acceptance convention; see gen11to12_test.go
+					continue
+				}
 				if isI114ContentDiffLine(line) { // I114's conscious current-template edit; see cursor_hygiene_test.go
 					continue
 				}
@@ -166,7 +169,7 @@ func TestUltimaHandWrittenCursorSectionSuperseded(t *testing.T) {
 		"exactly one, among the non-done stages", // canonical marker-semantics wording (I018 post-fix)
 		"spine cursor",                           // handoff rule: verbatim `spine cursor` output
 		"<!-- spine:cursor -->",                  // grammar reference embedded as documentation
-		"template_version: 11",
+		"template_version: 12",
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("migrated WORKFLOW.md missing %q", want)

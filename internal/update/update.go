@@ -402,6 +402,7 @@ func planClaude(dir, gen string, vals tmpl.Values) (FileReport, error) {
 			report.Unrecognized = []string{err.Error()}
 			return report, nil
 		}
+		report.Unrecognized = markerLocalEdits(old, block, "CLAUDE.md.tmpl", vals)
 		newContent = replaced
 	} else {
 		gen0, err := tmpl.Render("gen0", "CLAUDE.md.tmpl", vals)
@@ -449,6 +450,7 @@ func planAgents(dir string, vals tmpl.Values) (FileReport, error) {
 			report.Unrecognized = []string{err.Error()}
 			return report, nil
 		}
+		report.Unrecognized = markerLocalEdits(old, block, "AGENTS.md.tmpl", vals)
 		newContent = replaced
 	} else {
 		// No spine-owned block yet: claim on top, preserve everything below.
@@ -474,6 +476,32 @@ func replaceMarkerBlock(path, old, block string) (string, error) {
 		return "", fmt.Errorf("%s spine markers out of order; fix by hand", path)
 	}
 	return old[:begin] + strings.TrimSuffix(block, "\n") + old[end+len(markerEnd):], nil
+}
+
+func markerLocalEdits(old, currentBlock, tmplName string, vals tmpl.Values) []string {
+	begin := strings.Index(old, markerBegin)
+	end := strings.Index(old, markerEnd)
+	if begin < 0 || end < begin {
+		return nil
+	}
+	lineEnd := strings.IndexByte(old[begin:], '\n')
+	if lineEnd < 0 {
+		return nil
+	}
+	marker := old[begin : begin+lineEnd]
+	versionText := strings.TrimSuffix(strings.TrimPrefix(marker, "<!-- spine:begin v"), " -->")
+	version, err := strconv.Atoi(versionText)
+	if err != nil || version != tmpl.Version()-1 {
+		return nil
+	}
+	oldVals := vals
+	oldVals.Version = version
+	expected, err := tmpl.Render("current", tmplName, oldVals)
+	if err != nil {
+		return nil
+	}
+	oldBlock := old[begin : end+len(markerEnd)]
+	return unrecognizedLines(oldBlock, expected, currentBlock)
 }
 
 func planSimple(dir, gen, tmplName, relPath string, inGen0 bool, vals tmpl.Values) (FileReport, error) {
