@@ -3,7 +3,7 @@ id: I050
 title: "Verify convention: approved-untested as a first-class acceptance state"
 severity: med
 status: open
-commits: [7e94222, 4850488, fae360f, 6950089, c55faf3, 3761f4f, 8f8db36, f741224]
+commits: [7e94222, 4850488, fae360f, 6950089, c55faf3, 3761f4f, 8f8db36, f741224, 0547817, fc20dba]
 affects: [templates, doctor]
 blocked-by: []
 execution-mode: subagent-driven
@@ -124,3 +124,10 @@ The batch gate rerun after I032's layout correction also found a loop-scoped
 closes each ticket at the end of its own scan iteration, preserves scan-error
 reporting, and reruns both the go@1 `dead-code-callgraph` and
 `deferred-cleanup-errcheck` classes before its code commit.
+
+Second-correction commits are `0547817` for the binding contract amendment and
+`fc20dba` for whitespace-free tokens, structural marker selection, fail-closed
+identity scoping, per-iteration close/error handling, and package/doctor/audit/
+compiled-CLI regressions. Focused and full local verification passed before
+the code commit. Fresh primary re-review, independent verification, maipipe at
+the eventual exact review SHA, and ticket closure remain pending.
