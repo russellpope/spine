@@ -1,10 +1,12 @@
 package update
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -297,18 +299,32 @@ func Run(opts Options) ([]FileReport, error) {
 func normalizeForceFiles(rawPaths []string) ([]string, map[string]bool, error) {
 	normalized := make([]string, 0, len(rawPaths))
 	selected := make(map[string]bool, len(rawPaths))
+	var validationErrors []string
 	for _, raw := range rawPaths {
 		if raw == "" || isAbsoluteForceFilePath(raw) || hasRawParentComponent(raw) {
-			return nil, nil, fmt.Errorf("update: --force-file %q must be repository-relative and must not contain \"..\"", raw)
+			validationErrors = append(validationErrors, fmt.Sprintf("update: --force-file %q must be repository-relative and must not contain \"..\"", raw))
+			continue
 		}
 		canonical := path.Clean(strings.ReplaceAll(raw, "\\", "/"))
 		if selected[canonical] {
-			return nil, nil, fmt.Errorf("update: duplicate --force-file %q", canonical)
+			validationErrors = append(validationErrors, fmt.Sprintf("update: duplicate --force-file %q", canonical))
+			continue
 		}
 		normalized = append(normalized, canonical)
 		selected[canonical] = true
 	}
+	if err := firstSortedForceFileError(validationErrors); err != nil {
+		return nil, nil, err
+	}
 	return normalized, selected, nil
+}
+
+func firstSortedForceFileError(messages []string) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	slices.Sort(messages)
+	return errors.New(messages[0])
 }
 
 func hasRawParentComponent(path string) bool {
@@ -340,12 +356,13 @@ func validateForceFileMembership(normalizedPaths []string, reports []FileReport)
 	for _, r := range reports {
 		managed[r.Path] = true
 	}
+	var membershipErrors []string
 	for _, normalized := range normalizedPaths {
 		if !managed[normalized] {
-			return fmt.Errorf("update: --force-file %q must name a managed file in this update plan", normalized)
+			membershipErrors = append(membershipErrors, fmt.Sprintf("update: --force-file %q must name a managed file in this update plan", normalized))
 		}
 	}
-	return nil
+	return firstSortedForceFileError(membershipErrors)
 }
 
 func planWorkflow(opts Options) (FileReport, tmpl.Values, string, error) {

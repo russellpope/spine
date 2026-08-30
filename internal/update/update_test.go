@@ -69,6 +69,66 @@ func TestUpdateForceFileRejectsInvalidAuthorityBeforePolicyOrWrite(t *testing.T)
 	}
 }
 
+// I124: returning the first invalid flag makes the CLI error depend on shell
+// argument order. These sets must instead choose one stable failure after the
+// complete supplied set has been inspected.
+func TestUpdateForceFileInvalidSetsChooseOrderIndependentError(t *testing.T) {
+	tests := []struct {
+		name  string
+		paths []string
+		want  string
+	}{
+		{
+			name:  "multiple unknown managed paths",
+			paths: []string{"zzz", "aaa"},
+			want:  `update: --force-file "aaa" must name a managed file in this update plan`,
+		},
+		{
+			name:  "multiple malformed paths",
+			paths: []string{"docs/../WORKFLOW.md", "/WORKFLOW.md"},
+			want:  `update: --force-file "/WORKFLOW.md" must be repository-relative and must not contain ".."`,
+		},
+		{
+			name:  "mixed malformed and unknown paths",
+			paths: []string{"zzz", "docs/../WORKFLOW.md", "aaa", ""},
+			want:  `update: --force-file "" must be repository-relative and must not contain ".."`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, paths := range forceFilePermutations(tt.paths) {
+				dir := t.TempDir()
+				if _, err := scaffold.Init(dir, "go-service", "demo"); err != nil {
+					t.Fatal(err)
+				}
+				reports, err := Run(Options{Dir: dir, Write: true, ForceFiles: paths})
+				if err == nil || err.Error() != tt.want {
+					t.Fatalf("Run(ForceFiles: %#v) error = %v, want %q", paths, err, tt.want)
+				}
+				if reports != nil {
+					t.Fatalf("Run(ForceFiles: %#v) reports = %#v, want nil", paths, reports)
+				}
+			}
+		})
+	}
+}
+
+func forceFilePermutations(paths []string) [][]string {
+	if len(paths) == 0 {
+		return [][]string{{}}
+	}
+	permutations := make([][]string, 0)
+	for i, path := range paths {
+		remaining := append([]string{}, paths[:i]...)
+		remaining = append(remaining, paths[i+1:]...)
+		for _, tail := range forceFilePermutations(remaining) {
+			permutation := append([]string{path}, tail...)
+			permutations = append(permutations, permutation)
+		}
+	}
+	return permutations
+}
+
 // I124: repository path spelling is an input protocol, not a property of the
 // host running the test. A Windows-style separator must identify the same
 // nested planned report on every host, while both raw separator forms expose
