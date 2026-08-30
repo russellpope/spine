@@ -22,3 +22,16 @@ estate default → repo override → host constraint/pin; what `spine model` and
 host-dependent; and what doctor/audit check when a pinned model is not
 reachable from the current host. Grill with the owner, then feed the standard
 gate chain (PRD → tickets).
+
+## Correction evidence (2026-08-30)
+
+Status remains **open** pending the required fresh primary requirements review
+and independent verification. Commit `2d5843d` (`fix(I072): keep alternate
+host-blind`) removes the remaining review regression: a present malformed host
+file still fails structural loading, while a valid file cannot gate, replace,
+or filter `spine model --alternate`. The correction has command/model red-green
+coverage for a config missing the selected flavor, an unavailable selected
+harness, an unreachable selected primary route, and byte-identical no-config
+alternate output. Its exact-SHA clean-worktree evidence includes focused/full/
+race Go suites, vet, build, compiled alternate plus ordinary/effort/validate
+matrix, both go@1 lanes, and `maipipe run full --wait` (`run HEAD #11`, passed).
