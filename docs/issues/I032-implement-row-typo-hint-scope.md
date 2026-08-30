@@ -3,7 +3,7 @@ id: I032
 title: Scope the all-missing tickets-typo hint to the issues row; decouple truncation test from cap
 severity: low
 status: fixed
-commits: [2e75d5e, 910e421]
+commits: [2e75d5e, 910e421, 9e386ac]
 affects: [I029]
 blocked-by: []
 execution-mode:
@@ -39,10 +39,12 @@ Two Minors from the gen9-sweep-i029-i030 final review (2026-07-16), accepted as 
 
 ## Resolution
 
-Fixed in `2e75d5e`; correction committed in `910e421`. The all-missing
-`tickets:` typo hint is now passed only to the issues row; implement rows
-retain missing-id and ledger-word diagnostics without blaming the cursor's
-ticket value. The truncation fixture now derives its range from the
-production `maxNamedMissingIDs` through a test-only export, so the generated
-missing set remains exactly one larger than the cap. Focused stage tests and
-the full Go suite pass after the concurrent I111 tests became green.
+Fixed in `2e75d5e`; correction committed in `910e421`; test arrangement
+corrected in `9e386ac`. The all-missing `tickets:` typo hint is now passed
+only to the issues row; implement rows retain missing-id and ledger-word
+diagnostics without blaming the cursor's ticket value. The truncation fixture
+now lives in a package-internal test and derives its range directly from
+`maxNamedMissingIDs`, so the generated missing set remains exactly one larger
+than the cap without a test-only export. Focused stage tests and the full Go
+suite pass; the deferred-cleanup gate still reports the pre-existing I050
+finding at `internal/acceptance/acceptance.go:84`.
