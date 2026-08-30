@@ -1052,7 +1052,7 @@ func TestCodexMultiTokenOpeningLineAttributesToNeither(t *testing.T) {
 }
 
 // Regression (review finding I1, Important). The audit.go codex case-fold
-// (Run's agent-correlation loop, ToUpper for a.flavor=="codex") was
+// (Run's agent-correlation loop, ToUpper for a.source=="codex") was
 // previously untested — every prior fixture's opening-message title
 // happened to carry the ticket token uppercase already, so deleting the
 // fold left the suite green. A lowercase title line (plausible per D20's

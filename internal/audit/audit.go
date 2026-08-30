@@ -42,13 +42,13 @@
 //     dispatch's model alias; a dispatch with neither contributes nothing.
 //     Main-session assistant models are never ticket evidence — inline
 //     execution is out of the audit's scope by design.
-//   - Flavor of a dispatch is derived from its transcript source (design
-//     D15; see transcriptFlavor and readCodexSessions) and travels with the
-//     token itself (evidenceToken) all the way into judgeToken, which
-//     resolves it within that flavor's table alone (I040). The claude
-//     reader tags every token it produces "claude"; the codex reader (I041,
-//     codex.go) tags every token it produces "codex" — judge/judgeToken
-//     needed no change to pick up the second source. The worker-session scan
+//   - Flavor of a dispatch comes from its observed model id when that id maps
+//     to exactly one resolved flavor (I111, extending design D15). An id
+//     shared across flavors, or absent from all of them, retains the
+//     transcript-derived flavor. Source and flavor travel separately with
+//     the evidence token: flavor selects the model table, while source keeps
+//     transcript-layout behavior such as D28 repo qualification and codex
+//     source-file disclosure. The worker-session scan
 //     (D21, ticket I042) and the git-commit-probe repo scoping (D22, ticket
 //     I043) both shipped in codex.go: codex evidence covers dispatch
 //     records, linkable spawned-thread actuals, and top-level orchestrator
@@ -197,13 +197,13 @@ func (r Report) Blocking() bool {
 // tier order: mechanical < routine < primary; fallback is lateral (rank 0).
 var tierRank = map[string]int{"mechanical": 1, "routine": 2, "primary": 3, "fallback": 0}
 
-// evidenceToken is one observed model string paired with the flavor of the
-// transcript source it came from (design D15's per-token seam, made real by
-// I040). judgeToken resolves value within flavor's table alone; nothing
-// upstream of it needs to know which flavor a token carries.
+// evidenceToken is one observed model string paired with its model-derived
+// flavor and transcript source. judgeToken resolves value within flavor's
+// table alone; source controls transcript-layout behavior outside resolution.
 type evidenceToken struct {
 	value      string
 	flavor     string
+	source     string
 	sourceFile string // source transcript file (D24, codex only); "" for claude, keeping claude details byte-identical
 }
 
@@ -305,21 +305,19 @@ func Run(opts Options) (Report, error) {
 	if !anyAnnotated(tickets) {
 		rep.Warnings = append(rep.Warnings, "nothing audited — no annotated tickets found (zero docs/issues tickets carry a tier: annotation); an exit-0 run judged nothing")
 	}
-	flavor := transcriptFlavor(transcriptsDirs[0])
-	mapping, err := resolveFlavorTiers(repoDir, flavor)
-	if err != nil {
-		return Report{}, err
-	}
-	codexMapping, err := resolveFlavorTiers(repoDir, "codex")
-	if err != nil {
-		return Report{}, err
-	}
+	sourceFlavor := transcriptFlavor(transcriptsDirs[0])
 	// mappings is keyed by flavor so judgeToken can resolve each token
-	// within its own flavor's table (I040). The codex entry resolves
-	// unconditionally (cheap, always defined via embedded defaults) even
-	// when no codex sessions dir is configured — only the reader below is
-	// gated on that.
-	mappings := map[string]map[string]resolvedTier{flavor: mapping, "codex": codexMapping}
+	// within its own flavor's table (I040). Every shipped flavor resolves
+	// unconditionally so an observed model id can select its unique table;
+	// transcript source remains the tiebreaker for ambiguous or unknown ids.
+	mappings := map[string]map[string]resolvedTier{}
+	for _, flavor := range model.Flavors() {
+		mapping, err := resolveFlavorTiers(repoDir, flavor)
+		if err != nil {
+			return Report{}, err
+		}
+		mappings[flavor] = mapping
+	}
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
 	var dispatches []dispatch
 	var agents []subagent
@@ -328,7 +326,7 @@ func Run(opts Options) (Report, error) {
 		if discloseTranscriptDirs {
 			rep.Warnings = append(rep.Warnings, "scanning transcript dir: "+transcriptsDir)
 		}
-		moreDispatches, moreAgents, matched := readTranscripts(transcriptsDir, flavor, since, opts.Session, &rep.Warnings)
+		moreDispatches, moreAgents, matched := readTranscripts(transcriptsDir, sourceFlavor, since, opts.Session, &rep.Warnings)
 		dispatches = append(dispatches, moreDispatches...)
 		agents = append(agents, moreAgents...)
 		sessionMatched = sessionMatched || matched
@@ -354,6 +352,9 @@ func Run(opts Options) (Report, error) {
 		agents = append(agents, codexAgents...)
 		codexNearMisses = codexNM
 		sessionMatched = sessionMatched || codexSessionMatched
+	}
+	for i := range dispatches {
+		dispatches[i].flavor = deriveFlavor(dispatches[i].model, dispatches[i].source, mappings)
 	}
 	// M3 (I047 review): a non-empty --session that matched nothing anywhere
 	// (claude or codex) is silently misleading otherwise — an operator
@@ -386,7 +387,7 @@ func Run(opts Options) (Report, error) {
 			desc, prompt = firstLine(d.briefText), ""
 			qualifyingText = d.briefText
 		}
-		if d.flavor == "codex" {
+		if d.source == "codex" {
 			desc, prompt = strings.ToUpper(desc), strings.ToUpper(prompt)
 		}
 		if !(containsToken(desc, id) || containsToken(prompt, id)) {
@@ -398,7 +399,7 @@ func Run(opts Options) (Report, error) {
 		// hard-scoped to the repo before it reaches Run (D22,
 		// readCodexSessions' cwdInsideRepo/gitCommitProber gate), so gating
 		// it again here would be redundant, not stricter.
-		if d.flavor == "claude" && !repoQualifies(qualifyingText, d.cwd, absRepoDir, repoBase) {
+		if d.source == "claude" && !repoQualifies(qualifyingText, d.cwd, absRepoDir, repoBase) {
 			return false
 		}
 		return true
@@ -434,12 +435,12 @@ func Run(opts Options) (Report, error) {
 				continue // the subagent transcript below is the actual
 			}
 			if d.model != "" {
-				evidence[t.id] = append(evidence[t.id], evidenceToken{value: d.model, flavor: d.flavor, sourceFile: d.sourceFile})
+				evidence[t.id] = append(evidence[t.id], evidenceToken{value: d.model, flavor: d.flavor, source: d.source, sourceFile: d.sourceFile})
 			}
 		}
 		for _, a := range agents {
 			desc := a.description
-			if a.flavor == "codex" {
+			if a.source == "codex" {
 				desc = strings.ToUpper(desc)
 			}
 			use := containsToken(desc, t.id)
@@ -450,7 +451,7 @@ func Run(opts Options) (Report, error) {
 			// cross-repo collision the dispatch-side gate above closes, on a
 			// shared transcript dir where both repos' subagent files carry
 			// the same ticket id in their descriptions.
-			if use && a.flavor == "claude" && !repoQualifies(a.description, a.cwd, absRepoDir, repoBase) {
+			if use && a.source == "claude" && !repoQualifies(a.description, a.cwd, absRepoDir, repoBase) {
 				use = false
 			}
 			for _, d := range dispatches {
@@ -461,7 +462,9 @@ func Run(opts Options) (Report, error) {
 			}
 			if use {
 				for _, m := range a.models {
-					evidence[t.id] = append(evidence[t.id], evidenceToken{value: m, flavor: a.flavor, sourceFile: a.sourceFile})
+					evidence[t.id] = append(evidence[t.id], evidenceToken{
+						value: m, flavor: deriveFlavor(m, a.source, mappings), source: a.source, sourceFile: a.sourceFile,
+					})
 				}
 			}
 		}
@@ -627,7 +630,7 @@ func judge(t ticket, tokens []evidenceToken, mappings map[string]map[string]reso
 	for _, tok := range tokens {
 		v, d := judgeToken(tok, t, mappings, l)
 		worse(v, d)
-		if v == VerdictMatch && tok.flavor == "codex" && tok.sourceFile != "" {
+		if v == VerdictMatch && tok.source == "codex" && tok.sourceFile != "" {
 			matchSources = append(matchSources, tok.sourceFile)
 		}
 	}
@@ -637,14 +640,14 @@ func judge(t ticket, tokens []evidenceToken, mappings map[string]map[string]reso
 	return verdict, detail
 }
 
-// withSource appends a codex evidence token's source transcript file to a
+// withSource appends a codex-source evidence token's transcript file to a
 // judged detail line (D24: every judged codex verdict names its source, the
-// I008 silent-descent requirement satisfied as a special case). Claude
+// I008 silent-descent requirement satisfied as a special case). Claude-source
 // tokens never carry a sourceFile (readTranscripts/scanJSONL/parseLine never
-// set one), so this is a no-op for every claude-flavor call — the guarantee
+// set one), so this is a no-op for every claude-layout call — the guarantee
 // that claude verdict details stay byte-identical.
 func withSource(detail string, tok evidenceToken) string {
-	if tok.flavor != "codex" || tok.sourceFile == "" {
+	if tok.source != "codex" || tok.sourceFile == "" {
 		return detail
 	}
 	return detail + " (source: " + tok.sourceFile + ")"
@@ -805,18 +808,33 @@ func frontmatter(content string) map[string]string {
 	return fm
 }
 
-// transcriptFlavor derives the flavor of one transcript source — THE
-// flavor-derivation seam (design D15): flavor comes from the transcript
-// source, never from the ticket or the table. readTranscripts tags every
-// dispatch and subagent record it reads from that source with this value,
-// and it rides along inside evidenceToken all the way into judgeToken
-// (I040), so mixed builds judge each token within its own source's flavor.
-// It covers the claude harness's ~/.claude/projects layout; the codex-audit
-// effort (I041, codex.go) tags its own records "codex" directly in
-// readCodexSessions rather than calling this — judge and judgeToken needed
-// no further change to pick up that second source.
+// transcriptFlavor names the flavor associated with one transcript source.
+// I111 narrows its authority: deriveFlavor uses it only when an observed id
+// is ambiguous across resolved flavors or unknown to all of them. It covers
+// the claude harness's ~/.claude/projects layout; readCodexSessions tags the
+// codex source directly.
 func transcriptFlavor(transcriptsDir string) string {
 	return "claude"
+}
+
+// deriveFlavor uses the observed model id when it identifies exactly one
+// resolved flavor. The transcript source retains D15's authority for an id
+// shared across flavors and preserves the existing behavior for unknown ids.
+func deriveFlavor(token, sourceFlavor string, mappings map[string]map[string]resolvedTier) string {
+	match := ""
+	for flavor, mapping := range mappings {
+		if len(tiersOf(token, mapping)) == 0 {
+			continue
+		}
+		if match != "" {
+			return sourceFlavor
+		}
+		match = flavor
+	}
+	if match == "" {
+		return sourceFlavor
+	}
+	return match
 }
 
 // resolvedTier is the audit's view of one (flavor, tier) row, obtained
@@ -998,7 +1016,8 @@ type dispatch struct {
 	briefCutoff int    // I101 D32: evidence available when this spawn occurred
 	model       string
 	effort      string // declared worker effort, claude-team spawns only (I090); reported, never judged — see DispatchInfo.Effort
-	flavor      string // the transcript source's flavor (I040 per-token seam)
+	flavor      string // observed-model flavor, with source as D15 tiebreaker (I111)
+	source      string // transcript layout/source; distinct from model-derived flavor (I111)
 	sourceFile  string // source transcript file (D24, codex only); "" for claude
 	cwd         string // D28 (I047): the event line's own cwd, claude only; "" for codex (D22 scopes it separately)
 
@@ -1016,7 +1035,7 @@ type subagent struct {
 	toolUseID   string
 	description string
 	models      []string
-	flavor      string // the transcript source's flavor (I040 per-token seam)
+	source      string // transcript layout/source; each model derives its own flavor (I111)
 	sourceFile  string // source transcript file (D24, codex only); "" for claude
 	cwd         string // D28 (I047): the subagent transcript's own session cwd, claude only
 }
@@ -1170,9 +1189,9 @@ func sessionInScope(sf sessionFiles, mtime func(string) (time.Time, bool), since
 
 // readTranscripts collects Task/Agent dispatch records from every session
 // *.jsonl and actual models from <session>/subagents/agent-*.jsonl, linked
-// by the sidecar meta.json. Every record it emits is tagged with flavor —
-// the claude source's flavor for every call today, and the seam later
-// readers (codex) tag with their own. since and sessionID implement D28's
+// by the sidecar meta.json. Every record it emits is tagged with its source;
+// Run derives the model flavor after all resolved mappings are available.
+// since and sessionID implement D28's
 // --since/--session filters (ticket I047), applied once per session id
 // (I2 fix — see sessionFiles/sessionInScope): a zero since and empty
 // sessionID (every pre-I047 caller) filter nothing, keeping every existing
@@ -1181,7 +1200,7 @@ func sessionInScope(sf sessionFiles, mtime func(string) (time.Time, bool), since
 // whether --since then excluded it — the diagnostic input for M3's
 // "matched no sessions" warning; always true when sessionID is empty (no
 // filter to fail to match). All trouble becomes warnings.
-func readTranscripts(dir, flavor string, since time.Time, sessionID string, warnings *[]string) ([]dispatch, []subagent, bool) {
+func readTranscripts(dir, source string, since time.Time, sessionID string, warnings *[]string) ([]dispatch, []subagent, bool) {
 	des, err := os.ReadDir(dir)
 	if err != nil {
 		*warnings = append(*warnings, "transcript dir unreadable — all tickets will report no-transcript: "+err.Error())
@@ -1224,7 +1243,8 @@ func readTranscripts(dir, flavor string, since time.Time, sessionID string, warn
 		if sf.filePath != "" {
 			more, _, _ := scanJSONL(sf.filePath, warnings)
 			for i := range more {
-				more[i].flavor = flavor
+				more[i].flavor = source
+				more[i].source = source
 			}
 			dispatches = append(dispatches, more...)
 		}
@@ -1233,7 +1253,7 @@ func readTranscripts(dir, flavor string, since time.Time, sessionID string, warn
 			subs, _ := filepath.Glob(filepath.Join(subDir, "agent-*.jsonl"))
 			sort.Strings(subs)
 			for _, sub := range subs {
-				a := subagent{flavor: flavor}
+				a := subagent{source: source}
 				if metaRaw, err := os.ReadFile(strings.TrimSuffix(sub, ".jsonl") + ".meta.json"); err == nil {
 					var meta struct {
 						ToolUseID   string `json:"toolUseId"`
@@ -1245,7 +1265,8 @@ func readTranscripts(dir, flavor string, since time.Time, sessionID string, warn
 				}
 				more, models, cwd := scanJSONL(sub, warnings)
 				for i := range more {
-					more[i].flavor = flavor
+					more[i].flavor = source
+					more[i].source = source
 				}
 				a.models = models
 				a.cwd = cwd

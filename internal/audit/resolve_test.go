@@ -236,11 +236,9 @@ func TestHistoricalIDMatchesByExactID(t *testing.T) {
 	}
 }
 
-// Acceptance (D15, flavor scoping): tier resolution is scoped to the
-// dispatch's transcript-derived flavor — claude for everything audited
-// today — so an id declared only under codex reports unmapped rather than
-// resolving through another flavor's table.
-func TestCodexIDInvisibleWithinClaudeFlavor(t *testing.T) {
+// I111 extends D15: an id declared under exactly one resolved flavor selects
+// that flavor even when the transcript came from the Claude layout.
+func TestUniqueCodexIDOverridesClaudeTranscriptSource(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I831": "primary"})
 	tdir := t.TempDir()
@@ -249,18 +247,15 @@ func TestCodexIDInvisibleWithinClaudeFlavor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := rowsByID(t, rep)["I831"]; r.Verdict != VerdictUnmappedDispatch {
-		t.Errorf("I831 verdict = %s (%s), want unmapped-dispatch — codex ids must not resolve within the claude flavor", r.Verdict, r.Detail)
+	if r := rowsByID(t, rep)["I831"]; r.Verdict != VerdictMatch {
+		t.Errorf("I831 verdict = %s (%s), want match through the uniquely identified codex flavor", r.Verdict, r.Detail)
 	}
 }
 
 // I040: proves the per-token flavor seam directly. judgeToken must resolve
 // each evidenceToken within the table named by its own flavor field, not a
-// single table shared across every token judged for a ticket. No fixture
-// can yet exercise this end to end through Run (only the claude reader is
-// wired, so every token Run produces carries "claude"); this pins the
-// plumbing the deferred codex reader will rely on without churning judge or
-// judgeToken again.
+// single table shared across every token judged for a ticket. I111 now
+// exercises this end to end; this unit test retains the lower-level guard.
 func TestJudgeTokenResolvesWithinItsOwnFlavor(t *testing.T) {
 	mappings := map[string]map[string]resolvedTier{
 		"claude": {"primary": {id: "claude-model-x"}},

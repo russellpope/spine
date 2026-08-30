@@ -45,10 +45,24 @@ func TestResolve_NoRepoContext_ReturnsDefaultsForEveryFlavorTier(t *testing.T) {
 			"mechanical": {"FW-GLM-5.2", "high"},
 			"fallback":   {"FW-Kimi-K3", "high"},
 		},
+		"pi": {
+			"primary":    {"qwen3.8-27b-q8_0", "xhigh"},
+			"routine":    {"qwen3.8-27b-q8_0", "medium"},
+			"mechanical": {"qwen3.8-27b-q8_0", "low"},
+			"fallback":   {"qwen3.8-27b-q8_0", "xhigh"},
+		},
 	}
 	for _, repoDir := range []string{"", "/nonexistent/not-a-repo"} {
-		for flavor, tiers := range want {
-			for tier, exp := range tiers {
+		for _, flavor := range Flavors() {
+			tiers, ok := want[flavor]
+			if !ok {
+				t.Fatalf("Flavors() includes %q but the default-resolution test has no expectations for it", flavor)
+			}
+			for _, tier := range Tiers {
+				exp, ok := tiers[tier]
+				if !ok {
+					t.Fatalf("default-resolution expectations for %q omit tier %q", flavor, tier)
+				}
 				entry, err := Resolve(repoDir, flavor, tier)
 				if err != nil {
 					t.Fatalf("Resolve(%q, %q, %q): %v", repoDir, flavor, tier, err)
@@ -60,6 +74,29 @@ func TestResolve_NoRepoContext_ReturnsDefaultsForEveryFlavorTier(t *testing.T) {
 				if entry.Provenance != Default {
 					t.Errorf("Resolve(%q, %q, %q).Provenance = %s, want %s", repoDir, flavor, tier, entry.Provenance, Default)
 				}
+			}
+		}
+	}
+}
+
+func TestDefaultModelTokensAreDisjointAcrossFlavors(t *testing.T) {
+	seen := map[string]string{}
+	for _, flavor := range Flavors() {
+		for _, tier := range Tiers {
+			entry := defaults.Flavors[flavor][tier]
+			tokens := append([]string{entry.ID}, entry.Aliases...)
+			for _, historical := range entry.History {
+				tokens = append(tokens, historical.ID)
+			}
+			for _, token := range tokens {
+				if token == "" {
+					continue
+				}
+				if prior, ok := seen[token]; ok && prior != flavor {
+					t.Errorf("model token %q is declared under both %s and %s", token, prior, flavor)
+					continue
+				}
+				seen[token] = flavor
 			}
 		}
 	}

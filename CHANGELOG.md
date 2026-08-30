@@ -8,6 +8,12 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Fixed
 
+- **`spine audit routing` recognizes openweights models in Claude-layout transcripts.**
+  The audit now derives each evidence token's flavor from its observed model id,
+  so mixed Claude and openweights sessions resolve against the correct model
+  tables. Transcript source still breaks ambiguous-id ties and preserves unknown-id
+  behavior. D28 repo qualification remains attached to the Claude transcript
+  layout, including openweights records. (I111, ADR 0022)
 - **`adr new --supersedes` no longer parses zero-padded ids as octal.** The
   flag went through `flag.Int` (base-0), so the conventional zero-padded ids
   misparsed — `--supersedes 0011` silently flipped ADR **0009** — and

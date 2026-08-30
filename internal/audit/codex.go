@@ -934,6 +934,7 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 		for i := range res.dispatches {
 			res.dispatches[i].toolUseID = "codex:" + root
 			res.dispatches[i].flavor = "codex"
+			res.dispatches[i].source = "codex"
 			res.dispatches[i].sourceFile = path
 		}
 		if res.meta.isGuardian() {
@@ -952,7 +953,7 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 		}
 		dispatches = append(dispatches, res.dispatches...)
 		if res.meta.isSubagent() && len(res.turnModels) > 0 {
-			agents = append(agents, subagent{toolUseID: "codex:" + root, models: res.turnModels, flavor: "codex", sourceFile: path})
+			agents = append(agents, subagent{toolUseID: "codex:" + root, models: res.turnModels, source: "codex", sourceFile: path})
 		}
 		// D21 worker-session scan (I042): a top-level session with no
 		// dispatch records of its own (clause 3, orchestrator exclusion —
@@ -1004,7 +1005,7 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 					agents = append(agents, subagent{
 						description: firstLine(res.openingUserMessage),
 						models:      res.turnModels,
-						flavor:      "codex",
+						source:      "codex",
 						sourceFile:  path,
 					})
 					// D24: the same file's FULLER text (opening message beyond
