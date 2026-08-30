@@ -8,6 +8,11 @@ blocked-by: [I070, I071]
 labels: [wayfinder:grilling]
 parent: I066
 assignee:
+execution-mode: subagent-driven
+tier: routine
+effort:
+risk-triggers: [cross-task-integration, plan-flagged-ambiguity]
+review-tier: primary
 ---
 
 ## Question
