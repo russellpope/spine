@@ -109,6 +109,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/russellpope/spine/internal/acceptance"
 	"github.com/russellpope/spine/internal/cursor"
 	"github.com/russellpope/spine/internal/handoff"
 )
@@ -191,6 +192,9 @@ type Report struct {
 	// and Blocking() never consults them.
 	RoundBudget []string
 	Stages      []StageRow
+	// Acceptance is scoped to concrete ticket IDs resolved from Cursor.Tickets.
+	// Problems are advisory and never participate in Blocking.
+	Acceptance acceptance.Summary
 	// Handoff is the zero value (Applicable=false) when HasCursor is
 	// false — nothing to check a handoff against.
 	Handoff HandoffCheck
@@ -229,6 +233,9 @@ func FromResult(dir string, res cursor.Result) Report {
 	var notes []string
 	rep.Stages, notes = deriveStages(dir, res.Cursor)
 	rep.Notes = notes
+	if ids, ok := resolveTicketIDs(dir, res.Cursor.Tickets); ok {
+		rep.Acceptance = acceptance.ScanTicketIDs(dir, ids)
+	}
 	rep.RoundBudget = roundBudgetNotes(dir, res.Cursor.Effort)
 	rep.Handoff = deriveHandoff(dir, res.Cursor)
 	return rep

@@ -1257,6 +1257,102 @@ func TestAuditStagesCleanExitsZero(t *testing.T) {
 	}
 }
 
+func TestAuditStagesPrintsValidAcceptanceSummary(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	writeAuditAcceptanceTicket(t, dir, "I001-one.md", "I001", validDoctorAcceptanceLine())
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 0 || errs != "" {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errs)
+	}
+	summaryAt := strings.Index(out, "acceptance: approved-untested=1 invalid=0\n")
+	handoffAt := strings.Index(out, "handoff:")
+	if summaryAt < 0 || handoffAt < 0 || summaryAt > handoffAt {
+		t.Fatalf("summary must precede handoff: %q", out)
+	}
+}
+
+func TestAuditStagesInvalidAcceptanceWarnsWithoutBlocking(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	writeAuditAcceptanceTicket(t, dir, "I001-one.md", "I001", strings.TrimSuffix(validDoctorAcceptanceLine(), "lab unavailable"))
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 0 || !strings.Contains(out, "acceptance: approved-untested=0 invalid=1\n") || strings.Count(errs, "warning:") != 1 || !strings.Contains(errs, "docs/issues/I001-one.md: line 6:") {
+		t.Fatalf("invalid acceptance contract: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+func TestAuditStagesOmitsAcceptanceLineWhenNoCandidates(t *testing.T) {
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", stagesFixture("clean"))
+	const want = "stage            state    verdict     detail\n" +
+		"grill            done     not-judged  no derivation rule for stage \"grill\"\n" +
+		"prd              done     match       1/1 PRD file docs/specs/2026-01-01-fixture-design.md present\n" +
+		"issues           done     match       2/2 ticket file(s) present\n" +
+		"implement        done     match       2/2 ledger implement evidence present\n" +
+		"functional-test  here     not-judged  no derivation rule for stage \"functional-test\"\n" +
+		"review           pending  not-judged  no derivation rule for stage \"review\"\n" +
+		"verify           pending  not-judged  no derivation rule for stage \"verify\"\n" +
+		"ship             pending  not-judged  no derivation rule for stage \"ship\"\n" +
+		"deploy           pending  not-judged  no derivation rule for stage \"deploy\"\n" +
+		"docs             pending  not-judged  no derivation rule for stage \"docs\"\n" +
+		"handoff          pending  not-judged  no derivation rule for stage \"handoff\"\n" +
+		"handoff: applicable=true blocking=false — newest handoff ../../internal/stages/testdata/clean/repo/docs/handoffs/2026-01-02-fixture.md carries the spine:cursor block\n"
+	if code != 0 || out != want || errs != "" {
+		t.Fatalf("zero-marker output changed: code=%d\nstdout=%q\nstderr=%q", code, out, errs)
+	}
+}
+
+func TestAuditStagesExistingBlockStillBlocksWithAcceptance(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	writeAuditAcceptanceTicket(t, dir, "I001-one.md", "I001", validDoctorAcceptanceLine())
+	if err := os.Remove(filepath.Join(dir, "docs", "handoffs", "2026-08-30-acceptance.md")); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 1 || !strings.Contains(out, "acceptance: approved-untested=1 invalid=0") || !strings.Contains(out, "handoff: applicable=true blocking=true") || errs != "" {
+		t.Fatalf("existing blocker lost: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+func auditAcceptanceRepo(t *testing.T, tickets string) string {
+	t.Helper()
+	dir := t.TempDir()
+	block := "<!-- spine:cursor -->\n" +
+		"effort: acceptance\n" +
+		"prd: docs/specs/acceptance.md\n" +
+		"tickets: " + tickets + "\n" +
+		"stages: grill[x] issues[<]\n" +
+		"<!-- /spine:cursor -->\n"
+	if err := os.MkdirAll(filepath.Join(dir, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "handoffs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "issues"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte("stages: [grill, issues]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".superpowers", "sdd", "progress.md"), []byte(block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "handoffs", "2026-08-30-acceptance.md"), []byte(block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "handoffs", "2026-08-29-approval.md"), []byte("# Approval\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeAuditAcceptanceTicket(t *testing.T, dir, name, id, line string) {
+	t.Helper()
+	body := "---\nid: " + id + "\n---\n\n## Acceptance criteria\n" + line + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "docs", "issues", name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // I059: formatting a valid cursor block by hand is a sole-writer violation,
 // not malformed grammar. Audit stages must block it and name the built-in
 // rewrite path; the canonical clean fixture above remains an exit-0 control.

@@ -978,6 +978,9 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 	for _, n := range rep.RoundBudget {
 		fmt.Fprintln(stderr, "warning:", n)
 	}
+	for _, problem := range rep.Acceptance.Problems {
+		fmt.Fprintln(stderr, "warning:", problem.Path+":", problem.Message())
+	}
 	if !rep.HasCursor {
 		fmt.Fprintln(stdout, "no spine cursor — nothing to audit")
 		return 0
@@ -1006,6 +1009,9 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 	}
 	for _, s := range rep.Stages {
 		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %s\n", wName, s.Name, wState, s.StateLabel(), wVerdict, string(s.Verdict), s.Detail)
+	}
+	if rep.Acceptance.CandidateCount() > 0 {
+		fmt.Fprintf(stdout, "acceptance: approved-untested=%d invalid=%d\n", rep.Acceptance.ValidCount(), rep.Acceptance.InvalidCount())
 	}
 	fmt.Fprintf(stdout, "handoff: applicable=%v blocking=%v — %s\n", rep.Handoff.Applicable, rep.Handoff.Blocking(), rep.Handoff.Detail)
 	if rep.Blocking() || cursorMalformed || cursorNonCanonical {

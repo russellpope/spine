@@ -306,6 +306,71 @@ func TestStagesWithoutARuleAreNeverJudged(t *testing.T) {
 	}
 }
 
+func TestAcceptanceSummaryUsesResolvedCursorTicketsOnly(t *testing.T) {
+	dir := acceptanceStageRepo(t, "I001,I002")
+	writeFile(t, dir, "docs/handoffs/2026-08-29-approval.md", "# Approval\n")
+	writeAcceptanceStageTicket(t, dir, "I001-one.md", "I001", stageAcceptanceLine("reason one"))
+	writeAcceptanceStageTicket(t, dir, "I002-two.md", "I002", stageAcceptanceLine(""))
+	writeAcceptanceStageTicket(t, dir, "I003-unscoped.md", "I003", stageAcceptanceLine("reason three"))
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Acceptance.ValidCount() != 1 || rep.Acceptance.InvalidCount() != 1 || rep.Acceptance.CandidateCount() != 2 {
+		t.Fatalf("scoped acceptance summary = %#v", rep.Acceptance)
+	}
+}
+
+func TestAcceptanceSummarySkipsUnresolvableTickets(t *testing.T) {
+	dir := acceptanceStageRepo(t, "not-a-ticket-expression")
+	writeFile(t, dir, "docs/handoffs/2026-08-29-approval.md", "# Approval\n")
+	writeAcceptanceStageTicket(t, dir, "I001-one.md", "I001", stageAcceptanceLine("reason one"))
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Notes) == 0 || rep.Acceptance.CandidateCount() != 0 {
+		t.Fatalf("unresolvable tickets must warn and skip acceptance: notes=%#v summary=%#v", rep.Notes, rep.Acceptance)
+	}
+}
+
+func TestAcceptanceProblemsNeverAffectBlocking(t *testing.T) {
+	dir := acceptanceStageRepo(t, "I001")
+	writeFile(t, dir, "docs/handoffs/2026-08-29-approval.md", "# Approval\n")
+	writeAcceptanceStageTicket(t, dir, "I001-one.md", "I001", stageAcceptanceLine(""))
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Acceptance.InvalidCount() != 1 || rep.Blocking() {
+		t.Fatalf("invalid acceptance must remain advisory: summary=%#v report=%#v", rep.Acceptance, rep)
+	}
+}
+
+func acceptanceStageRepo(t *testing.T, tickets string) string {
+	t.Helper()
+	dir := t.TempDir()
+	block := "<!-- spine:cursor -->\n" +
+		"effort: acceptance\n" +
+		"prd: docs/specs/acceptance.md\n" +
+		"tickets: " + tickets + "\n" +
+		"stages: grill[x] issues[<]\n" +
+		"<!-- /spine:cursor -->\n"
+	writeFile(t, dir, "WORKFLOW.md", "stages: [grill, issues]\n")
+	writeFile(t, dir, ".superpowers/sdd/progress.md", block)
+	writeFile(t, dir, "docs/handoffs/2026-08-30-acceptance.md", block)
+	return dir
+}
+
+func writeAcceptanceStageTicket(t *testing.T, dir, name, id, line string) {
+	t.Helper()
+	writeFile(t, dir, filepath.Join("docs", "issues", name), "---\nid: "+id+"\n---\n\n## Acceptance criteria\n"+line+"\n")
+}
+
+func stageAcceptanceLine(reason string) string {
+	return "- [ ] Exercise failover -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/handoffs/2026-08-29-approval.md#failover reason: " + reason
+}
+
 // The tickets: field's "prefix I0" grammar form resolves against every
 // docs/issues ticket id sharing that prefix, not just a numeric range.
 func TestPrefixTicketGrammarResolves(t *testing.T) {
