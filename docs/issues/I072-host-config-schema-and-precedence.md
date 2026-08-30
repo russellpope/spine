@@ -80,3 +80,28 @@ I073/I074/I077 boundaries. Fresh full/race/static/source-built-audit/go@1/
 maipipe evidence is recorded in
 `.superpowers/sdd/I072-resume-correction-worker4-report.md`; the ticket is not
 closed by this implementation correction.
+
+## Correction 4 (2026-08-30)
+
+Status remains **open**. Documentation commit `20a2e5b` makes `executable` a
+bare host executable name under current-platform Go path semantics, permits
+omitted or empty `models` only for unavailable harnesses, locks the no-pin host
+status to `reachable`, and specifies final-entry metadata. Code commit
+`4ba395f` rejects absolute and relative path-bearing executable values before
+lookup for every harness (including unavailable ones), while retaining lookup
+and preference-routing skips for unavailable harnesses. It keeps every final
+entry field for a byte-identical pin; a divergent pin clears requested-entry
+aliases and alternate data, records final provenance `host`, and retains the
+repository provenance in the additive requested trail.
+
+The correction also removes audit's exported host-path/lookup test fields in
+favor of its private explicit-path helper. Its official matrix covers all five
+model configuration failures in plain, effort, and JSON modes; absent and
+identical-pin doctor behavior; and malformed, executable, pin, and unpinned
+audit boundaries. The reviewer assertion for no-pin `reachable` was accepted
+because the locked design and plan both name the only status vocabulary as
+`unconfigured`, `reachable`, and `pinned`.
+
+Fresh primary re-review, a different independent verifier, and exact-final-SHA
+verification evidence remain required before closure. This correction does not
+expand into I073, I074, or I077.
