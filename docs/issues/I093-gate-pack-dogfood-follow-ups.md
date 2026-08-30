@@ -75,3 +75,10 @@ test; (3) and (4) need an owner call first.
 
 Open: 3 (unconfigured-class advisory), 4 (`--force` scoping), 5 (D11 value
 hash) — owner call.
+
+## Owner ruling 2026-08-30
+
+- Item 3 is filed as I123 with the pre-write update-advisory design.
+- Item 4 is filed as I124 with additive repeatable `--force-file` authority;
+  global `--force` remains compatible.
+- Item 5 remains shape-only. No I125 is filed.
