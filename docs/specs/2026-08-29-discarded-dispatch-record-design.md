@@ -6,8 +6,10 @@
 
 **Ticket:** I078, discarded-dispatch record grammar for audit routing
 
-**Depends on:** I111 and I102 are already on main. Their source-versus-flavor
-split and first-prompt-only team pairing are the baseline for this work.
+**Depends on:** I050's approved-untested implementation owns template
+generation 12 and must land before this work. I111 and I102 are already on
+main. Their source-versus-flavor split and first-prompt-only team pairing are
+the audit baseline for this work.
 
 ## Goal
 
@@ -151,14 +153,20 @@ verdicts, exit codes, `ESCALATION`, `FALLBACK`, no-transcript handling, D28
 repo qualification, I111 source/flavor behavior, and I102 first-prompt-only
 pairing stays unchanged.
 
-This is user-facing workflow grammar. Update the current repository
-`WORKFLOW.md` and `templates/current/WORKFLOW.md.tmpl`, then bump
-`templates/VERSION` from 11 to 12. The bump is required because new and updated
-repositories must receive the record contract through `init`, `adopt`, and
-`update`. The implementation must register the exact predecessor workflow
-lines in `internal/update`'s superseded-line set and add a generation-11 to
-generation-12 migration test. It must not hand-edit an arbitrary fleet repo or
-claim that a template bump migrates an existing ledger record.
+This is user-facing workflow grammar. I078 starts from I050's generation-12
+output. Update the current repository `WORKFLOW.md` and
+`templates/current/WORKFLOW.md.tmpl`, then bump `templates/VERSION` from 12 to
+13. The bump is required because new and updated repositories must receive the
+record contract through `init`, `adopt`, and `update`. The generation-12 to
+generation-13 migration fixture must include I050's approved-untested wording
+and prove update preserves it while adding the discarded-record contract.
+
+I078 adds its workflow wording. It does not replace I050's approved-untested
+lines, so it must not register them in `internal/update`'s superseded-line set.
+If implementation replaces any other current rendered workflow line, it must
+register only that exact predecessor line and add a negative control for a
+hand-edited version. It must not hand-edit an arbitrary fleet repo or claim
+that a template bump migrates an existing ledger record.
 
 `CHANGELOG.md` receives a concise entry after implementation. The I078 ticket
 is closed only with actual commit ids and review evidence.
@@ -192,9 +200,10 @@ is closed only with actual commit ids and review evidence.
    `call_id` can be discarded only by that exact identity.
 7. Existing `ESCALATION`, `FALLBACK`, I111, I102, D28, and I090 tests stay
    green without changed expectations.
-8. Fresh scaffolded and updated workflow documentation shows the exact
-   `DISCARDED` grammar at template generation 12, while a hand-edited
-   predecessor line remains an unrecognized local edit.
+8. Fresh scaffolded and generation-12-updated workflow documentation shows
+   the exact `DISCARDED` grammar at template generation 13 and preserves
+   I050's `Acceptance exceptions` and `APPROVED-UNTESTED` lines. A hand edit
+   to either retained I050 line remains an unrecognized local edit.
 
 ## Requirements-attack resolutions
 
@@ -205,4 +214,4 @@ is closed only with actual commit ids and review evidence.
 | A linked Codex worker has only root-level correlation. | It is identity-less for I078 and cannot be excused. |
 | A record contains a typo or is copied twice. | It cannot suppress evidence and emits a warning. |
 | A record claims discarded work actually landed. | The audit cannot prove landed provenance. It treats the explicit, reasoned record as a narrow operator assertion and never widens it by ticket or tier. |
-| Template docs drift from the parser. | Generation 12, scaffold/update tests, and exact superseded-line registration make the grammar part of the emitted contract. |
+| Template docs drift from the parser. | Generation 13, a generation-12 fixture carrying I050's wording, scaffold/update tests, and exact superseded-line registration only for an actual replacement make the grammar part of the emitted contract. |

@@ -9,7 +9,7 @@ every other lower-tier dispatch.
 **Architecture:** Preserve an immutable dispatch identity from each reader to
 each evidence token, parse identity-scoped discarded records, then consult a
 record only in the otherwise-silent-descent path. A token without exact
-source/session/event correlation cannot be excused. Template generation 12
+source/session/event correlation cannot be excused. Template generation 13
 publishes the same grammar to generated workflow docs.
 
 **Tech stack:** Go standard library, existing audit fixture style, embedded
@@ -19,8 +19,9 @@ workflow templates.
 
 ## Global constraints
 
-- I078 is a routine-tier, subagent-driven audit change. I111 and I102 are
-  already integrated; preserve their current behavior.
+- I078 is a routine-tier, subagent-driven audit change. It starts after I050's
+  generation-12 approved-untested release. I111 and I102 are already
+  integrated; preserve their current behavior.
 - Do not infer whether a diff landed. The implementation is fail-closed when
   raw evidence lacks an exact dispatch identity.
 - Keep `ESCALATION`, `FALLBACK`, `pickTier`, D28 qualification, I111 flavor
@@ -41,13 +42,13 @@ workflow templates.
 | `internal/audit/codex_test.go` | Direct-Codex identity coverage and root-only worker fail-closed test. |
 | `internal/audit/resolve_test.go` | Fixture helpers that write session-specific discarded ledgers and Claude transcript events. |
 | `cmd/spine/main_test.go` | CLI exit-code and visible `discarded-with-reason` output test. |
-| `templates/VERSION` | Template generation 12. |
+| `templates/VERSION` | Template generation 13. |
 | `templates/current/WORKFLOW.md.tmpl` | Exact documented discarded grammar and scope. |
 | `WORKFLOW.md` | This repository's generated workflow contract after `spine update --write`. |
 | `internal/scaffold/scaffold_test.go` | Fresh-scaffold grammar assertion. |
-| `internal/tmpl/tmpl_test.go` | Generation assertion updated to 12. |
-| `internal/update/update.go` | Add the predecessor workflow prose to `supersededLines`. |
-| `internal/update/gen11to12_test.go` | New clean-migration and hand-edited-line negative control. |
+| `internal/tmpl/tmpl_test.go` | Current-generation assertion updated to 13. |
+| `internal/update/update.go` | Register only an exact current workflow line that I078 actually replaces; never register I050's retained approved-untested lines. |
+| `internal/update/gen12to13_test.go` | New clean migration, byte-for-byte I050 wording preservation, and retained-I050-line local-edit negative control. |
 | `docs/issues/I078-discarded-dispatch-record-grammar-for-audit-routing.md` | Closure, actual SHAs, and verification evidence. |
 | `CHANGELOG.md` | Consumer-visible verdict and workflow-grammar note. |
 
@@ -255,7 +256,7 @@ records only. Root-linked Codex worker actuals remain identity-less.
 
   Run: `git add internal/audit/codex.go internal/audit/codex_test.go internal/audit/audit_test.go && git commit -m 'feat(I078): correlate direct codex dispatch records'`
 
-### Task 4: publish grammar through template generation 12
+### Task 4: publish grammar through template generation 13
 
 **Files:**
 
@@ -264,42 +265,59 @@ records only. Root-linked Codex worker actuals remain identity-less.
 - Modify: `internal/scaffold/scaffold_test.go`
 - Modify: `internal/tmpl/tmpl_test.go`
 - Modify: `internal/update/update.go` (`supersededLines`)
-- Create: `internal/update/gen11to12_test.go`
+- Create: `internal/update/gen12to13_test.go`
 - Modify: `WORKFLOW.md` only via `spine update --write --dir .`
 
 **Consumes:** exact grammar and scope from the PRD.
 
-**Produces:** a generation-12 generated workflow contract and a safe update
-migration that recognizes only the real generation-11 predecessor prose.
+**Produces:** a generation-13 generated workflow contract and a safe update
+migration from I050's generation-12 output that preserves its
+approved-untested wording. It recognizes a predecessor line only if I078
+actually replaces that rendered line.
 
 - [ ] **Step 1: Write failing template and migration tests.** Assert a fresh
   scaffold contains the exact `DISCARDED` grammar, says one record covers one
   identified event rather than a ticket/tier, and stamps `template_version:
-  12`. Build a generation-11 workflow fixture from the captured current
-  render; assert `update.Run` reports pending with no unrecognized lines,
-  writes generation 12, and is idempotent. Mutate the predecessor prose and
-  assert ordinary update reports it as an unrecognized local edit.
+  13`. Build a generation-12 workflow fixture from I050's captured render,
+  including its exact `Acceptance exceptions` and `APPROVED-UNTESTED` lines.
+  Assert `update.Run` reports pending with no unrecognized lines, writes
+  generation 13, preserves those I050 lines byte-for-byte, and is idempotent.
+  Mutate one retained I050 line and assert ordinary update reports it as an
+  unrecognized local edit. Do not treat a retained I050 line as a predecessor.
+  If I078 replaces a different current rendered line, add a separate test for
+  that exact predecessor line.
 
 - [ ] **Step 2: Run red.**
 
-  Run: `go test ./internal/{tmpl,scaffold,update} -run 'Test.*(Generation|Discarded|Gen11To12)' -count=1`
+  Run: `go test ./internal/{tmpl,scaffold,update} -run 'Test.*(Generation|Discarded|Gen12To13)' -count=1`
 
-  Expected: FAIL because the version remains 11 and no discarded workflow
+  Expected: FAIL because the version remains 12 after I050 and no discarded workflow
   contract or migration lock exists.
 
 - [ ] **Step 3: Implement the documentation migration.** Bump
-  `templates/VERSION` to `12`; add the exact grammar and scope paragraph to
-  `templates/current/WORKFLOW.md.tmpl`; add only the outgoing exact lines to
-  `supersededLines`; and make the new migration test permit only the stamp and
-  documented generation-12 diff. Update the expectation in
-  `internal/tmpl/tmpl_test.go` and scaffold assertions.
+  `templates/VERSION` to `13`; add the exact grammar and scope paragraph to
+  `templates/current/WORKFLOW.md.tmpl`; preserve I050's approved-untested
+  lines verbatim; and make the new migration test permit only the stamp and
+  documented generation-13 addition. Update current-version expectations in
+  `internal/tmpl/tmpl_test.go` and scaffold assertions from 12 to 13, retain
+  captured generation-12 inputs as history, and advance the future-generation
+  refusal from 13 to 14. Search every current-version assertion before editing:
+
+  ```bash
+  rg -n 'template_version: 12|begin v12|generation 12|want 12|!= 12|future generation|template_version: 13' internal cmd templates --glob '*.go' --glob 'VERSION'
+  ```
+
+  Change only assertions about the compiled current version to 13. Keep the
+  captured generation-12 fixture unchanged. Add an exact `supersededLines`
+  entry only if this change actually replaces that rendered predecessor line.
 
 - [ ] **Step 4: Render this repository instead of hand-editing it.**
 
   Run: `go run ./cmd/spine update --dir . --write`
 
-  Expected: `WORKFLOW.md` updates to `template_version: 12` with the exact
-  discarded-record documentation and no unrecognized local edit.
+  Expected: `WORKFLOW.md` updates from `template_version: 12` to 13 with the
+  exact discarded-record documentation, retained I050 approved-untested
+  wording, and no unrecognized local edit.
 
 - [ ] **Step 5: Verify green.**
 
@@ -309,7 +327,7 @@ migration that recognizes only the real generation-11 predecessor prose.
 
 - [ ] **Step 6: Commit the generated-contract unit.**
 
-  Run: `git add templates/VERSION templates/current/WORKFLOW.md.tmpl internal/scaffold/scaffold_test.go internal/tmpl/tmpl_test.go internal/update/update.go internal/update/gen11to12_test.go WORKFLOW.md && git commit -m 'docs(I078): publish discarded dispatch grammar'`
+  Run: `git add templates/VERSION templates/current/WORKFLOW.md.tmpl internal/scaffold/scaffold_test.go internal/tmpl/tmpl_test.go internal/update/update.go internal/update/gen12to13_test.go WORKFLOW.md && git commit -m 'docs(I078): publish discarded dispatch grammar'`
 
 ### Task 5: integration, documentation, review, and verification
 
@@ -322,7 +340,7 @@ migration that recognizes only the real generation-11 predecessor prose.
 
 - [ ] **Step 1: Run full checks.**
 
-  Run: `gofmt -w internal/audit/audit.go internal/audit/codex.go internal/audit/audit_test.go internal/audit/codex_test.go internal/audit/resolve_test.go internal/scaffold/scaffold_test.go internal/tmpl/tmpl_test.go internal/update/update.go internal/update/gen11to12_test.go cmd/spine/main_test.go`
+  Run: `gofmt -w internal/audit/audit.go internal/audit/codex.go internal/audit/audit_test.go internal/audit/codex_test.go internal/audit/resolve_test.go internal/scaffold/scaffold_test.go internal/tmpl/tmpl_test.go internal/update/update.go internal/update/gen12to13_test.go cmd/spine/main_test.go`
 
   Expected: files formatted; inspect `git diff` afterward to confirm no
   unrelated edits.
@@ -348,7 +366,7 @@ migration that recognizes only the real generation-11 predecessor prose.
 - [ ] **Step 3: Update closure documentation.** Add a concise `CHANGELOG.md`
   item. Mark I078 `fixed` only with actual implementation and documentation
   SHAs. Its resolution must state the no-diff-attribution boundary, complete
-  identity requirement, malformed/duplicate behavior, template generation 12,
+  identity requirement, malformed/duplicate behavior, template generation 13,
   and test/review evidence.
 
 - [ ] **Step 4: Commit ticket and changelog docs.**
