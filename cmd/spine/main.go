@@ -157,10 +157,21 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	if *write {
 		warnDirty(*dir, stderr)
 	}
-	reports, err := update.Run(update.Options{Dir: *dir, Write: *write, Force: *force})
+	opts := update.Options{Dir: *dir, Write: *write, Force: *force}
+	if *write {
+		opts.BeforeWrite = func(advisories []update.GateConfigAdvisory) {
+			printGateConfigAdvisories(stdout, advisories)
+		}
+	}
+	reports, err := update.Run(opts)
 	if err != nil {
 		fmt.Fprintln(stderr, "update:", err)
 		return 2
+	}
+	if !*write {
+		for _, r := range reports {
+			printGateConfigAdvisories(stdout, r.GateConfigAdvisories)
+		}
 	}
 	outstanding := 0
 	// itemized model-table results (design D6): each inherited refresh names
@@ -257,6 +268,13 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func printGateConfigAdvisories(stdout io.Writer, advisories []update.GateConfigAdvisory) {
+	for _, advisory := range advisories {
+		fmt.Fprintf(stdout, "advisory: enabled gate class %q lacks required gate_pack_config.%s; configure gate_pack_config.%s or add %q to gate_pack_disabled\n",
+			advisory.Class, advisory.Key, advisory.Key, advisory.Class)
+	}
 }
 
 // warnDirty nudges the user to review post-write diffs with git; git being

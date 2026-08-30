@@ -2942,6 +2942,59 @@ func TestGatePackRegionAtCLISeam(t *testing.T) {
 	}
 }
 
+// I123: missing required gate configuration is advisory stdout, in bytewise
+// class order, before any ordinary update report. It changes neither the
+// dry-run nor write exit contract, and a later up-to-date plan has only
+// advice (not outstanding work).
+func TestUpdateGateConfigAdvisoriesAtCLISeam(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "go-service", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	setGateKeys(t, dir, "go@1", "[]")
+	want := "advisory: enabled gate class \"fixture-manifest\" lacks required gate_pack_config.fixture_manifest; configure gate_pack_config.fixture_manifest or add \"fixture-manifest\" to gate_pack_disabled\n" +
+		"advisory: enabled gate class \"gitignore-control\" lacks required gate_pack_config.build_outputs; configure gate_pack_config.build_outputs or add \"gitignore-control\" to gate_pack_disabled\n" +
+		"advisory: enabled gate class \"n-plus-one\" lacks required gate_pack_config.n_plus_one_clients; configure gate_pack_config.n_plus_one_clients or add \"n-plus-one\" to gate_pack_disabled\n" +
+		"advisory: enabled gate class \"test-enum-vs-spec\" lacks required gate_pack_config.test_enum_spec; configure gate_pack_config.test_enum_spec or add \"test-enum-vs-spec\" to gate_pack_disabled\n"
+
+	code, out, errs := runCmd(t, "update", "--dir", dir)
+	if code != 1 || errs != "" {
+		t.Fatalf("missing-config dry run code=%d stdout=%q stderr=%q, want 1/stdout-only", code, out, errs)
+	}
+	if !strings.HasPrefix(out, want) {
+		t.Fatalf("dry-run advice = %q, want exact leading lines %q", out, want)
+	}
+	if diff := strings.Index(out, "--- maipipe.toml"); diff < len(want) {
+		t.Errorf("advice must precede maipipe diff: advice end=%d diff=%d out=%q", len(want), diff, out)
+	}
+
+	code, out, errs = runCmd(t, "update", "--dir", dir, "--write")
+	if code != 0 || errs != "" || strings.Count(out, "advisory: enabled gate class") != 4 || !strings.HasPrefix(out, want) {
+		t.Fatalf("missing-config write code=%d stdout=%q stderr=%q, want one stdout advice per class and success", code, out, errs)
+	}
+
+	code, out, errs = runCmd(t, "update", "--dir", dir)
+	if code != 0 || errs != "" || !strings.HasPrefix(out, want) || strings.Contains(out, "--- maipipe.toml") {
+		t.Fatalf("advisory-only up-to-date dry run code=%d stdout=%q stderr=%q, want zero with no diff", code, out, errs)
+	}
+
+	configured := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", configured, "--profile", "go-service", "--name", "configured"); code != 0 {
+		t.Fatal(errs)
+	}
+	setGateKeys(t, configured, "go@1", "[]")
+	setGateConfigKeys(t, configured, map[string]string{
+		"fixture_manifest":   "docs/fixtures.md",
+		"build_outputs":      "bin/spine",
+		"n_plus_one_clients": "List",
+		"test_enum_spec":     "docs/spec.md",
+	})
+	code, out, errs = runCmd(t, "update", "--dir", configured)
+	if code != 1 || errs != "" || strings.Contains(out, "advisory: enabled gate class") {
+		t.Fatalf("configured dry run code=%d stdout=%q stderr=%q, want unchanged no-advice plan", code, out, errs)
+	}
+}
+
 // remediationRepo stages a repo whose cursor names effort E, plus a newest
 // handoff carrying the same cursor block so the stages backstop is satisfied
 // — the fixture the round-budget advisory tests measure exit codes against.
@@ -3242,6 +3295,51 @@ func setGateKeys(t *testing.T, dir, pack, disabled string) {
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func setGateConfigKeys(t *testing.T, dir string, values map[string]string) {
+	t.Helper()
+	path := filepath.Join(dir, "WORKFLOW.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	for key, value := range values {
+		content = updateTestSetKey(t, content, "gate_pack_config."+key, value)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func updateTestSetKey(t *testing.T, content, dotted, value string) string {
+	parts := strings.Split(dotted, ".")
+	if len(parts) != 2 {
+		panic("test helper only supports two-level keys")
+	}
+	lines := strings.Split(content, "\n")
+	inSection := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "gate_pack_config:") {
+			inSection = true
+			continue
+		}
+		if inSection && len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
+			break
+		}
+		if inSection && strings.HasPrefix(trimmed, parts[1]+":") {
+			comment := ""
+			if j := strings.Index(line, "#"); j >= 0 {
+				comment = "    " + line[j:]
+			}
+			lines[i] = "  " + parts[1] + ": " + value + comment
+			return strings.Join(lines, "\n")
+		}
+	}
+	t.Fatalf("WORKFLOW.md has no %s", dotted)
+	return ""
 }
 
 // AC (I098): the update plan names the stages a render adds to the region

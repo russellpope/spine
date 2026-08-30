@@ -3,12 +3,105 @@ package update
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/russellpope/spine/internal/scaffold"
 	"github.com/russellpope/spine/internal/tmpl"
 )
+
+// I123: reports are a real pre-write seam. The callback must see the fully
+// preflighted plan before its first atomic write; moving it after the write
+// would leave a caller unable to present advance configuration advice.
+func TestUpdatePreWriteGateAdvisoriesFollowPreflightAndPrecedeWrites(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	marker := filepath.Join(dir, "preflight-ran")
+	binDir := t.TempDir()
+	bin := filepath.Join(binDir, "maipipe")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n: > "+marker+"\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	want := []GateConfigAdvisory{
+		{Class: "fixture-manifest", Key: "fixture_manifest"},
+		{Class: "gitignore-control", Key: "build_outputs"},
+		{Class: "n-plus-one", Key: "n_plus_one_clients"},
+		{Class: "test-enum-vs-spec", Key: "test_enum_spec"},
+	}
+	calls := 0
+	_, err := Run(Options{
+		Dir:   dir,
+		Write: true,
+		BeforeWrite: func(got []GateConfigAdvisory) {
+			calls++
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("advisories = %#v, want %#v", got, want)
+			}
+			if _, err := os.Stat(marker); err != nil {
+				t.Errorf("callback ran before candidate preflight: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, MaipipeFile)); !os.IsNotExist(err) {
+				t.Errorf("callback ran after a write: maipipe stat err=%v", err)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("pre-write advisory callback calls = %d, want 1", calls)
+	}
+	if _, err := os.Stat(filepath.Join(dir, MaipipeFile)); err != nil {
+		t.Fatalf("write did not follow the callback: %v", err)
+	}
+}
+
+// I123's advisory is still useful when a candidate preflight refuses the
+// whole plan. It must be delivered before the refusal, while every planned
+// file remains byte-identical.
+func TestUpdatePreWriteGateAdvisoriesPrecedeRefusalWithoutWrites(t *testing.T) {
+	dir := gateRepo(t, "[]", nil)
+	wfPath := filepath.Join(dir, "WORKFLOW.md")
+	beforeWorkflow := setKey(readFile(t, wfPath), "template_version", "10")
+	if err := os.WriteFile(wfPath, []byte(beforeWorkflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	bin := filepath.Join(binDir, "maipipe")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho refused >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	called := false
+	_, err := Run(Options{
+		Dir:   dir,
+		Write: true,
+		BeforeWrite: func(got []GateConfigAdvisory) {
+			called = true
+			if len(got) != 4 {
+				t.Errorf("advisories = %#v, want four missing required inputs", got)
+			}
+			if _, err := os.Stat(filepath.Join(dir, MaipipeFile)); !os.IsNotExist(err) {
+				t.Errorf("callback ran after a write: maipipe stat err=%v", err)
+			}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "no files were written") {
+		t.Fatalf("refused update error = %v, want whole-plan no-write refusal", err)
+	}
+	if !called {
+		t.Fatal("pre-write advisory callback was not called before refusal")
+	}
+	if got := readFile(t, wfPath); got != beforeWorkflow {
+		t.Errorf("WORKFLOW.md changed after refusal:\nwant %q\n got %q", beforeWorkflow, got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, MaipipeFile)); !os.IsNotExist(err) {
+		t.Errorf("maipipe.toml created despite refusal: %v", err)
+	}
+}
 
 const gen0HbmviewClaude = `# hbmview
 

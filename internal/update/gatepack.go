@@ -131,6 +131,10 @@ func gateConfigAdvisories(s gatePackSettings) []GateConfigAdvisory {
 	if !shipped {
 		return nil
 	}
+	return gateConfigAdvisoriesForClasses(s, classes)
+}
+
+func gateConfigAdvisoriesForClasses(s gatePackSettings, classes []string) []GateConfigAdvisory {
 	seen := map[string]bool{}
 	var advisories []GateConfigAdvisory
 	for _, class := range classes {
@@ -233,6 +237,7 @@ func planMaipipe(dir, workflow string) (FileReport, bool, error) {
 			s.pack, strings.Join(gate.PackIDs(), ", "))}
 		return report, true, nil
 	}
+	report.GateConfigAdvisories = gateConfigAdvisoriesForClasses(s, classes)
 	region := renderGateRegion(s)
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {

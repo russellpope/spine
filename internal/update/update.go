@@ -66,8 +66,12 @@ type FileReport struct {
 	Refusal string
 	// Preflight records the pre-write check that ran, or the prerequisite that
 	// caused this file to be skipped. maipipe.toml only (I104).
-	Preflight  string
-	newContent string
+	Preflight string
+	// GateConfigAdvisories identifies the enabled classes in the planned
+	// maipipe gate pack that lack a required gate_pack_config value. It is
+	// plan metadata only: it never affects the file state or diff.
+	GateConfigAdvisories []GateConfigAdvisory
+	newContent           string
 }
 
 // Options configures Run. Zero value = dry-run on ".". AdoptProfile switches
@@ -80,6 +84,10 @@ type Options struct {
 	Force        bool
 	AdoptProfile string
 	AdoptName    string
+	// BeforeWrite receives the fully preflighted gate configuration advice
+	// immediately before a whole-plan refusal check or the first write. It
+	// lets callers present the same advice for dry-run and write execution.
+	BeforeWrite func([]GateConfigAdvisory)
 }
 
 const (
@@ -223,6 +231,13 @@ func Run(opts Options) ([]FileReport, error) {
 		}
 	}
 	if opts.Write {
+		var advisories []GateConfigAdvisory
+		for _, r := range reports {
+			advisories = append(advisories, r.GateConfigAdvisories...)
+		}
+		if opts.BeforeWrite != nil {
+			opts.BeforeWrite(advisories)
+		}
 		// A refusal aborts the whole run: update presents one plan and
 		// applies it as a whole, and a partial application would leave a
 		// rendered region stale against a WORKFLOW.md that already moved —
