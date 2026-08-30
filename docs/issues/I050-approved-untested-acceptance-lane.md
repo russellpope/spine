@@ -3,7 +3,7 @@ id: I050
 title: "Verify convention: approved-untested as a first-class acceptance state"
 severity: med
 status: open
-commits: [7e94222, 4850488, fae360f, 6950089, c55faf3]
+commits: [7e94222, 4850488, fae360f, 6950089, c55faf3, 3761f4f, 8f8db36]
 affects: [templates, doctor]
 blocked-by: []
 execution-mode: subagent-driven
@@ -94,5 +94,13 @@ not fully aggregated, valid bare/tab-delimited H1/H2 headings do not end the
 acceptance section, and the ledger/gate state was advanced too early. I050 is
 therefore open again, and every acceptance criterion remains unchecked until
 a later fresh primary re-review and a different independent verifier approve
-the corrected exact SHA. Correction commit SHAs will be added here without
-closing the ticket.
+the corrected exact SHA.
+
+Correction commits so far are `3761f4f` (reopen the ticket and amend the
+binding design/plan before product edits) and `8f8db36` (relative-root
+normalization, unlimited line reading with surfaced errors, deterministic
+multi-failure aggregation, complete H1/H2 boundary recognition, and compiled
+CLI regressions). Focused affected-package tests and repeated aggregation/path
+controls passed after their recorded red runs. Full repository verification,
+fresh re-review, and independent verification remain pending; this is not a
+closure resolution.
