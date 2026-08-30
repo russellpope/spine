@@ -1,7 +1,7 @@
 package eval
 
 import (
-	"io/fs"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,6 +53,11 @@ var pinEvidenceBatteryKeys = []string{
 	"ordering", "units-labels", "security-default", "lifecycle", "error-path-behaviour",
 }
 
+// pinEvidenceBeforeOpen is a deterministic test seam for replacement attacks.
+// Production leaves it nil. It is called after an entry is Lstat'd and before
+// the rooted descriptor is opened, which is the formerly vulnerable boundary.
+var pinEvidenceBeforeOpen func(string)
+
 // CheckPinEvidence reads only the selected repo-local runs. It neither walks
 // docs/evals nor invokes generic eval listing, so unrelated evals have no
 // bearing on a pin's evidence result.
@@ -90,27 +95,34 @@ func checkPinEvidenceReference(repoDir, model, ref string, today time.Time) (Pin
 	evalDir, runName := match[1], match[2]
 	runPath := filepath.ToSlash(filepath.Join("docs", "evals", evalDir, "runs", runName+".md"))
 	evalPath := filepath.ToSlash(filepath.Join("docs", "evals", evalDir, "eval.md"))
-	for _, rel := range []string{"docs", filepath.Join("docs", "evals"), filepath.Join("docs", "evals", evalDir), filepath.Join("docs", "evals", evalDir, "runs")} {
-		if kind := checkedDirectory(filepath.Join(repoDir, rel)); kind != "" {
-			if kind == PinEvidenceMissing {
-				return kind, runPath
-			}
-			return kind, runPath
-		}
-	}
-	if kind := checkedRegularFile(filepath.Join(repoDir, "docs", "evals", evalDir, "eval.md")); kind != "" {
-		return kind, evalPath
-	}
-	if kind := checkedRegularFile(filepath.Join(repoDir, "docs", "evals", evalDir, "runs", runName+".md")); kind != "" {
+	reader, kind := openPinEvidenceRoot(repoDir)
+	if kind != "" {
 		return kind, runPath
 	}
-	parent, err := os.ReadFile(filepath.Join(repoDir, "docs", "evals", evalDir, "eval.md"))
-	if err != nil || !hasRequiredFrontMatter(string(parent), evalKeys) {
+	for _, component := range []string{"docs", "evals", evalDir} {
+		next, kind := reader.openDirectory(component)
+		if kind != "" {
+			_ = reader.Close()
+			return kind, runPath
+		}
+		reader = next
+	}
+	defer func() { _ = reader.Close() }()
+	parent, kind := reader.readRegularFile("eval.md")
+	if kind != "" {
+		return kind, evalPath
+	}
+	if !hasRequiredFrontMatter(string(parent), evalKeys) {
 		return PinEvidenceMalformed, evalPath
 	}
-	raw, err := os.ReadFile(filepath.Join(repoDir, "docs", "evals", evalDir, "runs", runName+".md"))
-	if err != nil {
-		return PinEvidenceMalformed, runPath
+	next, kind := reader.openDirectory("runs")
+	if kind != "" {
+		return kind, runPath
+	}
+	reader = next
+	raw, kind := reader.readRegularFile(runName + ".md")
+	if kind != "" {
+		return kind, runPath
 	}
 	kv, has := meta.Parse(string(raw))
 	if !has || !hasRequiredKeys(kv, runKeys) {
@@ -133,32 +145,91 @@ func checkPinEvidenceReference(repoDir, model, ref string, today time.Time) (Pin
 	return checkPinEvidenceBattery(kv), runPath
 }
 
-func checkedDirectory(path string) PinEvidenceKind {
-	info, err := os.Lstat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return PinEvidenceMissing
-		}
-		return PinEvidenceMalformed
-	}
-	if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
-		return PinEvidenceMalformed
-	}
-	return ""
+// pinEvidenceRoot holds a descriptor for a selected directory. Every nested
+// component is opened relative to that descriptor, so a pathname replacement
+// cannot redirect the read outside repoDir. Each opened descriptor is also
+// matched to the object Lstat observed before it was opened.
+type pinEvidenceRoot struct {
+	root    *os.Root
+	path    string
+	parents []*os.Root
 }
 
-func checkedRegularFile(path string) PinEvidenceKind {
-	info, err := os.Lstat(path)
+func openPinEvidenceRoot(repoDir string) (*pinEvidenceRoot, PinEvidenceKind) {
+	root, err := os.OpenRoot(repoDir)
+	if err != nil {
+		return nil, PinEvidenceMalformed
+	}
+	return &pinEvidenceRoot{root: root}, ""
+}
+
+func (r *pinEvidenceRoot) Close() error {
+	err := r.root.Close()
+	for i := len(r.parents) - 1; i >= 0; i-- {
+		if closeErr := r.parents[i].Close(); err == nil {
+			err = closeErr
+		}
+	}
+	return err
+}
+
+func (r *pinEvidenceRoot) openDirectory(name string) (*pinEvidenceRoot, PinEvidenceKind) {
+	info, err := r.root.Lstat(name)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return PinEvidenceMissing
+			return nil, PinEvidenceMissing
 		}
-		return PinEvidenceMalformed
+		return nil, PinEvidenceMalformed
 	}
-	if info.Mode()&fs.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return PinEvidenceMalformed
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return nil, PinEvidenceMalformed
 	}
-	return ""
+	path := filepath.ToSlash(filepath.Join(r.path, name))
+	if pinEvidenceBeforeOpen != nil {
+		pinEvidenceBeforeOpen(path)
+	}
+	child, err := r.root.OpenRoot(name)
+	if err != nil {
+		return nil, PinEvidenceMalformed
+	}
+	opened, err := child.Stat(".")
+	if err != nil || !os.SameFile(info, opened) {
+		_ = child.Close()
+		return nil, PinEvidenceMalformed
+	}
+	parents := append(append([]*os.Root(nil), r.parents...), r.root)
+	return &pinEvidenceRoot{root: child, path: path, parents: parents}, ""
+}
+
+func (r *pinEvidenceRoot) readRegularFile(name string) ([]byte, PinEvidenceKind) {
+	info, err := r.root.Lstat(name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, PinEvidenceMissing
+		}
+		return nil, PinEvidenceMalformed
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, PinEvidenceMalformed
+	}
+	path := filepath.ToSlash(filepath.Join(r.path, name))
+	if pinEvidenceBeforeOpen != nil {
+		pinEvidenceBeforeOpen(path)
+	}
+	file, err := r.root.Open(name)
+	if err != nil {
+		return nil, PinEvidenceMalformed
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return nil, PinEvidenceMalformed
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return nil, PinEvidenceMalformed
+	}
+	return content, ""
 }
 
 func hasRequiredFrontMatter(content string, keys []string) bool {

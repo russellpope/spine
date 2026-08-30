@@ -3,6 +3,7 @@ package eval
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -119,6 +120,105 @@ func TestPinEvidenceDateQuoteAggregationAndContainment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPinEvidenceRejectsRunSwapToOutsideEvidence is a bounded adversarial
+// probe for the check-then-read race. While a valid-but-wrong-model regular
+// run is repeatedly exchanged with a symlink to an outside passing run, an
+// evidence reader must never accept the outside content. The large parent
+// file makes the old pathname-based reader's window reliable without relying
+// on an unbounded probabilistic race.
+func TestPinEvidenceRejectsRunSwapToOutsideEvidence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges not assumed by this test")
+	}
+	dir := pinEvidenceRepo(t, "2026-06-01", "wrong-model", fullPassingBattery())
+	outside := pinEvidenceRepo(t, "2026-06-01", pinEvidenceModel, fullPassingBattery())
+	parent := filepath.Join(dir, "docs", "evals", pinEvidenceEval, "eval.md")
+	mustWrite(t, parent, "---\ntitle: demo\ncreated: 2026-08-30\nprompt: prompt.md\nrubric: rubric.md\n---\n"+strings.Repeat("\n", 1<<20))
+
+	run := pinEvidenceRunPath(dir)
+	parked := run + ".regular"
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			if err := os.Rename(run, parked); err != nil {
+				continue
+			}
+			if err := os.Symlink(pinEvidenceRunPath(outside), run); err == nil {
+				runtime.Gosched()
+				_ = os.Remove(run)
+			}
+			_ = os.Rename(parked, run)
+		}
+	}()
+	t.Cleanup(func() {
+		close(done)
+		<-stopped
+	})
+
+	for attempt := 0; attempt < 16; attempt++ {
+		findings := CheckPinEvidence(dir, []PinEvidencePin{{Key: "codex.primary", Model: pinEvidenceModel, EvidenceRefs: []string{pinEvidenceRef}}}, pinEvidenceToday)
+		if len(findings) == 0 {
+			t.Fatalf("accepted outside symlink target on attempt %d", attempt+1)
+		}
+	}
+}
+
+func TestPinEvidenceRejectsSelectedComponentSwappedToOutsideSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges not assumed by this test")
+	}
+	for _, rel := range []string{
+		"docs",
+		"docs/evals",
+		"docs/evals/" + pinEvidenceEval,
+		"docs/evals/" + pinEvidenceEval + "/runs",
+		"docs/evals/" + pinEvidenceEval + "/eval.md",
+		"docs/evals/" + pinEvidenceEval + "/runs/" + pinEvidenceRun + ".md",
+	} {
+		t.Run(rel, func(t *testing.T) {
+			dir := pinEvidenceRepo(t, "2026-06-01", pinEvidenceModel, fullPassingBattery())
+			outside := pinEvidenceRepo(t, "2026-06-01", pinEvidenceModel, fullPassingBattery())
+			target := filepath.Join(dir, filepath.FromSlash(rel))
+			outsideTarget := filepath.Join(outside, filepath.FromSlash(rel))
+			parked := target + ".checked"
+			setPinEvidenceBeforeOpen(t, func(opened string) {
+				if opened != rel {
+					return
+				}
+				if err := os.Rename(target, parked); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outsideTarget, target); err != nil {
+					t.Fatal(err)
+				}
+			})
+
+			got := CheckPinEvidence(dir, []PinEvidencePin{{Key: "codex.primary", Model: pinEvidenceModel, EvidenceRefs: []string{pinEvidenceRef}}}, pinEvidenceToday)
+			wantPath := "docs/evals/2026-08-30-routing-check/runs/gpt-5-6-sol.md"
+			if rel == "docs/evals/"+pinEvidenceEval+"/eval.md" {
+				wantPath = "docs/evals/2026-08-30-routing-check/eval.md"
+			}
+			if len(got) != 1 || got[0].Kind != PinEvidenceMalformed || got[0].Path != wantPath {
+				t.Fatalf("findings = %#v, want malformed logical path %q", got, wantPath)
+			}
+		})
+	}
+}
+
+func setPinEvidenceBeforeOpen(t *testing.T, hook func(string)) {
+	t.Helper()
+	previous := pinEvidenceBeforeOpen
+	pinEvidenceBeforeOpen = hook
+	t.Cleanup(func() { pinEvidenceBeforeOpen = previous })
 }
 
 func pinEvidenceRepo(t *testing.T, created, model, battery string) string {
