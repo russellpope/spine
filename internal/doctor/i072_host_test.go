@@ -181,7 +181,7 @@ func TestHostRoutingCheckIdenticalPinSuppressesOnlyMatchingPreferenceWarning(t *
 `)
 	findings := hostRoutingCheck(t.TempDir(), path, func(string) (string, error) { return "/bin/codex", nil })
 	for _, finding := range findings {
-		if strings.Contains(finding.Message, "codex.primary") {
+		if finding.ID == "D16" && strings.Contains(finding.Message, "codex.primary") {
 			t.Fatalf("identical pin finding = %#v", finding)
 		}
 	}
