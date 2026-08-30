@@ -25,6 +25,10 @@ func TestUpdateForceFileRejectsInvalidAuthorityBeforePolicyOrWrite(t *testing.T)
 		{name: "empty", paths: []string{""}, want: `update: --force-file "" must be repository-relative and must not contain ".."`},
 		{name: "absolute", paths: []string{"/WORKFLOW.md"}, want: `update: --force-file "/WORKFLOW.md" must be repository-relative and must not contain ".."`},
 		{name: "raw traversal", paths: []string{"docs/../WORKFLOW.md"}, want: `update: --force-file "docs/../WORKFLOW.md" must be repository-relative and must not contain ".."`},
+		{name: "backslash traversal", paths: []string{"docs\\..\\WORKFLOW.md"}, want: `update: --force-file "docs\\..\\WORKFLOW.md" must be repository-relative and must not contain ".."`},
+		{name: "drive absolute", paths: []string{"C:\\WORKFLOW.md"}, want: `update: --force-file "C:\\WORKFLOW.md" must be repository-relative and must not contain ".."`},
+		{name: "drive relative", paths: []string{`C:WORKFLOW.md`}, want: `update: --force-file "C:WORKFLOW.md" must be repository-relative and must not contain ".."`},
+		{name: "UNC", paths: []string{"\\\\server\\share\\WORKFLOW.md"}, want: `update: --force-file "\\\\server\\share\\WORKFLOW.md" must be repository-relative and must not contain ".."`},
 		{name: "normalized duplicate", paths: []string{"./WORKFLOW.md", "WORKFLOW.md"}, want: `update: duplicate --force-file "WORKFLOW.md"`},
 		{name: "unknown unmanaged", paths: []string{"README.md"}, want: `update: --force-file "README.md" must name a managed file in this update plan`},
 	}
@@ -62,6 +66,31 @@ func TestUpdateForceFileRejectsInvalidAuthorityBeforePolicyOrWrite(t *testing.T)
 				t.Fatal("rejected authority changed WORKFLOW.md")
 			}
 		})
+	}
+}
+
+// I124: repository path spelling is an input protocol, not a property of the
+// host running the test. A Windows-style separator must identify the same
+// nested planned report on every host, while both raw separator forms expose
+// traversal before normalization can conceal it.
+func TestNormalizeForceFilesUsesCanonicalRepositoryPathsOnEveryHost(t *testing.T) {
+	paths, selected, err := normalizeForceFiles([]string{`docs\issues\README.md`, "WORKFLOW.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(paths, ","), "docs/issues/README.md,WORKFLOW.md"; got != want {
+		t.Fatalf("normalized paths = %q, want %q", got, want)
+	}
+	if !selected["docs/issues/README.md"] || !selected["WORKFLOW.md"] {
+		t.Fatalf("selected = %#v, want canonical repository paths", selected)
+	}
+	for _, raw := range []string{"docs/../WORKFLOW.md", `docs\..\WORKFLOW.md`} {
+		if _, _, err := normalizeForceFiles([]string{raw}); err == nil {
+			t.Fatalf("normalizeForceFiles(%q) accepted raw traversal", raw)
+		}
+	}
+	if _, _, err := normalizeForceFiles([]string{"./docs/issues/README.md", `docs\issues\README.md`}); err == nil {
+		t.Fatal("normalized duplicate accepted mixed separators")
 	}
 }
 
@@ -114,6 +143,7 @@ func TestUpdateForceFileAuthorizesOnlyItsExactManagedReport(t *testing.T) {
 	if err := os.WriteFile(wfPath, append([]byte(readFile(t, wfPath)), []byte("custom_rule: keep\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	beforeWorkflow := readFile(t, wfPath)
 	beforeSibling := readFile(t, siblingPath)
 	if err := os.WriteFile(siblingPath, append([]byte(beforeSibling), []byte("local issue convention\n")...), 0o644); err != nil {
 		t.Fatal(err)
@@ -134,22 +164,22 @@ func TestUpdateForceFileAuthorizesOnlyItsExactManagedReport(t *testing.T) {
 	}
 
 	opts := Options{Dir: dir, Write: true}
-	forceFiles(t, &opts, "./WORKFLOW.md")
+	forceFiles(t, &opts, `docs\issues\README.md`)
 	reports, err := Run(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := report(t, reports, "WORKFLOW.md"); got.State != Pending {
-		t.Fatalf("selected WORKFLOW.md state = %v, want Pending", got.State)
+	if got := report(t, reports, "WORKFLOW.md"); got.State != SkippedUnrecognized {
+		t.Fatalf("unselected WORKFLOW.md state = %v, want SkippedUnrecognized", got.State)
 	}
-	if got := report(t, reports, "docs/issues/README.md"); got.State != SkippedUnrecognized {
-		t.Fatalf("unselected sibling state = %v, want SkippedUnrecognized", got.State)
+	if got := report(t, reports, "docs/issues/README.md"); got.State != Pending || !got.SelectedByForceFile {
+		t.Fatalf("selected nested sibling = %#v, want pending scoped selection", got)
 	}
-	if got := readFile(t, siblingPath); got != beforeSibling+"local issue convention\n" {
-		t.Fatal("unselected sibling changed under scoped authority")
+	if got := readFile(t, siblingPath); strings.Contains(got, "local issue convention") {
+		t.Fatal("selected nested sibling was not regenerated")
 	}
-	if got := readFile(t, wfPath); strings.Contains(got, "custom_rule") {
-		t.Fatal("selected scoped report was not regenerated")
+	if got := readFile(t, wfPath); got != beforeWorkflow {
+		t.Fatal("unselected WORKFLOW.md changed under scoped authority")
 	}
 }
 
@@ -521,8 +551,8 @@ func TestForceFileDoesNotOverwriteBrokenClaudeMarkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := report(t, reports, "CLAUDE.md"); got.State != SkippedUnrecognized {
-		t.Fatalf("selected broken CLAUDE.md state = %v, want SkippedUnrecognized", got.State)
+	if got := report(t, reports, "CLAUDE.md"); got.State != SkippedUnrecognized || !got.SelectedByForceFile {
+		t.Fatalf("selected broken CLAUDE.md = %#v, want selected skipped report", got)
 	}
 	if got := readFile(t, path); got != broken {
 		t.Fatal("selected broken CLAUDE.md changed under --force-file")

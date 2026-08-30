@@ -3,6 +3,7 @@ package update
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -32,6 +33,9 @@ type FileReport struct {
 	State        FileState
 	Diff         string
 	Unrecognized []string
+	// SelectedByForceFile records scoped authority after normalized membership
+	// validation, including when marker damage prevents regeneration.
+	SelectedByForceFile bool
 	// Created is true when the file did not exist on disk at plan time, so a
 	// Pending state means "will be created" rather than "will be updated".
 	Created bool
@@ -127,7 +131,7 @@ func Run(opts Options) ([]FileReport, error) {
 	if opts.Force && len(opts.ForceFiles) > 0 {
 		return nil, fmt.Errorf("update: --force cannot be combined with --force-file; choose one overwrite authority")
 	}
-	selected, err := normalizeForceFiles(opts.ForceFiles)
+	normalizedForceFiles, selected, err := normalizeForceFiles(opts.ForceFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -192,8 +196,11 @@ func Run(opts Options) ([]FileReport, error) {
 	if ok {
 		reports = append(reports, mp)
 	}
-	if err := validateForceFileMembership(opts.ForceFiles, reports); err != nil {
+	if err := validateForceFileMembership(normalizedForceFiles, reports); err != nil {
 		return nil, err
+	}
+	for i := range reports {
+		reports[i].SelectedByForceFile = selected[reports[i].Path]
 	}
 	// policy: unrecognized edits skip the file unless --force; files with no
 	// regenerable content (nil newContent) stay skipped regardless. The one
@@ -287,23 +294,27 @@ func Run(opts Options) ([]FileReport, error) {
 
 // normalizeForceFiles rejects unsafe raw spellings before Clean can conceal
 // them, then returns the exact normalized repository-relative authority set.
-func normalizeForceFiles(rawPaths []string) (map[string]bool, error) {
+func normalizeForceFiles(rawPaths []string) ([]string, map[string]bool, error) {
+	normalized := make([]string, 0, len(rawPaths))
 	selected := make(map[string]bool, len(rawPaths))
 	for _, raw := range rawPaths {
-		if raw == "" || filepath.IsAbs(raw) || hasRawParentComponent(raw) {
-			return nil, fmt.Errorf("update: --force-file %q must be repository-relative and must not contain \"..\"", raw)
+		if raw == "" || isAbsoluteForceFilePath(raw) || hasRawParentComponent(raw) {
+			return nil, nil, fmt.Errorf("update: --force-file %q must be repository-relative and must not contain \"..\"", raw)
 		}
-		path := filepath.Clean(raw)
-		if selected[path] {
-			return nil, fmt.Errorf("update: duplicate --force-file %q", path)
+		canonical := path.Clean(strings.ReplaceAll(raw, "\\", "/"))
+		if selected[canonical] {
+			return nil, nil, fmt.Errorf("update: duplicate --force-file %q", canonical)
 		}
-		selected[path] = true
+		normalized = append(normalized, canonical)
+		selected[canonical] = true
 	}
-	return selected, nil
+	return normalized, selected, nil
 }
 
 func hasRawParentComponent(path string) bool {
-	for _, component := range strings.Split(path, string(filepath.Separator)) {
+	for _, component := range strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	}) {
 		if component == ".." {
 			return true
 		}
@@ -311,17 +322,27 @@ func hasRawParentComponent(path string) bool {
 	return false
 }
 
+func isAbsoluteForceFilePath(path string) bool {
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") {
+		return true
+	}
+	return len(path) >= 2 && isASCIILetter(path[0]) && path[1] == ':'
+}
+
+func isASCIILetter(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+}
+
 // validateForceFileMembership makes scoped authority relative to this exact
 // run's plan, rather than to every path a template could theoretically own.
-func validateForceFileMembership(rawPaths []string, reports []FileReport) error {
+func validateForceFileMembership(normalizedPaths []string, reports []FileReport) error {
 	managed := make(map[string]bool, len(reports))
 	for _, r := range reports {
 		managed[r.Path] = true
 	}
-	for _, raw := range rawPaths {
-		path := filepath.Clean(raw)
-		if !managed[path] {
-			return fmt.Errorf("update: --force-file %q must name a managed file in this update plan", path)
+	for _, normalized := range normalizedPaths {
+		if !managed[normalized] {
+			return fmt.Errorf("update: --force-file %q must name a managed file in this update plan", normalized)
 		}
 	}
 	return nil
