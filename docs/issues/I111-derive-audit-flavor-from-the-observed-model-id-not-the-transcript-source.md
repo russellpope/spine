@@ -2,7 +2,8 @@
 id: I111
 title: "derive audit flavor from the observed model id, not the transcript source"
 severity: high
-status: open
+status: fixed
+commits: [0723251]
 affects: [I110]
 blocked-by: [I110]
 execution-mode: subagent-driven
@@ -130,6 +131,35 @@ are no longer the same axis. Note that the disjointness of the openweights ids
 is what makes id-derived flavor unambiguous: if a future change points any
 `openweights` tier at a `claude-*` id, this ticket's core assumption breaks and
 the tiebreaker path becomes load-bearing.
+
+## Resolution
+
+Fixed 2026-08-29 in `0723251`. `spine audit routing` now resolves mappings for
+every shipped flavor and derives each dispatch or subagent evidence token's
+flavor from its observed id, aliases, and historical ids. A unique match uses
+that flavor. Cross-flavor collisions and unknown ids retain the transcript
+source as D15's tiebreaker and fallback, so the old unknown-id verdict and
+detail stay unchanged.
+
+Transcript source now travels separately from flavor. D28 repo qualification,
+Codex case folding, and D24 source-file disclosure key on source, while model
+table judgment keys on flavor. Openweights records from the Claude layout
+therefore use the openweights table without bypassing either dispatch-side or
+subagent-side D28 checks.
+
+The audit suite covers openweights and Claude records in one transcript,
+linked subagent actuals, both D28 paths, source fallback on a deliberate
+collision, and unknown-id preservation. The model suite now rejects shipped
+cross-flavor collisions across ids, aliases, and history. Its all-defaults
+test enumerates `Flavors()` and `Tiers`, with `pi` backfilled.
+
+ADR 0022 records the D15 extension and the source/flavor split. The
+consumer-visible behavior is in `CHANGELOG.md`. The required literal inventory
+and red-test evidence are in `.superpowers/sdd/I111-worker1-report.md`.
+Focused tests and `go test ./... -count=1` passed; `git diff --check` passed.
+A fresh primary-tier spec re-review reported zero missing requirements, scope
+creep, implementation mismatches, or correctness risks. A session-scoped
+routing audit reported I111 as `match` at the declared primary tier.
 
 ## Related
 
