@@ -2,7 +2,8 @@
 id: I032
 title: Scope the all-missing tickets-typo hint to the issues row; decouple truncation test from cap
 severity: low
-status: open
+status: fixed
+commits: [2e75d5e]
 affects: [I029]
 blocked-by: []
 execution-mode:
@@ -35,3 +36,12 @@ Two Minors from the gen9-sweep-i029-i030 final review (2026-07-16), accepted as 
    or gate the hint on the sibling issues row's evidence. Keep ids named on both rows.
 2. Derive the truncation fixture's range size from `maxNamedMissingIDs` (or pin the coupling with a comment
    and an exact-boundary case).
+
+## Resolution
+
+Fixed in `2e75d5e`. The all-missing `tickets:` typo hint is now passed only to
+the issues row; implement rows retain missing-id and ledger-word diagnostics
+without blaming the cursor's ticket value. The truncation fixture now uses a
+larger range so ordinary changes to `maxNamedMissingIDs` do not silently
+invalidate its premise. Focused stage tests pass. Full-suite verification is
+currently blocked by unrelated concurrent `internal/audit` test failures.
