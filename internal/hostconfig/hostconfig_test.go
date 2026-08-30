@@ -77,6 +77,7 @@ func TestLoadRejectsClosedSchemaAndDuplicateRules(t *testing.T) {
 		{"duplicate observed ID", strings.Replace(valid, `"seen"]`, `"seen", "seen"]`, 1)},
 		{"empty identifier", strings.Replace(valid, `"host"`, `""`, 1)},
 		{"control identifier", strings.Replace(valid, `"host"`, `"host\u000a"`, 1)},
+		{"other control identifier", strings.Replace(valid, `"host"`, `"host\u001f"`, 1)},
 		{"unknown flavor pin", strings.Replace(valid, `claude.primary`, `codex.primary`, 1)},
 		{"unknown tier pin", strings.Replace(valid, `claude.primary`, `claude.expert`, 1)},
 		{"unavailable pin harness", strings.Replace(valid, `"available": true`, `"available": false`, 1)},

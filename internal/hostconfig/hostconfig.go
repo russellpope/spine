@@ -11,7 +11,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"unicode"
 )
 
 // ErrNotConfigured reports the compatible case where the local capability
@@ -212,10 +214,16 @@ func validate(raw rawConfig, flavors []string) (Config, error) {
 }
 
 func validateExecutables(config Config, lookup func(string) (string, error)) error {
+	names := make([]string, 0, len(config.Harnesses))
 	for name, harness := range config.Harnesses {
 		if !harness.Available {
 			continue
 		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		harness := config.Harnesses[name]
 		if _, err := lookup(harness.Executable); err != nil {
 			return fmt.Errorf("available harness %q executable is not resolvable", name)
 		}
@@ -241,7 +249,7 @@ func safeString(value string) bool {
 	if value == "" {
 		return false
 	}
-	return !strings.ContainsAny(value, "\x00\n\r\t") && !strings.ContainsRune(value, 0x7f)
+	return !strings.ContainsFunc(value, unicode.IsControl)
 }
 
 func knownTier(tier string) bool {

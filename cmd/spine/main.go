@@ -837,6 +837,10 @@ func cmdAudit(args []string, stdout, stderr io.Writer) int {
 // cmdAuditRouting is a thin printer over audit.Run: table to stdout,
 // warnings to stderr, exit 1 only on a blocking (silent-descent) verdict.
 func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
+	return cmdAuditRoutingWithHostPath(args, stdout, stderr, "", nil)
+}
+
+func cmdAuditRoutingWithHostPath(args []string, stdout, stderr io.Writer, hostPath string, lookup func(string) (string, error)) int {
 	fs := flag.NewFlagSet("audit routing", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "repo root")
 	transcripts := fs.String("transcripts", "", "harness transcript dir (default: repo, git-worktree, and matching project dirs under ~/.claude/projects)")
@@ -846,7 +850,7 @@ func cmdAuditRouting(args []string, stdout, stderr io.Writer) int {
 	if _, ok := parseArgs(fs, args, "audit routing", `usage: spine audit routing [--dir D] [--transcripts DIR] [--codex-sessions DIR] [--since TIME] [--session ID]`, 0, stderr); !ok {
 		return 2
 	}
-	auditOpts := audit.Options{RepoDir: *dir, Since: *since, Session: *session}
+	auditOpts := audit.Options{RepoDir: *dir, Since: *since, Session: *session, HostConfigPath: hostPath, HostExecutableLookup: lookup}
 	if *transcripts == "" {
 		derived, err := audit.DefaultTranscriptsDirs(*dir)
 		if err != nil {
@@ -1568,15 +1572,22 @@ func flagAmongPositionals(args []string) (tok, prev string) {
 // or unknown one is reported via model.Resolve's own error rather than a
 // second validation path here.
 func cmdModel(args []string, stdout, stderr io.Writer) int {
+	return cmdModelWithHostPath(args, stdout, stderr, "", nil)
+}
+
+// cmdModelWithHostPath keeps host-config location and executable discovery as
+// argument seams. Production supplies neither, so there is no CLI path or
+// environment override for the local host authority.
+func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath string, lookup func(string) (string, error)) int {
 	if len(args) > 0 && args[0] == "validate" {
-		return cmdModelValidate(args[1:], ".", stdout, stderr)
+		return cmdModelValidateWithHostPath(args[1:], ".", stdout, stderr, hostPath, lookup)
 	}
 	if len(args) >= 3 && (args[0] == "--dir" || args[0] == "-dir") && args[2] == "validate" {
-		return cmdModelValidate(args[3:], args[1], stdout, stderr)
+		return cmdModelValidateWithHostPath(args[3:], args[1], stdout, stderr, hostPath, lookup)
 	}
 	if len(args) >= 2 && (strings.HasPrefix(args[0], "--dir=") || strings.HasPrefix(args[0], "-dir=")) && args[1] == "validate" {
 		_, dir, _ := strings.Cut(args[0], "=")
-		return cmdModelValidate(args[2:], dir, stdout, stderr)
+		return cmdModelValidateWithHostPath(args[2:], dir, stdout, stderr, hostPath, lookup)
 	}
 	fs := flag.NewFlagSet("model", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "repo root")
@@ -1591,11 +1602,12 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return 2
 	}
-	entry, err := model.Resolve(*dir, pos[0], pos[1])
+	resolution, err := model.ResolveForHost(*dir, hostPath, pos[0], pos[1], lookup)
 	if err != nil {
 		fmt.Fprintln(stderr, "model:", err)
 		return 2
 	}
+	entry := resolution.Entry
 	// --alternate answers from the cell's alternate half (I079). A cell that
 	// ships none is an error rather than a silent fall-back to the primary:
 	// an evaluator that asked for the critic and got the author would run a
@@ -1610,14 +1622,22 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 			ID     string `json:"id"`
 			Effort string `json:"effort"`
 		}
+		type requestedJSON struct {
+			ID         string `json:"id"`
+			Effort     string `json:"effort"`
+			Provenance string `json:"provenance"`
+		}
 		type entryJSON struct {
-			Flavor     string   `json:"flavor"`
-			Tier       string   `json:"tier"`
-			ID         string   `json:"id"`
-			Effort     string   `json:"effort"`
-			Aliases    []string `json:"aliases"`
-			Alternate  *altJSON `json:"alternate,omitempty"`
-			Provenance string   `json:"provenance"`
+			Flavor     string                `json:"flavor"`
+			Tier       string                `json:"tier"`
+			ID         string                `json:"id"`
+			Effort     string                `json:"effort"`
+			Aliases    []string              `json:"aliases"`
+			Alternate  *altJSON              `json:"alternate,omitempty"`
+			Provenance string                `json:"provenance"`
+			Requested  *requestedJSON        `json:"requested,omitempty"`
+			Host       *model.HostResolution `json:"host,omitempty"`
+			Pin        *model.PinResolution  `json:"pin,omitempty"`
 		}
 		out := entryJSON{
 			Flavor: entry.Flavor, Tier: entry.Tier, ID: entry.ID, Effort: entry.Effort,
@@ -1625,6 +1645,12 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 		}
 		if entry.Alternate != nil {
 			out.Alternate = &altJSON{ID: entry.Alternate.ID, Effort: entry.Alternate.Effort}
+		}
+		if resolution.Host.Status != model.HostUnconfigured {
+			requested := resolution.Requested
+			out.Requested = &requestedJSON{ID: requested.ID, Effort: requested.Effort, Provenance: string(requested.Provenance)}
+			out.Host = &resolution.Host
+			out.Pin = resolution.Pin
 		}
 		if out.Aliases == nil {
 			out.Aliases = []string{}
@@ -1646,6 +1672,10 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdModelValidate(args []string, repoDir string, stdout, stderr io.Writer) int {
+	return cmdModelValidateWithHostPath(args, repoDir, stdout, stderr, "", nil)
+}
+
+func cmdModelValidateWithHostPath(args []string, repoDir string, stdout, stderr io.Writer, hostPath string, lookup func(string) (string, error)) int {
 	fs := flag.NewFlagSet("model validate", flag.ContinueOnError)
 	var expected string
 	var expectSet bool
@@ -1666,13 +1696,13 @@ func cmdModelValidate(args []string, repoDir string, stdout, stderr io.Writer) i
 		fmt.Fprintf(stderr, "model validate: --expect must not be empty\n%s\n", validateUsage)
 		return 2
 	}
-	entry, err := model.ValidateLaunch(model.LaunchRequest{
+	resolution, err := model.ValidateLaunchForHost(model.LaunchRequest{
 		RepoDir:            repoDir,
 		Flavor:             pos[0],
 		Tier:               pos[1],
 		Expected:           expected,
 		MaxTemplateVersion: tmpl.Version(),
-	})
+	}, hostPath, lookup)
 	if err != nil {
 		var refusal *model.LaunchRefusal
 		if errors.As(err, &refusal) {
@@ -1682,7 +1712,7 @@ func cmdModelValidate(args []string, repoDir string, stdout, stderr io.Writer) i
 		fmt.Fprintln(stderr, "model validate:", err)
 		return 2
 	}
-	fmt.Fprintln(stdout, entry.ID)
+	fmt.Fprintln(stdout, resolution.Entry.ID)
 	return 0
 }
 

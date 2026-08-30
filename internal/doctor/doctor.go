@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/russellpope/spine/internal/adr"
 	"github.com/russellpope/spine/internal/cursor"
 	"github.com/russellpope/spine/internal/eval"
 	"github.com/russellpope/spine/internal/handoff"
+	"github.com/russellpope/spine/internal/hostconfig"
+	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/stages"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
@@ -28,6 +32,13 @@ type Finding struct {
 
 // Run executes all checks. It never writes.
 func Run(dir string) ([]Finding, error) {
+	return runWithHostPath(dir, "", nil)
+}
+
+// runWithHostPath is the race-safe test seam for the local, owner-managed
+// capability file. The public command has no host path flag or environment
+// override.
+func runWithHostPath(dir, hostPath string, lookup func(string) (string, error)) ([]Finding, error) {
 	required := []string{"WORKFLOW.md", "CLAUDE.md", "docs/harness-interface.md",
 		"docs/specs", "docs/adr", "docs/issues", "docs/handoffs"}
 	if raw, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md")); err == nil {
@@ -69,7 +80,71 @@ func Run(dir string) ([]Finding, error) {
 	findings = append(findings, ticketCheck(dir)...)
 	findings = append(findings, acceptanceCheck(dir)...)
 	findings = append(findings, toolchainCheck()...)
+	findings = append(findings, hostRoutingCheck(dir, hostPath, lookup)...)
 	return findings, nil
+}
+
+// hostRoutingCheck is D16. It evaluates repository preferences against each
+// declared available harness without changing those preferences or inferring
+// alternate routes. A host pin is trusted local authority, but a divergent
+// ID remains non-launchable under controlled validation until I074.
+func hostRoutingCheck(repoDir, hostPath string, lookup func(string) (string, error)) []Finding {
+	path := hostPath
+	if path == "" {
+		var err error
+		path, err = hostconfig.DefaultPath()
+		if err != nil {
+			return []Finding{{"D16", "error", "routing-host.json", "cannot locate host routing configuration"}}
+		}
+	}
+	if lookup == nil {
+		lookup = exec.LookPath
+	}
+	config, err := hostconfig.Load(path, model.Flavors(), lookup)
+	if errors.Is(err, hostconfig.ErrNotConfigured) {
+		return nil
+	}
+	if err != nil {
+		return []Finding{{"D16", "error", path, err.Error()}}
+	}
+	names := make([]string, 0, len(config.Harnesses))
+	for name, harness := range config.Harnesses {
+		if harness.Available {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	var findings []Finding
+	for _, flavor := range names {
+		harness := config.Harnesses[flavor]
+		for _, tier := range model.Tiers {
+			requested, err := model.Resolve(repoDir, flavor, tier)
+			if err != nil {
+				return append(findings, Finding{"D16", "error", path, fmt.Sprintf("cannot resolve %s.%s preference", flavor, tier)})
+			}
+			key := flavor + "." + tier
+			if pin, pinned := config.Pins[key]; pinned {
+				if pin.Model != requested.ID {
+					findings = append(findings, Finding{"D16", "warn", path, fmt.Sprintf("%s host pin %q differs from repository active ID %q and is not auditable until I074", key, pin.Model, requested.ID)})
+				}
+				continue
+			}
+			route, reachable := harness.Models[requested.ID]
+			if !reachable || !hostRouteContains(route.Efforts, requested.Effort) {
+				findings = append(findings, Finding{"D16", "warn", path, fmt.Sprintf("%s repository preference %q @ %q is not reachable on available harness %q", key, requested.ID, requested.Effort, flavor)})
+			}
+		}
+	}
+	return findings
+}
+
+func hostRouteContains(efforts []string, want string) bool {
+	for _, effort := range efforts {
+		if effort == want {
+			return true
+		}
+	}
+	return false
 }
 
 // stagesCheck is the I019 advisory: it reuses the internal/stages

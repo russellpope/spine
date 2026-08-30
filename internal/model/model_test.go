@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -877,6 +878,93 @@ func TestValidateHostPinForLaunchPreservesAuditInvariant(t *testing.T) {
 	if errors.As(err, &refusal) {
 		t.Fatalf("divergent host pin error = %#v, want exit-2 configuration error seam", refusal)
 	}
+}
+
+func TestResolveForHostPreservesPreferenceTrailAndRequiresExactReachability(t *testing.T) {
+	repo := writeWorkflow(t, "model_routing:\n  codex.primary: repository-safe @ xhigh\n")
+	configPath := writeHostConfig(t, `{
+  "schema_version": 1, "host_id": "test-host", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"host-safe": {"efforts": ["high"]}, "repository-safe": {"efforts": ["xhigh"]}}}
+  }, "pins": {"codex.primary": {"model": "host-safe", "effort": "high", "evidence_refs": ["owner:I068"]}}
+}`)
+	resolution, err := ResolveForHost(repo, configPath, "codex", "primary", func(string) (string, error) { return "/bin/codex", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.Entry.ID != "host-safe" || resolution.Entry.Effort != "high" {
+		t.Fatalf("final entry = %#v", resolution.Entry)
+	}
+	if resolution.Requested.ID != "repository-safe" || resolution.Requested.Provenance != Override {
+		t.Fatalf("requested entry = %#v", resolution.Requested)
+	}
+	if resolution.Host.Status != HostPinned || resolution.Host.ID != "test-host" || resolution.Pin == nil || resolution.Pin.Model != "host-safe" {
+		t.Fatalf("host trail = %#v pin = %#v", resolution.Host, resolution.Pin)
+	}
+
+	unreachablePath := writeHostConfig(t, `{
+  "schema_version": 1, "host_id": "test-host", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"other": {"efforts": ["high"]}}}
+  }, "pins": {}}
+`)
+	_, err = ResolveForHost(repo, unreachablePath, "codex", "primary", func(string) (string, error) { return "/bin/codex", nil })
+	if err == nil || !strings.Contains(err.Error(), "not reachable") {
+		t.Fatalf("unreachable preference error = %v", err)
+	}
+}
+
+func TestResolveForHostAbsentConfigIsRepositoryCompatible(t *testing.T) {
+	repo := writeWorkflow(t, "model_routing:\n  codex.primary: repository-safe @ xhigh\n")
+	want, err := Resolve(repo, "codex", "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveForHost(repo, filepath.Join(t.TempDir(), "absent.json"), "codex", "primary", func(string) (string, error) { t.Fatal("lookup called without config"); return "", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Entry, want) || !reflect.DeepEqual(got.Requested, want) || got.Host.Status != HostUnconfigured {
+		t.Fatalf("host resolution = %#v, want compatible %#v", got, want)
+	}
+}
+
+func TestValidateLaunchForHostRejectsDivergentPinButPermitsIdenticalPin(t *testing.T) {
+	repo := writeWorkflow(t, "template_version: 12\nmodel_routing:\n  codex.primary: repository-safe\n")
+	request := LaunchRequest{RepoDir: repo, Flavor: "codex", Tier: "primary", MaxTemplateVersion: testMaxTemplateVersion}
+	divergent := writeHostConfig(t, `{
+  "schema_version": 1, "host_id": "test-host", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"repository-safe": {"efforts": ["high"]}, "host-safe": {"efforts": ["high"]}}}
+  }, "pins": {"codex.primary": {"model": "host-safe", "effort": "high"}}
+}`)
+	_, err := ValidateLaunchForHost(request, divergent, func(string) (string, error) { return "/bin/codex", nil })
+	if err == nil || !strings.Contains(err.Error(), "not auditable until I074") {
+		t.Fatalf("divergent host pin error = %v", err)
+	}
+	identical := writeHostConfig(t, strings.Replace(string(mustReadFile(t, divergent)), `"model": "host-safe"`, `"model": "repository-safe"`, 1))
+	resolution, err := ValidateLaunchForHost(request, identical, func(string) (string, error) { return "/bin/codex", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.Entry.ID != "repository-safe" || resolution.Host.Status != HostPinned {
+		t.Fatalf("identical pin resolution = %#v", resolution)
+	}
+}
+
+func writeHostConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "routing-host.json")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return content
 }
 
 func TestParseLaunchRoutingRejectsGlobalAmbiguity(t *testing.T) {

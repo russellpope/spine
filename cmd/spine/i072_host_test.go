@@ -1,0 +1,105 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestModelHostOutputUsesFinalPairAndExposesTrail(t *testing.T) {
+	repo := writeModelHostWorkflow(t, "model_routing:\n  codex.primary: repository-safe @ xhigh\n")
+	path := writeModelHostConfig(t, `{
+  "schema_version": 1, "host_id": "cli-host", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"repository-safe": {"efforts": ["xhigh"]}, "host-safe": {"efforts": ["high"]}}}
+  }, "pins": {"codex.primary": {"model": "host-safe", "effort": "high", "evidence_refs": ["owner:I068"]}}
+}`)
+	code, out, errs := runModelWithHostPath(t, path, "--dir", repo, "codex", "primary")
+	if code != 0 || out != "host-safe\n" || errs != "" {
+		t.Fatalf("text: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runModelWithHostPath(t, path, "--dir", repo, "--effort", "codex", "primary")
+	if code != 0 || out != "high\n" || errs != "" {
+		t.Fatalf("effort: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runModelWithHostPath(t, path, "--dir", repo, "--json", "codex", "primary")
+	if code != 0 || errs != "" {
+		t.Fatalf("json: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["id"] != "host-safe" || decoded["effort"] != "high" || decoded["provenance"] != "override" {
+		t.Fatalf("old JSON fields = %#v", decoded)
+	}
+	requested, _ := decoded["requested"].(map[string]any)
+	host, _ := decoded["host"].(map[string]any)
+	pin, _ := decoded["pin"].(map[string]any)
+	if requested["id"] != "repository-safe" || host["id"] != "cli-host" || host["status"] != "pinned" || pin["model"] != "host-safe" {
+		t.Fatalf("trail requested=%#v host=%#v pin=%#v", requested, host, pin)
+	}
+}
+
+func TestModelHostConfigFailureWritesNoStandardOutput(t *testing.T) {
+	path := writeModelHostConfig(t, `{"schema_version":1,"host_id":"host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:test","models":{"m":{"efforts":["high"],"token":"secret"}}}},"pins":{}}`)
+	for _, args := range [][]string{{"codex", "primary"}, {"--effort", "codex", "primary"}, {"--json", "codex", "primary"}} {
+		code, out, errs := runModelWithHostPath(t, path, args...)
+		if code != 2 || out != "" || !strings.Contains(errs, "host routing configuration") || strings.Count(errs, "\n") != 1 {
+			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, out, errs)
+		}
+	}
+}
+
+func TestModelValidateHostDivergenceRefusesBeforeExpect(t *testing.T) {
+	repo := writeModelHostWorkflow(t, "template_version: 13\nmodel_routing:\n  codex.primary: repository-safe\n")
+	path := writeModelHostConfig(t, `{
+  "schema_version": 1, "host_id": "cli-host", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"repository-safe": {"efforts": ["high"]}, "host-safe": {"efforts": ["high"]}}}
+  }, "pins": {"codex.primary": {"model": "host-safe", "effort": "high"}}
+}`)
+	for _, expect := range []string{"repository-safe", "host-safe"} {
+		code, out, errs := runModelWithHostPath(t, path, "--dir", repo, "validate", "--expect", expect, "codex", "primary")
+		if code != 2 || out != "" || !strings.Contains(errs, "not auditable until I074") {
+			t.Fatalf("expect %q: code=%d stdout=%q stderr=%q", expect, code, out, errs)
+		}
+	}
+}
+
+func TestAuditRoutingHostPreflightReturnsUsageErrorBeforeOutput(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditFixtureRepo(t, repo, map[string]string{"I072": "primary"})
+	path := writeModelHostConfig(t, `{"schema_version":1,"host_id":"host","harnesses":{"claude":{"available":true,"executable":"claude","launch_contract_ref":"fleet:x","models":{"m":{"efforts":["high"],"token":"secret"}}}},"pins":{}}`)
+	var out, errs bytes.Buffer
+	code := cmdAuditRoutingWithHostPath([]string{"--dir", repo, "--transcripts", t.TempDir()}, &out, &errs, path, func(string) (string, error) { return "/bin/tool", nil })
+	if code != 2 || out.Len() != 0 || !strings.Contains(errs.String(), "host routing configuration") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errs.String())
+	}
+}
+
+func runModelWithHostPath(t *testing.T, hostPath string, args ...string) (int, string, string) {
+	t.Helper()
+	var out, errs bytes.Buffer
+	code := cmdModelWithHostPath(args, &out, &errs, hostPath, func(string) (string, error) { return "/bin/tool", nil })
+	return code, out.String(), errs.String()
+}
+
+func writeModelHostWorkflow(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func writeModelHostConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "routing-host.json")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

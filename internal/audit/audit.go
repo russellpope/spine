@@ -103,6 +103,7 @@ package audit
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -113,6 +114,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/russellpope/spine/internal/hostconfig"
 	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
@@ -237,6 +239,11 @@ func tokenValues(tokens []evidenceToken) []string {
 type Options struct {
 	RepoDir              string
 	ClaudeTranscriptsDir string
+	// HostConfigPath and HostExecutableLookup are private-equivalent argument
+	// seams exposed on Options for race-safe tests. Empty values select the
+	// one production local path and exec.LookPath.
+	HostConfigPath       string
+	HostExecutableLookup func(string) (string, error)
 	// ClaudeTranscriptsDirs is the default-discovery union. When non-empty it
 	// supersedes ClaudeTranscriptsDir; the singular field remains the explicit
 	// --transcripts and backwards-compatible public Run seam.
@@ -273,6 +280,9 @@ type Options struct {
 // Warnings; the only errors are a repo without docs/issues and the D14
 // version-gate refusal (see the package comment).
 func Run(opts Options) (Report, error) {
+	if err := preflightHostConfig(opts); err != nil {
+		return Report{}, err
+	}
 	repoDir := opts.RepoDir
 	transcriptsDirs := opts.ClaudeTranscriptsDirs
 	discloseTranscriptDirs := len(transcriptsDirs) > 0
@@ -529,6 +539,30 @@ func Run(opts Options) (Report, error) {
 	}
 	sort.Slice(rep.Tickets, func(i, j int) bool { return rep.Tickets[i].ID < rep.Tickets[j].ID })
 	return rep, nil
+}
+
+// preflightHostConfig validates only local configuration structure, declared
+// executable availability, and exact pins before any transcript work. It
+// intentionally does not infer reachability for unpinned preferences or
+// alter any preference-only audit mapping; those are I074 concerns.
+func preflightHostConfig(opts Options) error {
+	path := opts.HostConfigPath
+	if path == "" {
+		var err error
+		path, err = hostconfig.DefaultPath()
+		if err != nil {
+			return err
+		}
+	}
+	lookup := opts.HostExecutableLookup
+	if lookup == nil {
+		lookup = exec.LookPath
+	}
+	_, err := hostconfig.Load(path, model.Flavors(), lookup)
+	if errors.Is(err, hostconfig.ErrNotConfigured) {
+		return nil
+	}
+	return err
 }
 
 // nearMissDetail matches a ticket's token against every accumulated codex

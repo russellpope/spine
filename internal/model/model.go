@@ -65,12 +65,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/russellpope/spine/internal/hostconfig"
 	"github.com/russellpope/spine/models"
 )
 
@@ -478,6 +480,112 @@ func Resolve(repoDir, flavor, tier string) (Entry, error) {
 	return resolveFrom(defaults, repoDir, flavor, tier)
 }
 
+// HostStatus describes how the local capability file affected a resolution.
+type HostStatus string
+
+const (
+	HostUnconfigured HostStatus = "unconfigured"
+	HostConstrained  HostStatus = "constrained"
+	HostPinned       HostStatus = "pinned"
+)
+
+// HostResolution records the local authority that constrained a final route.
+// It contains no transport configuration or executable value.
+type HostResolution struct {
+	ID         string     `json:"id,omitempty"`
+	Status     HostStatus `json:"status"`
+	ConfigPath string     `json:"config_path,omitempty"`
+}
+
+// PinResolution is the safe, opaque provenance of a selected host pin.
+type PinResolution struct {
+	Model        string   `json:"model"`
+	Effort       string   `json:"effort"`
+	EvidenceRefs []string `json:"evidence_refs,omitempty"`
+}
+
+// Resolution preserves the estate-to-repository-to-host trail. Entry is the
+// final dispatchable route and Requested is the unmodified repository
+// preference.
+type Resolution struct {
+	Entry     Entry          `json:"-"`
+	Requested Entry          `json:"requested"`
+	Host      HostResolution `json:"host"`
+	Pin       *PinResolution `json:"pin,omitempty"`
+}
+
+// ResolveForHost applies a local host capability constraint after ordinary
+// estate and repository preference resolution. configPath is an internal
+// test seam when non-empty; production callers pass "" and use DefaultPath.
+// lookup is normally exec.LookPath and is never used to execute anything.
+func ResolveForHost(repoDir, configPath, flavor, tier string, lookup func(string) (string, error)) (Resolution, error) {
+	requested, err := Resolve(repoDir, flavor, tier)
+	if err != nil {
+		return Resolution{}, err
+	}
+	return resolveForHost(requested, configPath, lookup)
+}
+
+func resolveForHost(requested Entry, configPath string, lookup func(string) (string, error)) (Resolution, error) {
+	path, err := hostConfigPath(configPath)
+	if err != nil {
+		return Resolution{}, err
+	}
+	config, err := hostconfig.Load(path, Flavors(), hostLookup(lookup))
+	if errors.Is(err, hostconfig.ErrNotConfigured) {
+		return Resolution{Entry: requested, Requested: requested, Host: HostResolution{Status: HostUnconfigured, ConfigPath: path}}, nil
+	}
+	if err != nil {
+		return Resolution{}, err
+	}
+	return applyHostConfig(requested, path, config)
+}
+
+func hostConfigPath(configPath string) (string, error) {
+	if configPath != "" {
+		return configPath, nil
+	}
+	return hostconfig.DefaultPath()
+}
+
+func hostLookup(lookup func(string) (string, error)) func(string) (string, error) {
+	if lookup != nil {
+		return lookup
+	}
+	return exec.LookPath
+}
+
+func applyHostConfig(requested Entry, path string, config hostconfig.Config) (Resolution, error) {
+	harness, ok := config.Harnesses[requested.Flavor]
+	if !ok || !harness.Available {
+		return Resolution{}, fmt.Errorf("host routing configuration %q: harness %q is unavailable", path, requested.Flavor)
+	}
+	trail := HostResolution{ID: config.HostID, Status: HostConstrained, ConfigPath: path}
+	key := requested.Flavor + "." + requested.Tier
+	if pin, pinned := config.Pins[key]; pinned {
+		final := requested
+		final.ID = pin.Model
+		final.Effort = pin.Effort
+		final.Aliases = nil
+		trail.Status = HostPinned
+		return Resolution{Entry: final, Requested: requested, Host: trail, Pin: &PinResolution{Model: pin.Model, Effort: pin.Effort, EvidenceRefs: append([]string(nil), pin.EvidenceRefs...)}}, nil
+	}
+	route, reachable := harness.Models[requested.ID]
+	if !reachable || !containsString(route.Efforts, requested.Effort) {
+		return Resolution{}, fmt.Errorf("host routing configuration %q: requested %s.%s route %q @ %q is not reachable", path, requested.Flavor, requested.Tier, requested.ID, requested.Effort)
+	}
+	return Resolution{Entry: requested, Requested: requested, Host: trail}, nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 // LaunchReason is a stable policy-refusal token returned by ValidateLaunch.
 // Repository configuration and invocation errors are ordinary errors instead.
 type LaunchReason string
@@ -565,6 +673,57 @@ func ValidateLaunch(req LaunchRequest) (Entry, error) {
 		return Entry{}, err
 	}
 	return validateLaunchFrom(defaults, snap, req.Flavor, req.Tier, req.Expected)
+}
+
+// ValidateLaunchForHost performs I051 validation and local host inspection
+// from one strict repository snapshot. A divergent host pin is deliberately
+// non-launchable until I074 makes that final ID auditable.
+func ValidateLaunchForHost(req LaunchRequest, configPath string, lookup func(string) (string, error)) (Resolution, error) {
+	if _, ok := defaults.Flavors[req.Flavor]; !ok {
+		return Resolution{}, fmt.Errorf("unknown flavor %q (known: %s)", req.Flavor, strings.Join(flavorsOf(defaults), ", "))
+	}
+	if !isKnownTier(req.Tier) {
+		return Resolution{}, fmt.Errorf("unknown tier %q (known: %s)", req.Tier, strings.Join(Tiers, ", "))
+	}
+	snap, err := readLaunchSnapshot(req.RepoDir, req.MaxTemplateVersion)
+	if err != nil {
+		return Resolution{}, err
+	}
+	requested, err := validateLaunchFrom(defaults, snap, req.Flavor, req.Tier, "")
+	if err != nil {
+		return Resolution{}, err
+	}
+	path, err := hostConfigPath(configPath)
+	if err != nil {
+		return Resolution{}, err
+	}
+	config, err := hostconfig.Load(path, Flavors(), hostLookup(lookup))
+	if errors.Is(err, hostconfig.ErrNotConfigured) {
+		entry, err := validateLaunchFrom(defaults, snap, req.Flavor, req.Tier, req.Expected)
+		if err != nil {
+			return Resolution{}, err
+		}
+		return Resolution{Entry: entry, Requested: entry, Host: HostResolution{Status: HostUnconfigured, ConfigPath: path}}, nil
+	}
+	if err != nil {
+		return Resolution{}, err
+	}
+	resolution, err := applyHostConfig(requested, path, config)
+	if err != nil {
+		return Resolution{}, err
+	}
+	if resolution.Pin != nil {
+		if refusal := modelPolicyRefusal(defaults.ModelValidation, req.Flavor+"."+req.Tier, resolution.Pin.Model); refusal != nil {
+			return Resolution{}, refusal
+		}
+		if err := ValidateHostPinForLaunch(req.Flavor+"."+req.Tier, requested.ID, resolution.Pin.Model); err != nil {
+			return Resolution{}, err
+		}
+	}
+	if _, err := validateLaunchFrom(defaults, snap, req.Flavor, req.Tier, req.Expected); err != nil {
+		return Resolution{}, err
+	}
+	return resolution, nil
 }
 
 // ResolveStrictActive resolves one audit active row with the same strict

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/russellpope/spine/internal/model"
 	"github.com/russellpope/spine/internal/scaffold"
 )
 
@@ -257,6 +258,35 @@ func TestCurrentMirrorOpusLowIsIdempotent(t *testing.T) {
 	}
 	if string(after) != string(before) {
 		t.Error("already-current Opus-low mirror changed across write updates")
+	}
+}
+
+func TestHostPinDoesNotChangeMirrorOrUpdatePlan(t *testing.T) {
+	dir := stageCurrentRepo(t, nil)
+	hostPath := filepath.Join(t.TempDir(), "routing-host.json")
+	if err := os.WriteFile(hostPath, []byte(`{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:test", "models": {"claude-fable-5": {"efforts": ["high"]}, "host-safe": {"efforts": ["high"]}}}
+  }, "pins": {"claude.primary": {"model": "host-safe", "effort": "high"}}
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolution, err := model.ResolveForHost(dir, hostPath, "claude", "primary", func(string) (string, error) { return "/bin/claude", nil })
+	if err != nil || resolution.Entry.ID != "host-safe" {
+		t.Fatalf("host resolution = %#v err=%v", resolution, err)
+	}
+	for _, row := range model.MirrorRows() {
+		if strings.Contains(row, "host-safe") {
+			t.Fatalf("host pin leaked into mirror row %q", row)
+		}
+	}
+	reports, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf := report(t, reports, "WORKFLOW.md")
+	if wf.State != UpToDate || len(wf.ModelOverrides) != 0 || len(wf.ModelRefreshes) != 0 {
+		t.Fatalf("host pin changed update plan: %#v", wf)
 	}
 }
 
