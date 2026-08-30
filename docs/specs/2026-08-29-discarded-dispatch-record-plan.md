@@ -379,11 +379,30 @@ actually replaces that rendered line.
   and malformed records, I111/I102/D28 compatibility, output severity, and
   template migration. Resolve findings and rerun the affected red-green tests.
 
-- [ ] **Step 6: Routing audit and full verification.** Run `spine audit routing
-  --dir .` with `--transcripts <dir>` if the controlling transcript lives
-  outside this repo; run `spine audit stages --dir .`, `spine doctor --dir .`,
-  and `make verify`. Record expected pre-existing warnings separately from new
-  findings. Run `spine audit routing` again after the final review commit.
+- [ ] **Step 6: Routing audit and full verification.** This repository has no
+  `make verify` target. Run the concrete verification contract instead:
+
+  ```bash
+  go test ./internal/audit -run 'Test(Discarded|Escalation|Fallback|SilentDescent|CodexDiscarded)' -count=1
+  go test ./... -count=1
+  go test -race ./... -count=1
+  go vet ./...
+  go build ./cmd/spine
+  go run ./cmd/spine gate --dir . go@1 dead-code-callgraph
+  go run ./cmd/spine gate --dir . go@1 deferred-cleanup-errcheck
+  go run ./cmd/spine audit routing --dir . --transcripts <dir> --codex-sessions <dir>
+  go run ./cmd/spine audit stages --dir .
+  go run ./cmd/spine doctor --dir .
+  maipipe validate maipipe.toml
+  maipipe run full --wait
+  ```
+
+  Use an explicit transcript/session directory when the controlling transcript
+  lives outside this repository. Record expected pre-existing warnings (such as
+  stale handoffs) separately from new findings. Run routing audit again after
+  the final review commit. The two direct `go@1` commands are retained even
+  though `maipipe run full --wait` also composes the full gate pack: they pin
+  the two checks made load-bearing by I050/I051.
 
 - [ ] **Step 7: Final scope check and handoff.** Confirm `git status --short`
   lists only I078 paths before each I078 commit. Do not close or commit
