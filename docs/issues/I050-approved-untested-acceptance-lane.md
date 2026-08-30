@@ -105,3 +105,22 @@ acceptance). Focused affected-package tests and repeated aggregation/path
 controls passed after their recorded red runs. Full repository verification,
 fresh re-review, and independent verification remain pending; this is not a
 closure resolution.
+
+The different fresh primary re-review at exact SHA `3a0a46a` failed with three
+additional findings. The parser accepts ASCII or Unicode whitespace in the
+approver and full reference token, selects the first bare sentinel substring
+instead of the unique exact structural marker, and leaks pre-ID failures from
+unknown unscoped tickets into cursor-scoped audit output. The re-review also
+found contradictory no-marker/read-error promises. The amended binding design
+and plan now require zero candidates plus zero applicable scan errors for byte
+compatibility, fail closed by frontmatter identity in `ScanTicketIDs`, allow
+sentinel bytes in criterion text, reject multiple structural markers, and name
+package, doctor, audit, and compiled-CLI regressions for all three corrections.
+I050 stays open, every acceptance criterion stays unchecked, and fresh
+re-review plus independent verification remain pending.
+
+The batch gate rerun after I032's layout correction also found a loop-scoped
+`defer f.Close()` in ticket discovery. This correction records the gate red,
+closes each ticket at the end of its own scan iteration, preserves scan-error
+reporting, and reruns both the go@1 `dead-code-callgraph` and
+`deferred-cleanup-errcheck` classes before its code commit.

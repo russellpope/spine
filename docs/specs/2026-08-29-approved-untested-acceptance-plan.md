@@ -47,8 +47,9 @@ scaffold/update machinery, and existing CLI test harness.
   results but may not parse marker text or approval paths themselves.
 - `stages.Report.Blocking()` must remain byte-for-byte unchanged. Acceptance
   records never become stage evidence or blockers.
-- A zero-candidate repository keeps doctor and `audit stages` output and exits
-  unchanged. Existing tickets are never rewritten.
+- A zero-candidate, zero-applicable-scan-error repository keeps doctor and
+  `audit stages` output and exits unchanged. Existing tickets are never
+  rewritten.
 - Generation 12 changes are additive. Add no `supersededLines` entry unless an
   emitted predecessor line is actually removed or reworded. Any such removal
   requires a reviewed PRD amendment before implementation continues.
@@ -110,6 +111,8 @@ scaffold/update machinery, and existing CLI test harness.
   `repoRoot`. `ScanAllTickets` scans eligible `docs/issues/I*.md` files at all
   statuses. `ScanTicketIDs` discovers the same eligible files, reads their
   leading frontmatter `id`, and includes only exact IDs in the supplied set.
+  It skips discovery, open, and read failures before an ID is established. It
+  surfaces a scan failure only after the established ID matches a supplied ID.
   All three call one unexported line parser and one unexported approval-path
   validator. Their line reader adds no fixed maximum; read failures populate
   `Summary.ScanErrors` rather than returning a clean empty result.
@@ -692,6 +695,89 @@ to the review's smallest reproducer.
   advisories or stale-handoff state are recorded separately and never
   misreported as I050 success. A different fresh primary reviewer and then a
   different independent primary verifier own the later closure gates.
+
+## Second correction round after failed fresh re-review
+
+The second fresh primary review failed at exact SHA `3a0a46a`. This correction
+round treats the PRD contradictions and all three findings in
+`.superpowers/sdd/I050-rereview-worker2-report.md` as binding. It does not close
+I050 or advance review, verification, lane, or handoff state.
+
+- [ ] **Step 1: Amend the contract before code.** Narrow every no-marker
+  byte-compatibility promise to zero candidates and zero applicable scan
+  errors. Define identity-scoped discovery to skip failures before a
+  frontmatter ID can be established, leave those failures to estate-wide
+  doctor, and surface only later failures for an established wanted ID. Define
+  the marker as one unique exact ` -- APPROVED-UNTESTED ` structural marker;
+  sentinel bytes in criterion text remain allowed and multiple structural
+  markers are invalid. Commit only the design, plan, and open I050 ticket.
+
+- [ ] **Step 2: Whitespace-token TDD slice.** Before production edits, add
+  `TestScanTicketRejectsWhitespaceInApproverAndReferenceToken` with ordered
+  table cases for ASCII space, tab, and Unicode whitespace in the approver,
+  reference base, and reference fragment. Pin the exact aggregated failure
+  order, with the approver failure before the full-reference-token failure.
+  Add `TestD15WarnsForWhitespaceAcceptanceTokens`,
+  `TestAuditStagesWarnsForWhitespaceAcceptanceTokensAndCountsInvalid`, and
+  `TestCompiledCLIRejectsWhitespaceAcceptanceTokens` to cover package doctor,
+  doctor text and JSON, nonblocking audit warnings and counts, and the compiled
+  binary. Observe red because the current parser checks only emptiness. Reject
+  every code point accepted by Go's Unicode whitespace classification in both
+  extracted tokens, then rerun focused green.
+
+- [ ] **Step 3: Structural-marker TDD slice.** Before production edits, add
+  `TestScanTicketSelectsUniqueStructuralMarker` with a valid criterion that
+  contains bare `APPROVED-UNTESTED` bytes and
+  `TestScanTicketRejectsAmbiguousStructuralMarkers` with two exact structural
+  markers. Add `TestDoctorAndAuditUseStructuralAcceptanceMarker` and
+  `TestCompiledCLIUsesStructuralAcceptanceMarker` for the adapters and built
+  binary. Observe the sentinel-in-criterion case red against first-substring
+  parsing. Select only the unique exact structural marker, retain broad damaged
+  checklist candidate detection, reject ambiguity with one deterministic
+  problem, and rerun focused green.
+
+- [ ] **Step 4: Identity-scoping TDD slice.** Before production edits, add
+  `TestScanTicketIDsSkipsPreIDFailuresAndSurfacesWantedPostIDFailures`,
+  `TestAcceptanceSummaryExcludesUnreadableUnknownIDTickets`, and
+  `TestCompiledCLIAcceptanceIdentityScoping`. The compiled fixture contains a
+  broken unscoped ticket, a readable invalid unscoped ticket, and a wanted
+  ticket that fails after its matching ID is read. Audit must exclude both
+  unscoped controls while retaining the wanted post-ID nonblocking warning;
+  `ScanAllTickets`, doctor text, doctor JSON, and doctor exit 1 must still
+  surface the estate-wide broken-unscoped failure. Observe red because current
+  scoped discovery appends pre-ID errors. Implement the fail-closed identity
+  policy without changing candidate counts or `Report.Blocking()`, then rerun
+  focused green.
+
+- [ ] **Step 5: Per-iteration cleanup TDD slice.** Record
+  `spine gate --dir . go@1 deferred-cleanup-errcheck` red at
+  `internal/acceptance/acceptance.go` inside the ticket loop. Add
+  `TestScanTicketIDsClosesEachDiscoveredTicketPerIteration` using the existing
+  scanner seam or the smallest test-only file hook that can prove close timing
+  without asserting source text. Replace the loop-scoped `defer f.Close()`
+  with per-iteration cleanup that preserves open, read, and close errors in the
+  applicable estate-wide or identity-scoped error policy. Rerun the focused
+  package test and the deferred-cleanup gate green.
+
+- [ ] **Step 6: Rerun every retained regression.** Run all original and
+  first-correction parser, reference-containment, arbitrary-line, read-error,
+  aggregation, H1/H2 boundary, D15 text/JSON, cursor-scoping, blocking,
+  zero-candidate/zero-error byte-compatibility, generation-12 migration,
+  relative-root, hostile-symlink, and compiled-CLI controls. Run the whitespace,
+  sentinel, and identity-scoping tables repeatedly to prove deterministic
+  output.
+
+- [ ] **Step 7: Verify and report without advancing gates.** Run focused and
+  full Go tests, `go vet ./...`, `go build -o bin/spine ./cmd/spine`, `gofmt
+  -l`, `git diff --check`, the compiled relative/hostile/whitespace/sentinel/
+  scoping matrix, update dry-run, doctor, routing audit, and stages audit. Check
+  the concurrent I032 gate-layout correction before interpreting maipipe, and
+  rerun the go@1 `dead-code-callgraph` and `deferred-cleanup-errcheck` gate
+  classes after that correction lands. Commit coherent code/test/docs units
+  with explicit paths, append their SHAs to the open I050 ticket while leaving
+  every criterion unchecked, and write
+  `.superpowers/sdd/I050-correction2-worker3-report.md` with red/green evidence,
+  commits, tests, and remaining fresh-review and independent-verifier gates.
 
 ## Task 6: fresh spec review, verification, ticket closure, and final commits
 

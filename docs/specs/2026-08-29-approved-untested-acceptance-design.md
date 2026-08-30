@@ -48,7 +48,7 @@ box in the existing fleet.
 - Ship the convention through template generation 12 and safe
   config-preserving migration.
 - Preserve byte-for-byte command output and exit behavior when no candidate
-  marker exists.
+  marker and no applicable scan error exists.
 
 ## Non-goals
 
@@ -87,16 +87,21 @@ Every byte-level rule below is binding:
    Tabs, indentation, a checked state, alternate bullet characters, or
    different checkbox spacing are invalid.
 2. `<criterion>` is nonempty after trimming ASCII spaces and tabs.
-3. The criterion and marker are separated by the exact ASCII bytes ` -- `.
-4. `APPROVED-UNTESTED` is a case-sensitive literal.
+3. The criterion and marker are separated by one unique structural marker with
+   the exact ASCII bytes ` -- APPROVED-UNTESTED `. Sentinel bytes elsewhere in
+   the criterion are ordinary criterion text. More than one structural marker
+   on the line is ambiguous and invalid.
+4. `APPROVED-UNTESTED` in the structural marker is a case-sensitive literal.
 5. The date token has exactly the shape `YYYY-MM-DD` and parses as a real
    Gregorian calendar date. The date may be in the future; I050 adds no clock
    policy.
 6. The exact delimiters around the remaining fields are one ASCII space,
    `by `, ` ref: `, and ` reason: ` as shown above.
-7. `<approver>` is one nonempty, whitespace-free token. It records the name
-   supplied by the author; spine does not interpret or authenticate it.
-8. The reference is one nonempty, whitespace-free token split once at its
+7. `<approver>` is one nonempty token containing no ASCII or Unicode whitespace
+   code point. It records the name supplied by the author; spine does not
+   interpret or authenticate it.
+8. The full reference token, including its base and fragment, is nonempty and
+   contains no ASCII or Unicode whitespace code point. It is split once at its
    first `#`. Both parts are nonempty; later `#` bytes belong to the fragment
    and are preserved verbatim.
 9. `<one-line reason>` is the trimmed remainder of the physical line and is
@@ -132,9 +137,15 @@ are not candidates and produce no output.
 
 Physical lines have no I050-specific length limit. A candidate may be
 arbitrarily long, and an arbitrarily long noncandidate line must not hide any
-later candidate. Ticket open/read failures and failures encountered while
-reading a ticket are surfaced explicitly; they must never be returned as a
-clean empty summary.
+later candidate. `ScanTicket` and estate-wide `ScanAllTickets` surface ticket
+discovery, open, and read failures explicitly; they must never return those
+failures as a clean empty summary. Identity-scoped `ScanTicketIDs` follows the
+fail-closed rule in Ticket-local scope.
+
+Ticket discovery may scan an unbounded ledger. Each opened ticket is closed at
+the end of its own scan iteration, including read-error paths. The scanner must
+not accumulate loop-scoped deferred closes until the whole discovery pass
+returns.
 
 ## Approval-reference and path validation
 
@@ -178,6 +189,16 @@ contribute to the audit summary. If the ticket expression is unresolvable,
 the existing cursor warning remains and acceptance scanning does not guess an
 estate-wide scope.
 
+Cursor scope fails closed by established frontmatter identity. During
+`ScanTicketIDs` discovery, a ticket whose frontmatter ID cannot be established
+because discovery, open, or read fails is skipped without an audit scan error;
+estate-wide `ScanAllTickets` and doctor remain responsible for surfacing that
+failure. Once a frontmatter ID is established, the scanner ignores the ticket
+unless that ID is wanted. If the established ID matches a wanted ID, every
+later scan failure is surfaced as a scoped, nonblocking audit warning. An
+unscoped readable ticket and a broken ticket of unknown identity therefore
+produce no acceptance warning or count in `audit stages`.
+
 ## Shared validation model
 
 One new `internal/acceptance` package owns candidate detection, section scope,
@@ -212,7 +233,8 @@ I050 adds D15, `approved-untested acceptance records`.
   makes `spine doctor` exit 1. D15 never has severity `error` or `info`.
 - `--json` emits the existing `Finding` fields without schema changes:
   `id`, `severity`, `path`, and the line-bearing `message`.
-- No candidate marker means no D15 finding and no exit-code change.
+- Zero candidates and zero scan errors means no D15 finding and no exit-code
+  change.
 - A ticket scan error also produces a D15 `warn` that names the ticket and
   underlying read failure; it is not counted as an invalid candidate.
 
@@ -237,8 +259,9 @@ For the concrete ticket IDs resolved from the active cursor:
   acceptance: approved-untested=<valid-count> invalid=<invalid-count>
   ```
 
-- With zero candidates, stdout omits the acceptance line. Existing stdout,
-  stderr, and exit status remain byte-for-byte unchanged.
+- With zero candidates, stdout omits the acceptance line. When there are also
+  zero scoped scan errors, existing stdout, stderr, and exit status remain
+  byte-for-byte unchanged.
 - Invalid records alone do not change audit exit 0. Existing malformed or
   noncanonical cursor checks, stage contradictions, and handoff checks remain
   the only blockers.
@@ -291,14 +314,15 @@ resolution before proceeding.
 
 ## Compatibility
 
-- Repositories with no uppercase checklist candidate behave exactly as before.
+- Repositories with no uppercase checklist candidate and no applicable scan
+  error behave exactly as before.
 - Ordinary unchecked boxes remain ordinary unchecked boxes. Spine neither
   warns on them nor treats them as incomplete stage evidence.
 - Existing checked criteria and ticket status conventions are unchanged.
 - Existing doctor formatting and JSON schema are unchanged; only D15 findings
   are additive when invalid candidates exist.
 - Existing `audit stages` formatting is unchanged unless at least one scoped
-  candidate exists.
+  candidate or post-identity scoped scan error exists.
 - Existing cursor grammar, stage evidence, handoff rules, and blocking logic
   are unchanged.
 - Existing approval prose without the canonical marker is ignored.
@@ -335,6 +359,16 @@ part of the contract.
 12. **Policy ownership.** ADRs 0002, 0004, 0005, and 0014 already govern
     regeneration, compiled generations, doctor severity, and audit-stage
     blocking. I050 needs no new ADR.
+13. **No-marker compatibility.** Byte compatibility applies only when both
+    candidate and applicable scan-error counts are zero. Explicit scan errors
+    remain visible under the doctor and audit contracts.
+14. **Cursor identity failures.** Scoped audit discovery fails closed. It
+    skips failures before a frontmatter ID is established and surfaces only
+    later failures for an established, wanted ID. Doctor retains estate-wide
+    responsibility for pre-ID failures.
+15. **Marker selection.** Parsing selects the unique exact structural marker,
+    permits sentinel bytes in criterion text, and rejects multiple structural
+    markers as ambiguous.
 
 ## Acceptance criteria
 
@@ -343,9 +377,12 @@ part of the contract.
    root, and returns every parsed field with correct ticket path and 1-based
    line attribution.
 2. Missing criterion, date, approver, reference, fragment, or reason;
-   impossible dates; altered delimiters; checked state; indentation; malformed
-   checkbox spacing; and placement outside `## Acceptance criteria` each
-   produce exactly one aggregated invalid problem for the candidate line.
+   impossible dates; any ASCII or Unicode whitespace in the approver or full
+   reference token; altered delimiters; checked state; indentation; malformed
+   checkbox spacing; ambiguous multiple structural markers; and placement
+   outside `## Acceptance criteria` each produce exactly one aggregated
+   invalid problem for the candidate line. Sentinel bytes in criterion text do
+   not change structural marker selection.
 3. Absolute, traversal, backslash, non-`docs/`, non-Markdown, undated,
    missing, directory, broken-link, and outside-root-symlink approval targets
    are invalid. A valid fragment is recorded but not resolved; the reference
@@ -354,24 +391,30 @@ part of the contract.
    without the uppercase sentinel produce no record, problem, or count.
 5. Multiple records preserve file and line attribution and yield exact valid,
    invalid, and candidate counts. Arbitrarily long candidate and noncandidate
-   lines are processed without hiding later candidates, and ticket read errors
-   are surfaced explicitly without becoming candidate counts.
+   lines are processed without hiding later candidates. Estate-wide ticket
+   read errors and post-identity scoped read errors are surfaced explicitly
+   without becoming candidate counts. Each discovered ticket file is closed
+   per iteration rather than through a loop-scoped deferred cleanup.
 6. Doctor assigns I050 the source-verified ID D15. A valid record adds no D15;
    a reason-less record, missing artifact, and malformed record on a closed
    ticket each add exactly one D15 warn. D15 makes the CLI exit 1 under the
    existing contract and appears unchanged in JSON fields.
-7. With no candidates anywhere in the ledger, doctor produces no D15 output
-   and no I050-driven exit change.
+7. With no candidates and no ticket scan errors anywhere in the ledger, doctor
+   produces no D15 output and no I050-driven exit change.
 8. `audit stages` scans only concrete cursor-resolved ticket IDs. One valid
    record prints `acceptance: approved-untested=1 invalid=0`; one invalid
    record prints one stderr warning plus
    `acceptance: approved-untested=0 invalid=1`; either remains nonblocking
    when all existing stage and handoff checks pass.
-9. A marker on an unscoped ticket is excluded. An unresolvable cursor ticket
-   expression does not trigger an all-ticket fallback. An existing audit
-   blocker remains blocking with any acceptance summary.
-10. With no scoped candidates, `audit stages` stdout, stderr, and exit status
-    match the pre-I050 behavior byte for byte.
+9. A marker on an unscoped ticket is excluded. A readable unscoped ticket and
+   a discovery/open/read failure before its ID is known produce no audit
+   warning. A post-ID scan failure for a matching wanted ticket produces a
+   nonblocking warning. An unresolvable cursor ticket expression does not
+   trigger an all-ticket fallback. An existing audit blocker remains blocking
+   with any acceptance summary.
+10. With no scoped candidates and no post-identity scoped scan errors, `audit
+    stages` stdout, stderr, and exit status match the pre-I050 behavior byte for
+    byte.
 11. Fresh non-knowledge scaffolds emit template generation 12, the WORKFLOW
     grammar, the issue-template acceptance section, and the README pointer.
     Fresh knowledge scaffolds emit the WORKFLOW wording but no issue ledger.
@@ -392,7 +435,9 @@ part of the contract.
     relative-root and hostile-reference probes, `git diff --check`, the
     update dry run, `spine doctor`, `spine audit routing`, and
     `spine audit stages`, followed by `maipipe run full --wait` at the final
-    exact SHA before shipment.
+    exact SHA before shipment. The final gate run includes the go@1
+    `dead-code-callgraph` and `deferred-cleanup-errcheck` classes after the I032
+    gate-layout correction.
 
 ## Delivery boundaries
 
