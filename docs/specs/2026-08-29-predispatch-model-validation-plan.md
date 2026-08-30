@@ -636,6 +636,74 @@ is a necessary but insufficient I051 outcome.
   Do not begin Task 6 without a new explicit authorization covering the
   deepthought paths.
 
+## Phase 1 correction after failed blind review
+
+The first fresh primary blind review failed. The correction owns every finding
+in `.superpowers/sdd/I051-review-worker1-report.md` and does not narrow a
+finding to its smallest reproducer.
+
+- [ ] **Step 1: Amend the specs before product edits.** In one docs-only
+  commit, resolve empty-input exit classification, flavor-wide current-first
+  history, the real verification sequence, I072 command grammar, and the
+  fail-closed host/audit boundary. Keep I051 open and leave deepthought,
+  templates, and installed binaries untouched.
+
+- [ ] **Step 2: Same-file parser and audit slice.** Add failing tests for
+  malformed `model_routing:` headers, raw-key whitespace, comments,
+  duplicates, selected and shadowed legacy bare rows, and safe overrides.
+  Each fixture passes through validation and audit against the same unchanged
+  file. Implement one strict active-route result that both consumers use;
+  retain audit aliases and history only after that active leg.
+
+- [ ] **Step 3: Exact alternate delimiter and dotted precedence slice.** Add
+  failing active-ID tests for `salt:model` and `vault:autoencoder`, plus
+  repeated and empty exact ` alt:` delimiters. Add failing positive tests in
+  which a valid dotted row shadows duplicate or malformed bare rows, and keep
+  failing configuration tests for the same bare defects when the bare row is
+  selected. Implement only exact-delimiter parsing and dotted-first selection.
+
+- [ ] **Step 4: Recursive duplicate-JSON slice.** Add pre-decode mutation
+  tests for duplicate root `modelValidation`, `idPattern`, pattern `name`,
+  flavor, tier, and entry members. Observe last-member-wins decode red, then
+  reject duplicate object names recursively before typed decoding.
+
+- [ ] **Step 5: Diagnostic path slice.** Add failing CLI tests for newline,
+  tab, and carriage-return bytes in a repository path. Assert exit 2, zero
+  stdout, escaped bytes, and one physical stderr line. Extract the
+  `PathError.Path`, quote it, and wrap only `PathError.Err`.
+
+- [ ] **Step 6: Classification and future-host seam.** Add failing tests that
+  current IDs win anywhere in a flavor and otherwise cross-cell history is
+  retired. Add a host-divergent validation-refusal seam without implementing
+  I072 host configuration: divergent pins are not auditable before I074, while
+  an identical pin may validate. Preserve no-host byte compatibility.
+
+- [ ] **Step 7: Commit coherent red/green units.** For every slice, record the
+  exact failing command and expected failure before the product edit, then the
+  focused green command after it. Stage only the named model, audit, CLI, and
+  test paths. Recheck shared-checkout status before every commit and stop on
+  overlap with I050 or unrelated work.
+
+- [ ] **Step 8: Run the actual correction verification sequence.** Run:
+
+  ```bash
+  go test ./internal/model ./internal/audit ./cmd/spine -count=1
+  go test -race ./internal/model ./internal/audit ./cmd/spine -count=1
+  go test ./... -count=1
+  go vet ./...
+  go build -o bin/spine ./cmd/spine
+  ./bin/spine doctor --dir .
+  ./bin/spine audit routing --dir .
+  ./bin/spine audit stages --dir .
+  gofmt -l internal/model internal/audit cmd/spine
+  git diff --check
+  maipipe run full --wait
+  ```
+
+  Also run an independent compiled CLI matrix, recursive JSON mutation builds,
+  and same-file validation-to-audit fixtures with raw stdout, stderr, and exit
+  codes. A different fresh primary reviewer and verifier own the later gates.
+
 ## Phase 2: separately authorized deepthought integration
 
 ### Blocking gate
