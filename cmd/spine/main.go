@@ -982,6 +982,9 @@ func cmdAuditStages(args []string, stdout, stderr io.Writer) int {
 	for _, problem := range rep.Acceptance.Problems {
 		fmt.Fprintln(stderr, "warning:", problem.Path+":", problem.Message())
 	}
+	for _, scanErr := range rep.Acceptance.ScanErrors {
+		fmt.Fprintln(stderr, "warning:", scanErr.Path+":", scanErr.Message())
+	}
 	if !rep.HasCursor {
 		fmt.Fprintln(stdout, "no spine cursor — nothing to audit")
 		return 0

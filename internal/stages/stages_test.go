@@ -347,6 +347,24 @@ func TestAcceptanceProblemsNeverAffectBlocking(t *testing.T) {
 	}
 }
 
+func TestAcceptanceReadErrorsAreAdvisoryAndSurfaced(t *testing.T) {
+	dir := acceptanceStageRepo(t, "I001")
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "issues"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "missing-ticket.md"), filepath.Join(dir, "docs", "issues", "I001-broken.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Acceptance.ScanErrors) != 1 || rep.Acceptance.CandidateCount() != 0 || rep.Blocking() {
+		t.Fatalf("acceptance read error contract = %#v", rep)
+	}
+}
+
 func acceptanceStageRepo(t *testing.T, tickets string) string {
 	t.Helper()
 	dir := t.TempDir()

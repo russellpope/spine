@@ -3,7 +3,9 @@ package acceptance
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,6 +33,17 @@ type Problem struct {
 	Failed []string
 }
 
+// ScanError is an explicit failure to open or fully read one ticket.
+type ScanError struct {
+	Path string
+	Err  error
+}
+
+// Message formats a ticket scan failure for doctor and audit stages.
+func (e ScanError) Message() string {
+	return fmt.Sprintf("unable to read ticket: %v", e.Err)
+}
+
 // Message formats a problem for doctor and audit stages.
 func (p Problem) Message() string {
 	return fmt.Sprintf("line %d: invalid APPROVED-UNTESTED record: %s", p.Line, strings.Join(p.Failed, "; "))
@@ -38,8 +51,9 @@ func (p Problem) Message() string {
 
 // Summary contains every valid record and malformed candidate found.
 type Summary struct {
-	Records  []Record
-	Problems []Problem
+	Records    []Record
+	Problems   []Problem
+	ScanErrors []ScanError
 }
 
 func (s Summary) ValidCount() int     { return len(s.Records) }
@@ -47,13 +61,12 @@ func (s Summary) InvalidCount() int   { return len(s.Problems) }
 func (s Summary) CandidateCount() int { return s.ValidCount() + s.InvalidCount() }
 
 var candidateRE = regexp.MustCompile(`^[ \t]*-[ \t]*\[[^]\r\n]*\].*APPROVED-UNTESTED`)
-var canonicalRE = regexp.MustCompile(`^- \[ \] (.*?) -- APPROVED-UNTESTED ([^ ]*) by ([^[:space:]]*) ref: ([^[:space:]]*) reason: (.*)$`)
 
 // ScanTicket scans one absolute or repository-relative ticket path.
 func ScanTicket(repoRoot, ticketPath string) Summary {
 	absRoot, err := filepath.Abs(repoRoot)
 	if err != nil {
-		return Summary{}
+		return Summary{ScanErrors: []ScanError{{Path: filepath.ToSlash(ticketPath), Err: err}}}
 	}
 	absTicket := ticketPath
 	if !filepath.IsAbs(absTicket) {
@@ -61,36 +74,65 @@ func ScanTicket(repoRoot, ticketPath string) Summary {
 	}
 	rel, err := filepath.Rel(absRoot, absTicket)
 	if err != nil {
-		return Summary{}
+		return Summary{ScanErrors: []ScanError{{Path: filepath.ToSlash(ticketPath), Err: err}}}
 	}
 	rel = filepath.ToSlash(rel)
 	f, err := os.Open(absTicket)
 	if err != nil {
-		return Summary{}
+		return Summary{ScanErrors: []ScanError{{Path: rel, Err: err}}}
 	}
 	defer f.Close()
+	return scanReader(absRoot, rel, f)
+}
 
+func scanReader(repoRoot, ticketPath string, source io.Reader) Summary {
 	var out Summary
 	inAcceptance := false
-	scanner := bufio.NewScanner(f)
-	for lineNo := 1; scanner.Scan(); lineNo++ {
-		line := scanner.Text()
-		if line == "## Acceptance criteria" {
-			inAcceptance = true
-		} else if strings.HasPrefix(line, "# ") || strings.HasPrefix(line, "## ") {
-			inAcceptance = false
+	reader := bufio.NewReader(source)
+	for lineNo := 1; ; lineNo++ {
+		line, readErr := reader.ReadString('\n')
+		line = strings.TrimSuffix(line, "\n")
+		line = strings.TrimSuffix(line, "\r")
+		if line != "" {
+			inAcceptance = scanLine(repoRoot, ticketPath, lineNo, line, inAcceptance, &out)
 		}
-		if !candidateRE.MatchString(line) {
-			continue
+		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				out.ScanErrors = append(out.ScanErrors, ScanError{Path: ticketPath, Err: readErr})
+			}
+			break
 		}
-		record, failed := parseLine(absRoot, rel, lineNo, line, inAcceptance)
-		if len(failed) != 0 {
-			out.Problems = append(out.Problems, Problem{Path: rel, Line: lineNo, Failed: failed})
-			continue
-		}
-		out.Records = append(out.Records, record)
 	}
 	return out
+}
+
+func scanLine(repoRoot, ticketPath string, lineNo int, line string, inAcceptance bool, out *Summary) bool {
+	if line == "## Acceptance criteria" {
+		inAcceptance = true
+	} else if isH1OrH2Boundary(line) {
+		inAcceptance = false
+	}
+	if !candidateRE.MatchString(line) {
+		return inAcceptance
+	}
+	record, failed := parseLine(repoRoot, ticketPath, lineNo, line, inAcceptance)
+	if len(failed) != 0 {
+		out.Problems = append(out.Problems, Problem{Path: ticketPath, Line: lineNo, Failed: failed})
+		return inAcceptance
+	}
+	out.Records = append(out.Records, record)
+	return inAcceptance
+}
+
+func isH1OrH2Boundary(line string) bool {
+	hashes := 0
+	for hashes < len(line) && line[hashes] == '#' {
+		hashes++
+	}
+	if hashes != 1 && hashes != 2 {
+		return false
+	}
+	return len(line) == hashes || line[hashes] == ' ' || line[hashes] == '\t'
 }
 
 // ScanAllTickets scans every eligible docs/issues/I*.md file.
@@ -108,9 +150,16 @@ func ScanTicketIDs(repoRoot string, ids []string) Summary {
 }
 
 func scanTickets(repoRoot string, wanted map[string]bool) Summary {
-	issuesDir := filepath.Join(repoRoot, "docs", "issues")
+	absRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return Summary{ScanErrors: []ScanError{{Path: filepath.ToSlash(repoRoot), Err: err}}}
+	}
+	issuesDir := filepath.Join(absRoot, "docs", "issues")
 	entries, err := os.ReadDir(issuesDir)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return Summary{ScanErrors: []ScanError{{Path: "docs/issues", Err: err}}}
+		}
 		return Summary{}
 	}
 	var paths []string
@@ -122,7 +171,11 @@ func scanTickets(repoRoot string, wanted map[string]bool) Summary {
 		p := filepath.Join(issuesDir, name)
 		if wanted != nil {
 			raw, err := os.ReadFile(p)
-			if err != nil || !wanted[frontmatterID(string(raw))] {
+			if err != nil {
+				paths = append(paths, p)
+				continue
+			}
+			if !wanted[frontmatterID(string(raw))] {
 				continue
 			}
 		}
@@ -131,9 +184,10 @@ func scanTickets(repoRoot string, wanted map[string]bool) Summary {
 	sort.Strings(paths)
 	var out Summary
 	for _, p := range paths {
-		part := ScanTicket(repoRoot, p)
+		part := ScanTicket(absRoot, p)
 		out.Records = append(out.Records, part.Records...)
 		out.Problems = append(out.Problems, part.Problems...)
+		out.ScanErrors = append(out.ScanErrors, part.ScanErrors...)
 	}
 	return out
 }
@@ -157,77 +211,118 @@ func frontmatterID(content string) string {
 func parseLine(repoRoot, ticketPath string, lineNo int, line string, inAcceptance bool) (Record, []string) {
 	record := Record{Path: ticketPath, Line: lineNo}
 	var failed []string
-	if !inAcceptance {
-		failed = append(failed, "record must appear under ## Acceptance criteria")
+	const marker = "APPROVED-UNTESTED"
+	markerAt := strings.Index(line, marker)
+	beforeMarker := line[:markerAt]
+	afterMarker := line[markerAt+len(marker):]
+
+	if !strings.HasPrefix(line, "- [ ] ") {
+		failed = append(failed, "record must start at column 0 with the exact - [ ] prefix")
 	}
-	parts := canonicalRE.FindStringSubmatch(line)
-	if parts == nil {
-		return record, append(failed, "record must match the canonical single-line grammar")
+	criterionText := beforeMarker
+	if checkboxEnd := strings.Index(criterionText, "]"); checkboxEnd >= 0 {
+		criterionText = criterionText[checkboxEnd+1:]
 	}
-	record.Criterion = strings.Trim(parts[1], " \t")
-	record.Date = parts[2]
-	record.Approver = parts[3]
-	record.Reference = parts[4]
-	record.Reason = strings.Trim(parts[5], " \t")
+	hasSeparator := strings.HasSuffix(criterionText, " -- ")
+	if hasSeparator {
+		criterionText = strings.TrimSuffix(criterionText, " -- ")
+	} else {
+		criterionText = strings.Trim(criterionText, " \t-")
+	}
+	record.Criterion = strings.Trim(criterionText, " \t")
 	if record.Criterion == "" {
 		failed = append(failed, "criterion is required")
 	}
+	if !hasSeparator {
+		failed = append(failed, "criterion and marker must be separated by exact ` -- ` bytes")
+	}
+
+	hasMarkerSpace := strings.HasPrefix(afterMarker, " ")
+	fields := strings.TrimPrefix(afterMarker, " ")
+	beforeReason, reason, hasReasonDelimiter := strings.Cut(fields, " reason: ")
+	beforeReference, reference, hasReferenceDelimiter := strings.Cut(beforeReason, " ref: ")
+	date, approver, hasByDelimiter := strings.Cut(beforeReference, " by ")
+	record.Date = date
+	record.Approver = approver
+	record.Reference = reference
+	record.Reason = strings.Trim(reason, " \t")
+
 	if !validDate(record.Date) {
 		failed = append(failed, "date must be a real YYYY-MM-DD date")
+	}
+	if !hasMarkerSpace {
+		failed = append(failed, "marker must be followed by one ASCII space")
+	}
+	if !hasByDelimiter {
+		failed = append(failed, "date and approver must be separated by exact ` by ` bytes")
+	}
+	if !hasReferenceDelimiter {
+		failed = append(failed, "approver and reference must be separated by exact ` ref: ` bytes")
+	}
+	if !hasReasonDelimiter {
+		failed = append(failed, "reference and reason must be separated by exact ` reason: ` bytes")
 	}
 	if record.Approver == "" {
 		failed = append(failed, "approver is required")
 	}
 	if record.Reference == "" {
 		failed = append(failed, "reference is required")
-	} else if reason := validateReference(repoRoot, record.Reference); reason != "" {
-		failed = append(failed, reason)
+	} else {
+		failed = append(failed, validateReference(repoRoot, record.Reference)...)
 	}
 	if record.Reason == "" {
 		failed = append(failed, "reason is required")
 	}
+	if !inAcceptance {
+		failed = append(failed, "record must appear under ## Acceptance criteria")
+	}
 	return record, failed
 }
 
-func validateReference(repoRoot, reference string) string {
+func validateReference(repoRoot, reference string) []string {
+	var failed []string
 	base, fragment, ok := strings.Cut(reference, "#")
 	if !ok || base == "" || fragment == "" {
-		return "reference must contain a nonempty path and fragment"
+		failed = append(failed, "reference must contain a nonempty path and fragment")
 	}
-	if strings.Contains(base, "\\") || path.IsAbs(base) || filepath.VolumeName(base) != "" || !strings.HasPrefix(base, "docs/") || path.Clean(base) != base {
-		return "reference path must be a clean relative docs/ path using slash separators"
+	pathSafe := base != "" && !strings.Contains(base, "\\") && !path.IsAbs(base) && filepath.VolumeName(base) == "" && path.Clean(base) == base
+	if base != "" && (!pathSafe || !strings.HasPrefix(base, "docs/")) {
+		failed = append(failed, "reference path must be a clean relative docs/ path using slash separators")
 	}
-	if !strings.HasSuffix(base, ".md") {
-		return "reference path must end in .md"
+	if base != "" && !strings.HasSuffix(base, ".md") {
+		failed = append(failed, "reference path must end in .md")
 	}
 	name := path.Base(base)
-	if len(name) < 11 || name[10] != '-' || !validDate(name[:10]) {
-		return "reference basename must begin with a real YYYY-MM-DD date"
+	if base != "" && (len(name) < 11 || name[10] != '-' || !validDate(name[:10])) {
+		failed = append(failed, "reference basename must begin with a real YYYY-MM-DD date")
+	}
+	if !pathSafe {
+		return failed
 	}
 	absRoot, err := filepath.Abs(repoRoot)
 	if err != nil {
-		return "repository root cannot be resolved"
+		return append(failed, "repository root cannot be resolved")
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(absRoot)
 	if err != nil {
-		return "repository root cannot be resolved"
+		return append(failed, "repository root cannot be resolved")
 	}
 	target := filepath.Join(absRoot, filepath.FromSlash(base))
 	if !within(absRoot, target) {
-		return "reference target escapes the repository root"
+		return append(failed, "reference target escapes the repository root")
 	}
 	resolved, err := filepath.EvalSymlinks(target)
 	if err != nil {
-		return "reference target must exist"
+		return append(failed, "reference target must exist")
 	}
 	if !within(resolvedRoot, resolved) {
-		return "reference target escapes the resolved repository root"
+		return append(failed, "reference target escapes the resolved repository root")
 	}
 	info, err := os.Stat(resolved)
 	if err != nil || !info.Mode().IsRegular() {
-		return "reference target must be a regular file"
+		return append(failed, "reference target must be a regular file")
 	}
-	return ""
+	return failed
 }
 
 func within(root, target string) bool {

@@ -1312,6 +1312,99 @@ func TestAuditStagesExistingBlockStillBlocksWithAcceptance(t *testing.T) {
 	}
 }
 
+func TestCompiledAcceptanceCommandsHonorRelativeRoots(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "named-relative")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	block := "<!-- spine:cursor -->\n" +
+		"effort: acceptance\n" +
+		"prd: docs/specs/acceptance.md\n" +
+		"tickets: I001,I002\n" +
+		"stages: grill[x] issues[<]\n" +
+		"<!-- /spine:cursor -->\n"
+	for rel, body := range map[string]string{
+		"WORKFLOW.md":                            "stages: [grill, issues]\n",
+		".superpowers/sdd/progress.md":           block,
+		"docs/handoffs/2026-08-30-acceptance.md": block,
+		"docs/handoffs/2026-08-29-approval.md":   "# Approval\n",
+		"docs/issues/I001-valid.md":              "---\nid: I001\n---\n\n## Acceptance criteria\n" + validDoctorAcceptanceLine() + "\n",
+		"docs/issues/I002-invalid.md":            "---\nid: I002\n---\n\n## Acceptance criteria\n" + strings.TrimSuffix(validDoctorAcceptanceLine(), "lab unavailable") + "\n",
+	} {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	bin := filepath.Join(t.TempDir(), "spine")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build compiled CLI: %v\n%s", err, out)
+	}
+
+	code, out, errs := runCompiledSpine(t, bin, dir, "doctor", "--dir", ".")
+	if code != 1 || !strings.Contains(out, "D15 warn  docs/issues/I002-invalid.md: line 6:") || errs != "" {
+		t.Fatalf("doctor --dir .: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCompiledSpine(t, bin, base, "doctor", "--dir", "named-relative")
+	if code != 1 || !strings.Contains(out, "D15 warn  docs/issues/I002-invalid.md: line 6:") || errs != "" {
+		t.Fatalf("doctor named relative: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCompiledSpine(t, bin, dir, "audit", "stages", "--dir", ".")
+	if code != 0 || !strings.Contains(out, "acceptance: approved-untested=1 invalid=1\n") ||
+		!strings.Contains(errs, "warning: docs/issues/I002-invalid.md: line 6:") {
+		t.Fatalf("audit stages --dir .: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+func TestAuditStagesPrintsAcceptanceReadErrorsWithoutBlocking(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	if err := os.Symlink(filepath.Join(dir, "missing-ticket.md"), filepath.Join(dir, "docs", "issues", "I001-broken.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 0 || strings.Contains(out, "acceptance: approved-untested=") ||
+		!strings.Contains(errs, "warning: docs/issues/I001-broken.md: unable to read ticket:") {
+		t.Fatalf("acceptance read error output: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+func TestAuditStagesPinsDeterministicAggregatedAcceptanceWarning(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	line := "- [ ]  -- APPROVED-UNTESTED 2026-02-30 by owner ref: outside/approval.txt#x reason: "
+	writeAuditAcceptanceTicket(t, dir, "I001-aggregate.md", "I001", line)
+
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+	const want = "warning: docs/issues/I001-aggregate.md: line 6: invalid APPROVED-UNTESTED record: criterion is required; date must be a real YYYY-MM-DD date; reference path must be a clean relative docs/ path using slash separators; reference path must end in .md; reference basename must begin with a real YYYY-MM-DD date; reference target must exist; reason is required\n"
+	if code != 0 || !strings.Contains(out, "acceptance: approved-untested=0 invalid=1\n") || errs != want {
+		t.Fatalf("aggregated audit warning: code=%d out=%q\n got stderr=%q\nwant stderr=%q", code, out, errs, want)
+	}
+}
+
+func runCompiledSpine(t *testing.T, bin, dir string, args ...string) (int, string, string) {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return 0, stdout.String(), stderr.String()
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return exitErr.ExitCode(), stdout.String(), stderr.String()
+	}
+	t.Fatalf("run compiled spine: %v", err)
+	return 0, "", ""
+}
+
 func auditAcceptanceRepo(t *testing.T, tickets string) string {
 	t.Helper()
 	dir := t.TempDir()

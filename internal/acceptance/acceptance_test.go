@@ -1,6 +1,9 @@
 package acceptance
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,6 +173,182 @@ func TestScanTicketIDsUsesExactFrontmatterIDs(t *testing.T) {
 		t.Fatalf("got %#v", got)
 	}
 }
+
+func TestScanAllTicketsAcceptsRelativeRoot(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "issues"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")
+	writeTicket(t, dir, "I092-relative.md", "I092", "open", "## Acceptance criteria\n"+canonical+"\n")
+	t.Chdir(base)
+
+	got := ScanAllTickets("repo")
+	if got.ValidCount() != 1 || got.Records[0].Path != "docs/issues/I092-relative.md" {
+		t.Fatalf("relative root scan = %#v", got)
+	}
+}
+
+func TestScanTicketIDsAcceptsRelativeRoot(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "issues"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")
+	writeTicket(t, dir, "I093-relative.md", "I093", "open", "## Acceptance criteria\n"+canonical+"\n")
+	writeTicket(t, dir, "I094-unselected.md", "I094", "open", "## Acceptance criteria\n"+canonical+"\n")
+	t.Chdir(base)
+
+	got := ScanTicketIDs("repo", []string{"I093"})
+	if got.ValidCount() != 1 || got.Records[0].Path != "docs/issues/I093-relative.md" {
+		t.Fatalf("relative root scoped scan = %#v", got)
+	}
+}
+
+func TestScanTicketAcceptsArbitrarilyLongCandidateLine(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")
+	criterion := strings.Repeat("candidate-byte-", 6000)
+	line := "- [ ] " + criterion + " -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/handoffs/2026-08-29-i050-approval.md#long#fragment reason: why"
+	path := writeTicket(t, dir, "I095-long-candidate.md", "I095", "open", "## Acceptance criteria\n"+line+"\n")
+
+	got := ScanTicket(dir, path)
+	if got.ValidCount() != 1 || got.InvalidCount() != 0 || got.Records[0].Criterion != criterion ||
+		got.Records[0].Reference != "docs/handoffs/2026-08-29-i050-approval.md#long#fragment" {
+		t.Fatalf("long candidate scan = %#v", got)
+	}
+}
+
+func TestScanTicketLongNoncandidateDoesNotHideLaterCandidates(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")
+	bad := strings.TrimSuffix(canonical, "lab hardware unavailable; I123 tracks the deferred run")
+	body := "## Acceptance criteria\n" + strings.Repeat("ordinary prose ", 6000) + "\n" + canonical + "\n" + bad + "\n"
+	path := writeTicket(t, dir, "I096-long-before.md", "I096", "open", body)
+
+	got := ScanTicket(dir, path)
+	if got.ValidCount() != 1 || got.InvalidCount() != 1 || got.Records[0].Line != 10 || got.Problems[0].Line != 11 {
+		t.Fatalf("long noncandidate scan = %#v", got)
+	}
+}
+
+func TestScanReaderSurfacesReadError(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")
+	wantErr := errors.New("injected read failure")
+	reader := &errorAfterReader{data: []byte("## Acceptance criteria\n" + canonical), err: wantErr}
+
+	got := scanReader(dir, "docs/issues/I097-read.md", reader)
+	if got.ValidCount() != 1 || got.CandidateCount() != 1 {
+		t.Fatalf("partial line before read failure was not processed: %#v", got)
+	}
+	if len(got.ScanErrors) != 1 || got.ScanErrors[0].Path != "docs/issues/I097-read.md" || !errors.Is(got.ScanErrors[0].Err, wantErr) {
+		t.Fatalf("read failure not surfaced: %#v", got.ScanErrors)
+	}
+}
+
+func TestScanTicketAggregatesEveryApplicableFailureDeterministically(t *testing.T) {
+	dir := ticketRepo(t)
+	line := "- [ ]  -- APPROVED-UNTESTED 2026-02-30 by owner ref: outside/approval.txt#x reason: "
+	path := writeTicket(t, dir, "I098-aggregate.md", "I098", "open", "## Verification\n"+line+"\n")
+	want := []string{
+		"criterion is required",
+		"date must be a real YYYY-MM-DD date",
+		"reference path must be a clean relative docs/ path using slash separators",
+		"reference path must end in .md",
+		"reference basename must begin with a real YYYY-MM-DD date",
+		"reference target must exist",
+		"reason is required",
+		"record must appear under ## Acceptance criteria",
+	}
+	for i := 0; i < 20; i++ {
+		got := ScanTicket(dir, path)
+		if got.InvalidCount() != 1 || got.CandidateCount() != 1 || !slicesEqual(got.Problems[0].Failed, want) {
+			t.Fatalf("iteration %d aggregated failures:\n got %#v\nwant %#v", i, got.Problems, want)
+		}
+	}
+}
+
+func TestScanTicketAggregatesRecoverableGrammarAndReferenceFailures(t *testing.T) {
+	dir := ticketRepo(t)
+	line := " \t- [x] C - APPROVED-UNTESTED 2026-02-30 by owner ref: outside/approval.txt#x reason: "
+	path := writeTicket(t, dir, "I099-grammar.md", "I099", "open", "## Acceptance criteria\n"+line+"\n")
+	want := []string{
+		"record must start at column 0 with the exact - [ ] prefix",
+		"criterion and marker must be separated by exact ` -- ` bytes",
+		"date must be a real YYYY-MM-DD date",
+		"reference path must be a clean relative docs/ path using slash separators",
+		"reference path must end in .md",
+		"reference basename must begin with a real YYYY-MM-DD date",
+		"reference target must exist",
+		"reason is required",
+	}
+
+	got := ScanTicket(dir, path)
+	if got.InvalidCount() != 1 || !slicesEqual(got.Problems[0].Failed, want) {
+		t.Fatalf("recoverable grammar failures:\n got %#v\nwant %#v", got.Problems, want)
+	}
+}
+
+func TestScanTicketRecognizesEveryColumnZeroH1H2Boundary(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")
+	boundaries := []string{"#", "# Title", "#\tTitle", "##", "## Title", "##\tTitle"}
+	for i, heading := range boundaries {
+		t.Run(strings.ReplaceAll(heading, "\t", "-tab-"), func(t *testing.T) {
+			path := writeTicket(t, dir, fmt.Sprintf("I1%02d-boundary.md", i), "I100", "open", "## Acceptance criteria\n"+heading+"\n"+canonical+"\n")
+			got := ScanTicket(dir, path)
+			if got.ValidCount() != 0 || got.InvalidCount() != 1 ||
+				!slicesEqual(got.Problems[0].Failed, []string{"record must appear under ## Acceptance criteria"}) {
+				t.Fatalf("heading %q did not end acceptance scope: %#v", heading, got)
+			}
+		})
+	}
+}
+
+func TestScanTicketKeepsH3HeadingsInsideAcceptanceSection(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")
+	for i, heading := range []string{"###", "### Title", "###\tTitle"} {
+		t.Run(strings.ReplaceAll(heading, "\t", "-tab-"), func(t *testing.T) {
+			path := writeTicket(t, dir, fmt.Sprintf("I2%02d-h3.md", i), "I200", "open", "## Acceptance criteria\n"+heading+"\n"+canonical+"\n")
+			got := ScanTicket(dir, path)
+			if got.ValidCount() != 1 || got.InvalidCount() != 0 {
+				t.Fatalf("H3 heading %q ended acceptance scope: %#v", heading, got)
+			}
+		})
+	}
+}
+
+func slicesEqual(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+type errorAfterReader struct {
+	data []byte
+	err  error
+}
+
+func (r *errorAfterReader) Read(p []byte) (int, error) {
+	if len(r.data) > 0 {
+		n := copy(p, r.data)
+		r.data = r.data[n:]
+		return n, nil
+	}
+	return 0, r.err
+}
+
+var _ io.Reader = (*errorAfterReader)(nil)
 
 func ticketRepo(t *testing.T) string {
 	t.Helper()
