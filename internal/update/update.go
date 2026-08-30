@@ -491,7 +491,7 @@ func markerLocalEdits(old, currentBlock, tmplName string, vals tmpl.Values) []st
 	marker := old[begin : begin+lineEnd]
 	versionText := strings.TrimSuffix(strings.TrimPrefix(marker, "<!-- spine:begin v"), " -->")
 	version, err := strconv.Atoi(versionText)
-	if err != nil || version != tmpl.Version()-1 {
+	if err != nil || version < 1 || version > tmpl.Version() {
 		return nil
 	}
 	oldVals := vals
@@ -501,7 +501,30 @@ func markerLocalEdits(old, currentBlock, tmplName string, vals tmpl.Values) []st
 		return nil
 	}
 	oldBlock := old[begin : end+len(markerEnd)]
-	return unrecognizedLines(oldBlock, expected, currentBlock)
+	return dropKnownMarkerMigrationLines(unrecognizedLines(oldBlock, expected, currentBlock), tmplName, version)
+}
+
+// dropKnownMarkerMigrationLines recognizes only the exact v11 CLAUDE.md
+// prose that generation 12 replaced. It lets a pristine v11 block advance
+// directly to generation 13 while keeping a hand edit to that old prose
+// visible. Other marker generations remain literal-match-only.
+func dropKnownMarkerMigrationLines(unrec []string, tmplName string, version int) []string {
+	if tmplName != "CLAUDE.md.tmpl" || version != 11 {
+		return unrec
+	}
+	retired := map[string]bool{
+		"### Issue tracker": true,
+		"Issues live as markdown files in `docs/issues/` (the ledger above). `/wayfinder` and `/to-tickets` publish here too — see \"Wayfinding operations\" in `docs/issues/README.md`.": true,
+		"**Mandatory gates:** a PRD up front (run `/grill-with-docs` -> `/to-spec`), `/spec-review` of the finished diff against the PRD, and verification before completion.":            true,
+		"**Model:** see `WORKFLOW.md` `model_routing` (primary / routine / mechanical / fallback; swappable).":                                                                            true,
+	}
+	var kept []string
+	for _, line := range unrec {
+		if !retired[line] {
+			kept = append(kept, line)
+		}
+	}
+	return kept
 }
 
 func planSimple(dir, gen, tmplName, relPath string, inGen0 bool, vals tmpl.Values) (FileReport, error) {
