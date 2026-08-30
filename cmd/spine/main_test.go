@@ -1362,6 +1362,38 @@ func TestCompiledAcceptanceCommandsHonorRelativeRoots(t *testing.T) {
 	}
 }
 
+func TestCompiledAcceptanceCommandsRejectOutsideRootSymlink(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "hostile-relative")
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "issues"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "reviews"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(base, "2026-08-29-outside.md")
+	if err := os.WriteFile(outside, []byte("outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "docs", "reviews", "2026-08-29-outside.md")); err != nil {
+		t.Fatal(err)
+	}
+	line := "- [ ] Hostile reference -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/reviews/2026-08-29-outside.md#first#later reason: verify containment"
+	if err := os.WriteFile(filepath.Join(dir, "docs", "issues", "I001-hostile.md"), []byte("---\nid: I001\n---\n\n## Acceptance criteria\n"+line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := filepath.Join(t.TempDir(), "spine")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build compiled CLI: %v\n%s", err, out)
+	}
+	code, out, errs := runCompiledSpine(t, bin, base, "doctor", "--dir", "hostile-relative")
+	if code != 1 || errs != "" || !strings.Contains(out, "D15 warn  docs/issues/I001-hostile.md: line 6: invalid APPROVED-UNTESTED record: reference target escapes the resolved repository root") {
+		t.Fatalf("outside-root symlink: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
 func TestAuditStagesPrintsAcceptanceReadErrorsWithoutBlocking(t *testing.T) {
 	dir := auditAcceptanceRepo(t, "I001")
 	if err := os.Symlink(filepath.Join(dir, "missing-ticket.md"), filepath.Join(dir, "docs", "issues", "I001-broken.md")); err != nil {
