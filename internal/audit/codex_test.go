@@ -98,6 +98,10 @@ func codexTurnContextLine(model string) string {
 // arguments JSON-string-encoded, the OpenAI-style function-calling
 // convention I009's prose implies ("arguments carry the explicit model").
 func codexFunctionCallLine(name string, argsObj map[string]string) string {
+	return codexFunctionCallLineWithID(name, "call_1", argsObj)
+}
+
+func codexFunctionCallLineWithID(name, callID string, argsObj map[string]string) string {
 	argsJSON, err := json.Marshal(argsObj)
 	if err != nil {
 		panic(err)
@@ -106,7 +110,7 @@ func codexFunctionCallLine(name string, argsObj map[string]string) string {
 	if err != nil {
 		panic(err)
 	}
-	return fmt.Sprintf(`{"type":"response_item","payload":{"type":"function_call","name":%q,"call_id":"call_1","arguments":%s}}`, name, encoded)
+	return fmt.Sprintf(`{"type":"response_item","payload":{"type":"function_call","name":%q,"call_id":%q,"arguments":%s}}`, name, callID, encoded)
 }
 
 // codexUserMessageLine builds a response_item/message line with role "user"
@@ -142,6 +146,64 @@ func runCodexFixture(t *testing.T, tickets map[string]string, codexDir string) (
 		t.Fatal(err)
 	}
 	return rep, dir
+}
+
+func TestCodexDiscardedDirectDispatch(t *testing.T) {
+	codexDir := t.TempDir()
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+	if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(
+		"DISCARDED I078 source:codex session:root-1 dispatch:call_discard tier:routine reason: exploratory worker was discarded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+		codexSessionMetaLine("root-1", "root-1", "", repo, "user", topLevelSource),
+		codexFunctionCallLineWithID("spawn_agent", "call_discard", map[string]string{
+			"task_name": "I078 exploratory prototype", "model": "gpt-5.6-terra",
+		}),
+	)
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I078"]
+	if got, want := string(row.Verdict), "discarded-with-reason"; got != want || rep.Blocking() {
+		t.Fatalf("I078 = %q (%s), blocking=%v; want advisory %q", got, row.Detail, rep.Blocking(), want)
+	}
+}
+
+func TestCodexDiscardedDoesNotExcuseRootOnlyWorker(t *testing.T) {
+	codexDir := t.TempDir()
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+	if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(
+		"DISCARDED I078 source:codex session:root-1 dispatch:call_discard tier:routine reason: exploratory worker was discarded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+		codexSessionMetaLine("root-1", "root-1", "", repo, "user", topLevelSource),
+		codexFunctionCallLineWithID("spawn_agent", "call_discard", map[string]string{
+			"task_name": "I078 primary implementation", "model": "gpt-5.6-sol",
+		}),
+	)
+	writeCodexFile(t, filepath.Join(codexDir, "worker.jsonl"),
+		codexSessionMetaLine("worker-1", "root-1", "root-1", repo, "subagent", threadSpawnSource("root-1")),
+		codexTurnContextLine("gpt-5.6-terra"),
+	)
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I078"]
+	if row.Verdict != VerdictSilentDescent || !rep.Blocking() {
+		t.Fatalf("I078 = %s (%s), blocking=%v; root-only worker must stay a silent descent", row.Verdict, row.Detail, rep.Blocking())
+	}
 }
 
 // Acceptance: a herdr-shaped fixture — a lead session recording a team spawn

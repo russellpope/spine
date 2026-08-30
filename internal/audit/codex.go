@@ -211,6 +211,7 @@ func (m codexSessionMeta) rootID() string {
 type codexResponseItem struct {
 	Type      string          `json:"type"`
 	Name      string          `json:"name"`      // function_call, custom_tool_call ("exec")
+	CallID    string          `json:"call_id"`   // immutable function-call event identity (I078)
 	Arguments json.RawMessage `json:"arguments"` // function_call
 	Role      string          `json:"role"`      // message
 	Content   json.RawMessage `json:"content"`   // message
@@ -337,6 +338,7 @@ type codexNearMiss struct {
 // tickets from colliding into a single, wrong dispatch record.
 type codexExecWorker struct {
 	model  string
+	callID string
 	text   strings.Builder
 	prompt string
 }
@@ -390,7 +392,7 @@ func parseCodexBytes(path string, data []byte, warnings *[]string) (codexFileRes
 	for _, name := range names {
 		w := st.execWorkers[name]
 		if w.model != "" {
-			st.res.dispatches = append(st.res.dispatches, dispatch{model: w.model, description: w.text.String()})
+			st.res.dispatches = append(st.res.dispatches, dispatch{model: w.model, description: w.text.String(), identity: evidenceIdentity{dispatch: w.callID}})
 		}
 	}
 	if !st.haveMeta {
@@ -447,6 +449,7 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 					st.res.dispatches = append(st.res.dispatches, dispatch{
 						model:       m,
 						description: args["task_name"],
+						identity:    evidenceIdentity{dispatch: item.CallID},
 					})
 				}
 				return true
@@ -487,6 +490,7 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 			if match := codexTeamSpawnStartRe.FindStringSubmatch(cmd); match != nil {
 				w := st.execWorker(match[1])
 				w.model = match[2]
+				w.callID = item.CallID
 				w.text.WriteString(cmd)
 				w.text.WriteByte(' ')
 			} else if match := codexTeamSpawnPromptRe.FindStringSubmatch(cmd); match != nil {
@@ -933,6 +937,8 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 			res.dispatches[i].flavor = "codex"
 			res.dispatches[i].source = "codex"
 			res.dispatches[i].sourceFile = path
+			res.dispatches[i].identity.source = "codex"
+			res.dispatches[i].identity.session = root
 		}
 		if res.meta.isGuardian() {
 			// D23: never evidence, in any path — but its content (e.g. a
