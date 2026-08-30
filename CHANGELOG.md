@@ -77,10 +77,10 @@ Behaviour changes visible to repos that consume `spine`. Format follows
   flags-first contract remains binding: outer `--dir` precedes `validate`, so
   `spine model validate --dir ...` is a usage error. There is no bypass, and
   existing plain, JSON, effort, alternate, audit-alias, and audit-history
-  behavior is unchanged. Rollout is binary-first: controlled team skills may
-  adopt the command only after this exact Spine build is reviewed, shipped,
-  and installed; that separately authorized integration is not part of this
-  change. (I051)
+  behavior is unchanged. The controlled codex-team, claude-team, and handoff
+  launch sites now validate locally before every spawn, pass only the captured
+  model (and separately resolved effort where supported), and refuse plain
+  modes that cannot prove the handoff. (I051)
 
 - **Ticket-local `APPROVED-UNTESTED` acceptance records.** An applicable
   criterion may stay unchecked while recording a dated approver token,

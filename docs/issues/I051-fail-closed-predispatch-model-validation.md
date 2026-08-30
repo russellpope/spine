@@ -2,7 +2,8 @@
 id: I051
 title: "Fail-closed pre-dispatch model validation: forbidden tokens, unmapped-route refusal"
 severity: med
-status: open
+status: fixed
+commits: [ca37dcd, f710ce6, 409c0ea, ed9c7c2, 114c9b9, 1624ab1, 7dc307c, bf546ad, db977f6, 45d76c7, 7362b9b, 62cdc72]
 affects: [model, skills-preflight]
 blocked-by: []
 execution-mode: subagent-driven
@@ -57,8 +58,22 @@ is only caught days later by audit (maipipe I060 being the live example).
 
 ## Acceptance criteria (sharpened at PRD time)
 
-- [ ] Valid route passes; retired-default id, unknown id, and each
+- [x] Valid route passes; retired-default id, unknown id, and each
       forbidden-token class refuse with a named reason (negative controls).
-- [ ] Team-skill preflight blocks a spawn on refusal end-to-end.
-- [ ] Regression test: the preflight path cannot spawn with a literal model id
+- [x] Team-skill preflight blocks a spawn on refusal end-to-end.
+- [x] Regression test: the preflight path cannot spawn with a literal model id
       that skipped validation.
+
+## Resolution
+
+Fixed 2026-08-30 at final Spine product SHA `62cdc72` and Deepthought SHA
+`7650d84`. Spine now validates one strict active-model snapshot, rejects unsafe,
+forbidden, retired, wrong-route, and unmapped IDs before launch, keeps audit's
+active vocabulary aligned, gates divergent host pins, and emits escaped,
+deterministic diagnostics that name known and attempted route pairs. The eight
+controlled codex-team, claude-team, and handoff launch sites validate locally,
+pass only captured model/effort values, and fail closed without dangerous
+permission bypasses or plain-mode fallback. A fresh primary cross-repository
+review and a different independent primary verifier passed focused/full/race,
+compiled hostile, 97-site runtime, and 60-mutation gates. Final dual-binary
+installation remains deferred until the single batch-final exact-SHA lane.
