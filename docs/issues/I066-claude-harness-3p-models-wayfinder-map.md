@@ -68,18 +68,40 @@ gateways; the codex harness is untouched.
   `modelOverrides` provider-facing effective ID and its redacted provenance;
   raw OpenAI-compatible endpoints need an adapter; every `claude-auto` wrapper
   contract remains owner-verified before cmux/herdr changes land.
+- [Host config schema and precedence](I072-host-config-schema-and-precedence.md)
+  — the committed [I072 design](../specs/2026-08-29-host-routing-config-design.md)
+  specifies a local, schema-versioned JSON capability/pin file at
+  `os.UserConfigDir()/spine/routing-host.json`. Embedded defaults then the repo
+  mirror remain preferences; a validated host constraint or explicit pin picks
+  the final exact `(model, effort)` pair. Mirrors, templates, update, and fleet
+  state stay host-blind. This design is approved for I072 implementation, not
+  evidence that the implementation or dependent rename/eval work has landed.
+- [Effort dispatch recommendation](I075-effort-first-class-dispatch-parameter.md)
+  — the completed grill recommends raw target-harness `(harness, model,
+  effort)` declarations per dispatch. Omitted effort resolves to the selected
+  target; a supplied raw token is validated for that harness; the existing
+  exact `ESCALATION <ticket> effort <from>-><to> reason: ...` line authorizes
+  only that declared pair. Audit should report declared effort separately from
+  unconfirmed effective effort. This is a recommendation awaiting owner
+  approval and an I075 PRD, not a settled audit verdict.
 
 ## Not yet specified
 
-- [I072](I072-host-config-schema-and-precedence.md) — host config schema and
-  the estate-default → repo-override → host-constraint precedence story.
-- [I073](I073-flavor-to-harness-rename-migration.md) — the rename migration.
-- [I074](I074-audit-heterogeneous-verdicts.md) — audit verdicts for
-  heterogeneous dispatches.
-- [I075](I075-effort-first-class-dispatch-parameter.md) — effort in the
-  dispatch/record grammar.
-- [I077](I077-eval-informed-equivalence-pins.md) — eval evidence feeding pin
-  ratification.
+- [I072](I072-host-config-schema-and-precedence.md) — specified by the
+  committed design and awaiting implementation, review, and verification.
+- [I073](I073-flavor-to-harness-rename-migration.md) — awaits I072's verified
+  implementation, then its own migration PRD and fleet plan.
+- [I074](I074-audit-heterogeneous-verdicts.md) — the declared-versus-observed
+  verdict vocabulary, correlation, and severity remain unspecified.
+- [I075](I075-effort-first-class-dispatch-parameter.md) — a grill
+  recommendation exists, but owner approval, PRD, implementation, and the
+  declared-versus-observed audit decision remain open.
+- [I076](I076-routing-yield-review-record-and-yield-verb.md) — review-record
+  grammar and `spine yield` remain to be designed; its model/harness naming
+  must follow I073 rather than freeze the old flavor term.
+- [I077](I077-eval-informed-equivalence-pins.md) — awaits I072's verified
+  implementation and must still define how eval evidence informs, but never
+  silently replaces, owner pin ratification.
 
 ## Out of scope
 
