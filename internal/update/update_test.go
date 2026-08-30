@@ -11,6 +11,171 @@ import (
 	"github.com/russellpope/spine/internal/tmpl"
 )
 
+func forceFiles(t *testing.T, opts *Options, paths ...string) {
+	t.Helper()
+	opts.ForceFiles = paths
+}
+
+func TestUpdateForceFileRejectsInvalidAuthorityBeforePolicyOrWrite(t *testing.T) {
+	tests := []struct {
+		name  string
+		paths []string
+		want  string
+	}{
+		{name: "empty", paths: []string{""}, want: `update: --force-file "" must be repository-relative and must not contain ".."`},
+		{name: "absolute", paths: []string{"/WORKFLOW.md"}, want: `update: --force-file "/WORKFLOW.md" must be repository-relative and must not contain ".."`},
+		{name: "raw traversal", paths: []string{"docs/../WORKFLOW.md"}, want: `update: --force-file "docs/../WORKFLOW.md" must be repository-relative and must not contain ".."`},
+		{name: "normalized duplicate", paths: []string{"./WORKFLOW.md", "WORKFLOW.md"}, want: `update: duplicate --force-file "WORKFLOW.md"`},
+		{name: "unknown unmanaged", paths: []string{"README.md"}, want: `update: --force-file "README.md" must name a managed file in this update plan`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := scaffold.Init(dir, "go-service", "demo"); err != nil {
+				t.Fatal(err)
+			}
+			before := readFile(t, filepath.Join(dir, "WORKFLOW.md"))
+			callback := false
+			writerCalled := false
+			previousWriter := writeFileAtomic
+			writeFileAtomic = func(string, []byte) error {
+				writerCalled = true
+				return nil
+			}
+			t.Cleanup(func() { writeFileAtomic = previousWriter })
+			opts := Options{Dir: dir, Write: true, BeforeWrite: func([]GateConfigAdvisory) { callback = true }}
+			forceFiles(t, &opts, tt.paths...)
+			reports, err := Run(opts)
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+			if reports != nil {
+				t.Fatalf("rejected authority returned reports: %#v", reports)
+			}
+			if callback {
+				t.Fatal("rejected authority reached the write callback")
+			}
+			if writerCalled {
+				t.Fatal("rejected authority reached the atomic writer")
+			}
+			if got := readFile(t, filepath.Join(dir, "WORKFLOW.md")); got != before {
+				t.Fatal("rejected authority changed WORKFLOW.md")
+			}
+		})
+	}
+}
+
+func TestUpdateForceFileRejectsPathsOutsideThisPlan(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile string
+		paths   []string
+	}{
+		{name: "profile not owned", profile: "knowledge", paths: []string{"docs/issues/README.md"}},
+		{name: "maipipe not planned", profile: "go-service", paths: []string{MaipipeFile}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := scaffold.Init(dir, tt.profile, "demo"); err != nil {
+				t.Fatal(err)
+			}
+			writerCalled := false
+			previousWriter := writeFileAtomic
+			writeFileAtomic = func(string, []byte) error {
+				writerCalled = true
+				return nil
+			}
+			t.Cleanup(func() { writeFileAtomic = previousWriter })
+			opts := Options{Dir: dir, Write: true}
+			forceFiles(t, &opts, tt.paths...)
+			reports, err := Run(opts)
+			want := `update: --force-file "` + tt.paths[0] + `" must name a managed file in this update plan`
+			if err == nil || err.Error() != want {
+				t.Fatalf("error = %v, want %q", err, want)
+			}
+			if reports != nil {
+				t.Fatalf("rejected plan membership returned reports: %#v", reports)
+			}
+			if writerCalled {
+				t.Fatal("rejected plan membership reached the atomic writer")
+			}
+		})
+	}
+}
+
+func TestUpdateForceFileAuthorizesOnlyItsExactManagedReport(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold.Init(dir, "go-service", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	wfPath := filepath.Join(dir, "WORKFLOW.md")
+	siblingPath := filepath.Join(dir, "docs", "issues", "README.md")
+	if err := os.WriteFile(wfPath, append([]byte(readFile(t, wfPath)), []byte("custom_rule: keep\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	beforeSibling := readFile(t, siblingPath)
+	if err := os.WriteFile(siblingPath, append([]byte(beforeSibling), []byte("local issue convention\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A clean member is valid and produces no artificial pending report.
+	clean := Options{Dir: t.TempDir()}
+	if _, err := scaffold.Init(clean.Dir, "go-service", "clean"); err != nil {
+		t.Fatal(err)
+	}
+	forceFiles(t, &clean, "./WORKFLOW.md")
+	cleanReports, err := Run(clean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report(t, cleanReports, "WORKFLOW.md"); got.State != UpToDate {
+		t.Fatalf("selected clean member state = %v, want UpToDate", got.State)
+	}
+
+	opts := Options{Dir: dir, Write: true}
+	forceFiles(t, &opts, "./WORKFLOW.md")
+	reports, err := Run(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report(t, reports, "WORKFLOW.md"); got.State != Pending {
+		t.Fatalf("selected WORKFLOW.md state = %v, want Pending", got.State)
+	}
+	if got := report(t, reports, "docs/issues/README.md"); got.State != SkippedUnrecognized {
+		t.Fatalf("unselected sibling state = %v, want SkippedUnrecognized", got.State)
+	}
+	if got := readFile(t, siblingPath); got != beforeSibling+"local issue convention\n" {
+		t.Fatal("unselected sibling changed under scoped authority")
+	}
+	if got := readFile(t, wfPath); strings.Contains(got, "custom_rule") {
+		t.Fatal("selected scoped report was not regenerated")
+	}
+}
+
+func TestUpdateRejectsMixedGlobalAndScopedForceBeforePlanning(t *testing.T) {
+	opts := Options{Dir: filepath.Join(t.TempDir(), "missing"), Force: true}
+	forceFiles(t, &opts, "WORKFLOW.md")
+	writerCalled := false
+	previousWriter := writeFileAtomic
+	writeFileAtomic = func(string, []byte) error {
+		writerCalled = true
+		return nil
+	}
+	t.Cleanup(func() { writeFileAtomic = previousWriter })
+	reports, err := Run(opts)
+	want := "update: --force cannot be combined with --force-file; choose one overwrite authority"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+	if reports != nil {
+		t.Fatalf("mixed authority returned reports: %#v", reports)
+	}
+	if writerCalled {
+		t.Fatal("mixed authority reached the atomic writer")
+	}
+}
+
 // I123: reports are a real pre-write seam. The callback must see the fully
 // preflighted plan before its first atomic write; moving it after the write
 // would leave a caller unable to present advance configuration advice.

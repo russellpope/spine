@@ -79,9 +79,13 @@ type FileReport struct {
 // defaults (project name = AdoptName, else the dir basename) instead of
 // being a hard error. Set only by spine adopt.
 type Options struct {
-	Dir          string
-	Write        bool
-	Force        bool
+	Dir   string
+	Write bool
+	Force bool
+	// ForceFiles grants overwrite authority to exactly the managed paths in
+	// this update plan. Values arrive from the CLI unnormalized so Run can
+	// reject ambiguous traversal and duplicate spellings before writing.
+	ForceFiles   []string
 	AdoptProfile string
 	AdoptName    string
 	// BeforeWrite receives the fully preflighted gate configuration advice
@@ -89,6 +93,8 @@ type Options struct {
 	// lets callers present the same advice for dry-run and write execution.
 	BeforeWrite func([]GateConfigAdvisory)
 }
+
+var writeFileAtomic = fsutil.WriteFileAtomic
 
 const (
 	markerBegin = "<!-- spine:begin"
@@ -117,6 +123,13 @@ var simpleFiles = []struct {
 func Run(opts Options) ([]FileReport, error) {
 	if opts.Dir == "" {
 		opts.Dir = "."
+	}
+	if opts.Force && len(opts.ForceFiles) > 0 {
+		return nil, fmt.Errorf("update: --force cannot be combined with --force-file; choose one overwrite authority")
+	}
+	selected, err := normalizeForceFiles(opts.ForceFiles)
+	if err != nil {
+		return nil, err
 	}
 	wf, vals, gen, err := planWorkflow(opts)
 	if err != nil {
@@ -179,6 +192,9 @@ func Run(opts Options) ([]FileReport, error) {
 	if ok {
 		reports = append(reports, mp)
 	}
+	if err := validateForceFileMembership(opts.ForceFiles, reports); err != nil {
+		return nil, err
+	}
 	// policy: unrecognized edits skip the file unless --force; files with no
 	// regenerable content (nil newContent) stay skipped regardless. The one
 	// exception is legacyPreserve (docs/adr/README.md, ADR 0009): a
@@ -188,13 +204,14 @@ func Run(opts Options) ([]FileReport, error) {
 	for i := range reports {
 		r := &reports[i]
 		if len(r.Unrecognized) > 0 {
-			if legacyPreserve[r.Path] && !opts.Force {
+			authorized := opts.Force || selected[r.Path]
+			if legacyPreserve[r.Path] && !authorized {
 				r.State = UpToDate
 				r.Preserved = true
 				r.Diff = ""
 				continue
 			}
-			if opts.Force && r.newContent != "" {
+			if authorized && r.newContent != "" {
 				r.State = Pending
 			} else {
 				r.State = SkippedUnrecognized
@@ -260,12 +277,54 @@ func Run(opts Options) ([]FileReport, error) {
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				return reports, err
 			}
-			if err := fsutil.WriteFileAtomic(dst, []byte(r.newContent)); err != nil {
+			if err := writeFileAtomic(dst, []byte(r.newContent)); err != nil {
 				return reports, err
 			}
 		}
 	}
 	return reports, nil
+}
+
+// normalizeForceFiles rejects unsafe raw spellings before Clean can conceal
+// them, then returns the exact normalized repository-relative authority set.
+func normalizeForceFiles(rawPaths []string) (map[string]bool, error) {
+	selected := make(map[string]bool, len(rawPaths))
+	for _, raw := range rawPaths {
+		if raw == "" || filepath.IsAbs(raw) || hasRawParentComponent(raw) {
+			return nil, fmt.Errorf("update: --force-file %q must be repository-relative and must not contain \"..\"", raw)
+		}
+		path := filepath.Clean(raw)
+		if selected[path] {
+			return nil, fmt.Errorf("update: duplicate --force-file %q", path)
+		}
+		selected[path] = true
+	}
+	return selected, nil
+}
+
+func hasRawParentComponent(path string) bool {
+	for _, component := range strings.Split(path, string(filepath.Separator)) {
+		if component == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// validateForceFileMembership makes scoped authority relative to this exact
+// run's plan, rather than to every path a template could theoretically own.
+func validateForceFileMembership(rawPaths []string, reports []FileReport) error {
+	managed := make(map[string]bool, len(reports))
+	for _, r := range reports {
+		managed[r.Path] = true
+	}
+	for _, raw := range rawPaths {
+		path := filepath.Clean(raw)
+		if !managed[path] {
+			return fmt.Errorf("update: --force-file %q must name a managed file in this update plan", path)
+		}
+	}
+	return nil
 }
 
 func planWorkflow(opts Options) (FileReport, tmpl.Values, string, error) {
