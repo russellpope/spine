@@ -862,6 +862,23 @@ func TestActiveIDMatchesUsesByteEquality(t *testing.T) {
 	}
 }
 
+func TestValidateHostPinForLaunchPreservesAuditInvariant(t *testing.T) {
+	if err := ValidateHostPinForLaunch("codex.primary", "gpt-5.6-sol", "gpt-5.6-sol"); err != nil {
+		t.Fatalf("byte-identical host pin: %v", err)
+	}
+	err := ValidateHostPinForLaunch("codex.primary", "gpt-5.6-sol", "bespoke-host-safe")
+	if err == nil {
+		t.Fatal("divergent host pin validated before I074")
+	}
+	if !strings.Contains(err.Error(), "not auditable until I074") || !strings.Contains(err.Error(), `"bespoke-host-safe"`) {
+		t.Fatalf("divergent host pin error = %q, want quoted pin and I074 gate", err)
+	}
+	var refusal *LaunchRefusal
+	if errors.As(err, &refusal) {
+		t.Fatalf("divergent host pin error = %#v, want exit-2 configuration error seam", refusal)
+	}
+}
+
 func TestParseLaunchRoutingRejectsGlobalAmbiguity(t *testing.T) {
 	cases := []struct {
 		name, content string

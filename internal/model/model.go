@@ -530,6 +530,22 @@ func ActiveIDMatches(activeID, candidate string) bool {
 	return activeID == candidate
 }
 
+// ValidateHostPinForLaunch is the I072 integration seam that preserves
+// I051's same-policy validation-to-audit invariant. Until I074 teaches audit
+// to recognize host-conformant active IDs, controlled launch validation may
+// accept only a host pin whose model ID is byte-identical to the repository
+// active ID. This function parses no host configuration and applies no host
+// precedence itself.
+func ValidateHostPinForLaunch(key, repositoryActiveID, hostPinnedID string) error {
+	if ActiveIDMatches(repositoryActiveID, hostPinnedID) {
+		return nil
+	}
+	return fmt.Errorf(
+		"%s host pin %q differs from repository active ID %q and is not auditable until I074",
+		key, hostPinnedID, repositoryActiveID,
+	)
+}
+
 type launchSnapshot struct {
 	rows          map[string][]string
 	malformedRows []string
