@@ -82,9 +82,13 @@ A battery result must carry:
 - **No pass threshold.** No submission fails on kill rate; low rates drive
   remediation by judgment, not by gate. This is a deliberate decision — see the
   research doc's *Grill outcomes*, item 2.
-- **Presence is required by the `/model-eval` skill's process, not by tooling.**
-  There is no `spine doctor` check for this field, and none is planned unless a
-  threshold is ever adopted.
+- **Presence is required by the `/model-eval` skill's process, not by ordinary
+  tooling.** I077 adds a narrow exception for a run explicitly cited as host-pin
+  evidence: its front matter must state `battery_version: 1`, a matching
+  `battery_verdict: pass` or `fail`, and the exact ten-key comma-separated
+  `battery_results` matrix. Doctor reports a cited missing, malformed, or failing
+  record as advisory D17 evidence only. It does not impose a threshold, block a
+  pin, or change ordinary eval handling.
 - **A mutation that breaks the build is not a kill.** It is an invalid probe,
   excluded from the denominator, and must be disclosed in the record (a
   `BUILD-ERR` row), not silently dropped.
