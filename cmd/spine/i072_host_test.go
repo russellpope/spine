@@ -53,6 +53,47 @@ func TestModelHostConfigFailureWritesNoStandardOutput(t *testing.T) {
 	}
 }
 
+func TestModelAlternateJSONKeepsLegacyBytesWithoutHostTrail(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "routing-host.json")
+	validPath := writeModelHostConfig(t, `{
+  "schema_version": 1, "host_id": "alternate-host", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"gpt-5.6-sol": {"efforts": ["xhigh"]}}}
+  }, "pins": {}}
+`)
+	args := []string{"--alternate", "--json", "pi", "routine"}
+	code, legacy, errs := runModelWithHostPath(t, missingPath, args...)
+	if code != 0 || errs != "" {
+		t.Fatalf("missing config: code=%d stdout=%q stderr=%q", code, legacy, errs)
+	}
+	wantLegacy := "{\"flavor\":\"pi\",\"tier\":\"routine\",\"id\":\"qwen3.8-27b-q8_0\",\"effort\":\"medium\",\"aliases\":[\"qwen3.8\",\"qwen\"],\"alternate\":{\"id\":\"qwen3.8-27b-q8_0\",\"effort\":\"xhigh\"},\"provenance\":\"default\"}\n"
+	if legacy != wantLegacy {
+		t.Fatalf("missing config alternate JSON = %q, want legacy bytes %q", legacy, wantLegacy)
+	}
+	for _, field := range []string{`"requested"`, `"host"`, `"pin"`} {
+		if strings.Contains(legacy, field) {
+			t.Fatalf("missing config JSON contains host trail %s: %q", field, legacy)
+		}
+	}
+	code, got, errs := runModelWithHostPath(t, validPath, args...)
+	if code != 0 || errs != "" {
+		t.Fatalf("valid config: code=%d stdout=%q stderr=%q", code, got, errs)
+	}
+	if got != legacy {
+		t.Fatalf("valid config alternate JSON = %q, want legacy bytes %q", got, legacy)
+	}
+	for _, args := range [][]string{
+		{"--alternate", "pi", "routine"},
+		{"--alternate", "--effort", "pi", "routine"},
+		{"--alternate", "--json", "pi", "routine"},
+	} {
+		malformedPath := writeModelHostConfig(t, `{"schema_version":`)
+		code, out, errs := runModelWithHostPath(t, malformedPath, args...)
+		if code != 2 || out != "" || !strings.Contains(errs, "host routing configuration") {
+			t.Fatalf("malformed %v: code=%d stdout=%q stderr=%q", args, code, out, errs)
+		}
+	}
+}
+
 func TestModelValidateHostDivergenceRefusesBeforeExpect(t *testing.T) {
 	repo := writeModelHostWorkflow(t, "template_version: 13\nmodel_routing:\n  codex.primary: repository-safe\n")
 	path := writeModelHostConfig(t, `{

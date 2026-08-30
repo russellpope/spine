@@ -69,6 +69,9 @@ func TestLoadRejectsClosedSchemaAndDuplicateRules(t *testing.T) {
 		name, content string
 	}{
 		{"unknown root", strings.Replace(valid, `"host_id": "host",`, `"host_id": "host", "token": "secret",`, 1)},
+		{"forbidden base URL", strings.Replace(valid, `"host_id": "host",`, `"host_id": "host", "base_url": "https://example.test",`, 1)},
+		{"forbidden auth header", strings.Replace(valid, `"host_id": "host",`, `"host_id": "host", "auth_header": "Bearer secret",`, 1)},
+		{"forbidden model overrides", strings.Replace(valid, `"host_id": "host",`, `"host_id": "host", "modelOverrides": {},`, 1)},
 		{"unknown harness", strings.Replace(valid, `"available": true,`, `"available": true, "env": {},`, 1)},
 		{"unknown route", strings.Replace(valid, `"efforts": ["high"]`, `"efforts": ["high"], "args": []`, 1)},
 		{"unknown pin", strings.Replace(valid, `"model": "m",`, `"model": "m", "credentials": "x",`, 1)},

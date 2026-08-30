@@ -1661,7 +1661,7 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 		if entry.Alternate != nil {
 			out.Alternate = &altJSON{ID: entry.Alternate.ID, Effort: entry.Alternate.Effort}
 		}
-		if resolution.Host.Status != model.HostUnconfigured {
+		if !*alternate && resolution.Host.Status != model.HostUnconfigured {
 			requested := resolution.Requested
 			out.Requested = &requestedJSON{ID: requested.ID, Effort: requested.Effort, Provenance: string(requested.Provenance)}
 			out.Host = &resolution.Host

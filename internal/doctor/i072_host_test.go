@@ -62,6 +62,48 @@ func TestHostRoutingCheckReportsInvalidConfigAsD16Error(t *testing.T) {
 	}
 }
 
+func TestHostRoutingCheckUsesLexicalAvailableHarnessOrderWithParallelExplicitPaths(t *testing.T) {
+	for _, hostID := range []string{"alpha", "beta"} {
+		hostID := hostID
+		t.Run(hostID, func(t *testing.T) {
+			t.Parallel()
+			repo := t.TempDir()
+			if err := os.WriteFile(filepath.Join(repo, "WORKFLOW.md"), []byte("model_routing:\n  claude.primary: unavailable-claude\n  codex.primary: unavailable-codex\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			path := writeDoctorHostConfig(t, `{
+  "schema_version": 1, "host_id": "`+hostID+`", "harnesses": {
+    "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:codex", "models": {"known-codex": {"efforts": ["high"]}}},
+    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:claude", "models": {"known-claude": {"efforts": ["high"]}}}
+  }, "pins": {}}
+`)
+			var lookedUp []string
+			findings := hostRoutingCheck(repo, path, func(name string) (string, error) {
+				lookedUp = append(lookedUp, name)
+				return "/bin/" + name, nil
+			})
+			if got, want := strings.Join(lookedUp, ","), "claude,codex"; got != want {
+				t.Fatalf("executable lookup order = %q, want %q", got, want)
+			}
+			if len(findings) != 8 {
+				t.Fatalf("D16 findings = %#v, want eight unreachable preferences", findings)
+			}
+			wantKeys := []string{
+				"claude.primary", "claude.routine", "claude.mechanical", "claude.fallback",
+				"codex.primary", "codex.routine", "codex.mechanical", "codex.fallback",
+			}
+			for i, finding := range findings {
+				if finding.Path != path {
+					t.Fatalf("finding %d path = %q, want explicit path %q", i, finding.Path, path)
+				}
+				if !strings.Contains(finding.Message, wantKeys[i]) {
+					t.Fatalf("finding %d = %#v, want lexical key %q", i, finding, wantKeys[i])
+				}
+			}
+		})
+	}
+}
+
 func writeDoctorHostConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "routing-host.json")

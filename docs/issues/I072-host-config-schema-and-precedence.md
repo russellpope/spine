@@ -35,3 +35,21 @@ harness, an unreachable selected primary route, and byte-identical no-config
 alternate output. Its exact-SHA clean-worktree evidence includes focused/full/
 race Go suites, vet, build, compiled alternate plus ordinary/effort/validate
 matrix, both go@1 lanes, and `maipipe run full --wait` (`run HEAD #11`, passed).
+
+## Correction 2 scope (2026-08-30)
+
+Status remains **open**. Plan correction `4e2ce60`
+(`docs(I072): ratify host config validation boundary`) makes the evidence-backed
+`hostconfig.Load(path, flavors, lookup)` interface binding and records that
+`Load` is the complete exported validation boundary. It does not add an
+exported `Validate` seam or remove any schema, routing, audit, or validation
+requirement.
+
+The correction adds regressions for legacy no-config and valid-config
+`model --alternate --json` bytes with no requested/host/pin trail, while a
+malformed present config remains an exit-2/no-stdout failure. It also adds the
+missing parser attacks for `base_url`, `modelOverrides`, and `auth_header`,
+retains every prior prohibited-field case, and covers two available doctor
+harnesses in lexical order with parallel explicit-path seams. Required fresh
+primary requirements review, independent verification, both go@1 lanes, and
+exact-final-SHA maipipe evidence remain pending before this ticket can close.
