@@ -191,6 +191,9 @@ func mustLoadDefaults() table {
 }
 
 func decodeTable(raw []byte) (table, error) {
+	if err := rejectDuplicateJSONMembers(raw); err != nil {
+		return table{}, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var t table
@@ -205,6 +208,64 @@ func decodeTable(raw []byte) (table, error) {
 		return table{}, err
 	}
 	return t, nil
+}
+
+func rejectDuplicateJSONMembers(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := scanJSONValue(dec); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}
+
+func scanJSONValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		seen := map[string]struct{}{}
+		for dec.More() {
+			keyToken, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return fmt.Errorf("JSON object member name is not a string")
+			}
+			if _, duplicate := seen[key]; duplicate {
+				return fmt.Errorf("duplicate JSON member %q", key)
+			}
+			seen[key] = struct{}{}
+			if err := scanJSONValue(dec); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token()
+		return err
+	case '[':
+		for dec.More() {
+			if err := scanJSONValue(dec); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token()
+		return err
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delim)
+	}
 }
 
 // validateTable enforces the completeness Resolve depends on: every flavor

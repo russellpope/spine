@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/russellpope/spine/models"
 )
 
 func writeWorkflow(t *testing.T, content string) string {
@@ -709,6 +711,62 @@ func TestValidateTableModelValidationRejectsUnknownJSONMembers(t *testing.T) {
 	}`))
 	if err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Fatalf("decodeTable unknown policy member error = %v, want strict rejection", err)
+	}
+}
+
+func TestDecodeTableRejectsDuplicateJSONMembersRecursively(t *testing.T) {
+	raw, err := models.FS.ReadFile("defaults.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, old, replacement string
+	}{
+		{
+			name:        "root modelValidation",
+			old:         `"modelValidation": {`,
+			replacement: `"modelValidation": {}, "modelValidation": {`,
+		},
+		{
+			name:        "modelValidation idPattern",
+			old:         `"idPattern": "^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,127}$",`,
+			replacement: `"idPattern": "shadow", "idPattern": "^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,127}$",`,
+		},
+		{
+			name:        "modelValidation forbiddenTokens",
+			old:         `"forbiddenTokens": [`,
+			replacement: `"forbiddenTokens": [], "forbiddenTokens": [`,
+		},
+		{
+			name:        "pattern name",
+			old:         `{"name": "generic-selector",`,
+			replacement: `{"name": "shadow", "name": "generic-selector",`,
+		},
+		{
+			name:        "flavor member",
+			old:         `"claude": {`,
+			replacement: `"claude": {}, "claude": {`,
+		},
+		{
+			name:        "tier member",
+			old:         `"primary": {`,
+			replacement: `"primary": {}, "primary": {`,
+		},
+		{
+			name:        "entry id",
+			old:         `"id": "claude-fable-5",`,
+			replacement: `"id": "shadow", "id": "claude-fable-5",`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := strings.Replace(string(raw), tc.old, tc.replacement, 1)
+			if mutated == string(raw) {
+				t.Fatalf("mutation anchor %q was not found", tc.old)
+			}
+			if _, err := decodeTable([]byte(mutated)); err == nil || !strings.Contains(err.Error(), "duplicate JSON member") {
+				t.Fatalf("decodeTable error = %v, want recursive duplicate-member rejection", err)
+			}
+		})
 	}
 }
 
