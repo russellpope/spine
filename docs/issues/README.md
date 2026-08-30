@@ -26,6 +26,20 @@ without them — `spine audit routing` reports unannotated tickets, never judges
 
 See `WORKFLOW.md` `model_routing` for the tier→model mapping and the full dispatch contract.
 
+## Dispatch-effort declarations
+
+Every controlled dispatch records raw `harness`, `model`, and `effort` tokens:
+`harness=<raw execution vehicle> model=<exact selected ID> effort=<exact raw token>`.
+Tokens carry no ordering across harnesses. A retry is a separate declaration.
+The sole effort-deviation authorization is the exact one-line record
+`ESCALATION <ticket-id> effort <from>-><to> reason: <one line>`; its unspaced
+arrow and byte-exact ticket/from/to pair authorize only that matching
+declaration. Malformed or mismatched records authorize nothing and do not
+change routing's model-tier verdict.
+
+Routing output reports `declared-effort=-` when the transcript carried no
+declaration and `observed-effort=-` while no runtime observation exists.
+
 Optional batch-coordination fields, written by the maikanban board and the claude-team skill
 (spine owns the schema; a ticket without them is valid, and `spine doctor` warns — which, like
 every other doctor warn, sets a non-zero exit — when a value contradicts the lifecycle below):

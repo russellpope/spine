@@ -965,10 +965,11 @@ func cmdAuditRoutingWithHostPathAndDefaults(args []string, stdout, stderr io.Wri
 		wActual = max(wActual, len(dash(strings.Join(t.Actuals, ","))))
 		wVerdict = max(wVerdict, len(t.Verdict))
 	}
-	fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %-*s  %s\n", wID, "ticket", wTier, "tier", wActual, "actual", wVerdict, "verdict", "detail")
+	fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %-*s  %s  %s\n", wID, "ticket", wTier, "tier", wActual, "actual", wVerdict, "verdict", "detail", "expected-effort  declared-effort  declaration-status  observed-effort")
 	for _, t := range rep.Tickets {
-		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %-*s  %s\n",
-			wID, t.ID, wTier, dash(t.Tier), wActual, dash(strings.Join(t.Actuals, ",")), wVerdict, string(t.Verdict), t.Detail)
+		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %-*s  %s  expected-effort=%s declared-effort=%s declaration-status=%s observed-effort=%s\n",
+			wID, t.ID, wTier, dash(t.Tier), wActual, dash(strings.Join(t.Actuals, ",")), wVerdict, string(t.Verdict), t.Detail,
+			dash(t.ExpectedEffort), dash(t.DeclaredEffort), dash(t.DeclarationStatus), dash(t.ObservedEffort))
 	}
 	if len(rep.Unmatched) > 0 {
 		fmt.Fprintln(stdout, "unmatched dispatches (no ticket id or not repo-qualified; not judged):")

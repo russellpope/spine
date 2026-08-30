@@ -118,6 +118,19 @@ declares exactly one.
   declared tier annotations vs actual models in the transcript, per task
   (`spine audit routing`). Required at the verify stage: reasoned
   escalations advisory, silent descent blocking.
+- **dispatch effort declaration** (decided 2026-08-30, I075) — the exact raw
+  triple written before one controlled launch:
+  `harness=<raw execution vehicle> model=<exact selected ID> effort=<exact raw token>`.
+  It records a transport request, not a provider, gateway, or runtime result;
+  a missing recorded declaration is `declared-effort=-` and I075 always reports
+  `observed-effort=-`. Raw effort tokens have no global ordering.
+- **effort authorization** (decided 2026-08-30, I075) — one exact ledger
+  record, `ESCALATION <ticket-id> effort <from>-><to> reason: <one line>`,
+  authorizing only a declaration for that ticket whose selected target token is
+  exactly `<from>` and whose declared token is exactly `<to>`. The arrow is
+  unspaced; missing endpoints, duplicate or empty `reason:`, spaced arrows,
+  reversed pairs, and other grammar changes authorize nothing. This record is
+  declared-effort-only and never changes the model-tier routing verdict.
 - **harness** (ratified 2026-08-10, I067) — the execution vehicle that runs a
   dispatch: claude, codex, and from 2026-08-18 **pi** (the weak-local /
   open-weight driver). Replaces **flavor** as the model table's first axis;

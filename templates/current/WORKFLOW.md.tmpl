@@ -73,6 +73,34 @@ Fallback routing: proactive — security-framed work (attacker/exploit framing) 
 
 Dispatch conventions the audit depends on: every subagent dispatch carries an explicit model (never inherit), and its description contains the ticket id token (the correlation contract). Verify stage: run `spine audit routing` (add `--transcripts <dir>` when the controller session runs in a different repo than the audited one) — reasoned escalations are advisory, silent descent blocks.
 
+## Raw dispatch effort declarations
+
+Every controlled launch records the exact raw declaration before launch:
+
+    harness=<raw execution vehicle> model=<exact selected ID> effort=<exact raw token>
+
+`harness`, `model`, and `effort` are a dispatch declaration, not evidence of
+what a provider, gateway, or agent runtime used. A supplied effort token is
+validated byte-exactly against the selected harness vocabulary; no ordering or
+cross-harness comparison is implied. A retry is a new declaration and may use
+a different token only with its own exact authorization record.
+
+The exact effort authorization grammar is:
+
+    ESCALATION <ticket-id> effort <from>-><to> reason: <one line>
+
+The arrow is unspaced; `<from>` and `<to>` are non-empty raw tokens without
+spaces; `reason:` appears once with non-empty one-line text. It authorizes
+only that ticket's declaration when its selected target effort is exactly
+`<from>` and its declared effort is exactly `<to>`. A malformed, reversed,
+or different-ticket pair authorizes nothing and does not alter model-tier
+judgment.
+
+`spine audit routing` preserves its leading `ticket tier actual verdict detail`
+layout and appends declared-only fields. `declared-effort=-` means the
+transcript did not record a declaration. `observed-effort=-` is always
+unavailable at this stage; it is not runtime evidence.
+
 ## Execution modes
 
 subagent-driven is the default for planned build work. ultracode is for work whose shape demands parallel orchestration (unknown-size discovery, cross-cutting audits, N-perspective verification); opt-in is granted by the owner's ticket approval, mid-build escalation is recommend-only. inline is the rare justified exception — tightly-coupled sequential chains, verbatim pre-specified diffs, live-system/secret/interactive steps — and requires a one-line justification in the ticket.

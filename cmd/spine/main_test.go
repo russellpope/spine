@@ -1356,6 +1356,72 @@ func TestAuditRoutingEndToEnd(t *testing.T) {
 	}
 }
 
+// I075: effort evidence is additive audit disclosure. The existing model
+// verdict and its five leading fields remain the prefix; observed effort is
+// intentionally unavailable and must stay a literal dash rather than a
+// guessed provider value.
+func TestAuditRoutingAppendsDeclaredOnlyEffortFields(t *testing.T) {
+	fixture := func(parts ...string) string {
+		return filepath.Join(append([]string{"..", "..", "internal", "audit", "testdata"}, parts...)...)
+	}
+	noCodex := filepath.Join(t.TempDir(), "no-codex-sessions")
+	if err := os.Mkdir(noCodex, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errs := runCmd(t, "audit", "routing",
+		"--dir", fixture("clean", "repo"), "--transcripts", fixture("clean", "transcripts"), "--codex-sessions", noCodex)
+	if code != 0 || errs != "" {
+		t.Fatalf("model-only fixture: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	row := auditRoutingRow(t, out, "I101")
+	prefix := auditRoutingPrefix(t, row)
+	if fields := strings.Fields(prefix); len(fields) < 4 || fields[0] != "I101" || fields[1] != "routine" || fields[3] != "match" {
+		t.Fatalf("model-only leading ticket/tier/actual/verdict/detail layout changed: %q", row)
+	}
+	if !strings.HasSuffix(row, "expected-effort=- declared-effort=- declaration-status=unconfirmable observed-effort=-") {
+		t.Fatalf("model-only row must append declared-only absent values, got %q", row)
+	}
+
+	code, out, errs = runCmd(t, "audit", "routing",
+		"--dir", fixture("team", "repo"), "--transcripts", fixture("team", "transcripts"), "--codex-sessions", noCodex)
+	if code != 1 || errs != "" {
+		t.Fatalf("declared fixture: code=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	row = auditRoutingRow(t, out, "I401")
+	prefix = auditRoutingPrefix(t, row)
+	if fields := strings.Fields(prefix); len(fields) < 4 || fields[0] != "I401" || fields[1] != "routine" || fields[3] != "match" {
+		t.Fatalf("declared row leading ticket/tier/actual/verdict/detail layout changed: %q", row)
+	}
+	if !strings.HasSuffix(row, "expected-effort=medium declared-effort=medium declaration-status=target-match observed-effort=-") {
+		t.Fatalf("declared row did not expose the raw declaration without observed effort: %q", row)
+	}
+	if !strings.Contains(out, "I402") || !strings.Contains(out, "silent-descent") {
+		t.Fatalf("effort disclosure changed the existing blocking model result: %q", out)
+	}
+}
+
+func auditRoutingPrefix(t *testing.T, row string) string {
+	t.Helper()
+	const marker = " expected-effort="
+	i := strings.Index(row, marker)
+	if i == -1 {
+		t.Fatalf("audit row has no additive effort fields: %q", row)
+	}
+	return row[:i]
+}
+
+func auditRoutingRow(t *testing.T, out, ticketID string) string {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
+		if strings.HasPrefix(line, ticketID+" ") {
+			return line
+		}
+	}
+	t.Fatalf("audit output has no %s row: %q", ticketID, out)
+	return ""
+}
+
 func TestAuditRoutingDiscardedRecordIsVisibleAndNonBlocking(t *testing.T) {
 	repo := t.TempDir()
 	writeAuditFixtureRepo(t, repo, map[string]string{"I078": "primary"})
