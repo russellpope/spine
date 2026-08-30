@@ -2,7 +2,7 @@
 id: I007
 title: "`primary: session` sentinel — let the primary tier track the harness session model"
 severity: low
-status: open
+status: superseded
 affects: [I006]
 blocked-by: []
 execution-mode:
@@ -57,3 +57,16 @@ Sequencing: overlaps I006's surfaces — fold into the fleet sweep or land
 immediately after it, so the sweep isn't re-run for a template wording change.
 Do NOT land before praxis I001: that build is the acceptance exercise for the
 gen-6 contract as shipped.
+
+## Resolution
+
+Superseded by owner ruling on 2026-08-30. The omit-the-model inheritance
+proposal conflicts with fail-closed validation, host-aware final-route
+selection, and explicit per-dispatch effort evidence.
+
+Any successor must obtain a transport-attested `(model, effort)` pair before
+launch, validate it against the final host-aware route, and pass both values
+explicitly to the child. If a transport cannot attest the pair before launch,
+that dispatch form fails closed. I051 owns validated launch IDs, I072 owns host
+route selection, and I075 owns effort declaration; none may treat `session`
+as a model ID or infer a child model after the fact.
