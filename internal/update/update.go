@@ -491,7 +491,11 @@ func markerLocalEdits(old, currentBlock, tmplName string, vals tmpl.Values) []st
 	marker := old[begin : begin+lineEnd]
 	versionText := strings.TrimSuffix(strings.TrimPrefix(marker, "<!-- spine:begin v"), " -->")
 	version, err := strconv.Atoi(versionText)
-	if err != nil || version < 1 || version > tmpl.Version() {
+	// The normal predecessor check is generation 12. Generation 11 is the
+	// only older marker block with audited evidence for a direct-to-13 update;
+	// older generations still replace wholesale so their historical prose is
+	// never mistaken for a local edit.
+	if err != nil || (version != tmpl.Version()-1 && version != 11) {
 		return nil
 	}
 	oldVals := vals
