@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHostRoutingCheckCoversEveryTierOfEveryAvailableHarness(t *testing.T) {
@@ -224,6 +226,98 @@ func TestHostRoutingCheckUsesLexicalAvailableHarnessOrderWithParallelExplicitPat
 				}
 			}
 		})
+	}
+}
+
+func TestHostRoutingCheckD17MapsSanitizedPinEvidenceAfterD16(t *testing.T) {
+	today := time.Now().UTC().Format("2006-01-02")
+	evalDir := today + "-routing-check"
+	ref := "eval:" + evalDir + "/runs/gpt-5-6-sol.md"
+	runPath := "docs/evals/" + evalDir + "/runs/gpt-5-6-sol.md"
+	evalPath := "docs/evals/" + evalDir + "/eval.md"
+	for _, tc := range []struct {
+		name, ref, run, wantPath, wantMessage string
+		write                                 bool
+	}{
+		{"no reference", "owner:I068", "", "routing-host.json", "pin codex.primary has no eligible eval reference", false},
+		{"bad reference", "eval:not-a-reference", "", "routing-host.json", "pin codex.primary has a malformed eval reference", false},
+		{"missing", ref, "", runPath, "pin codex.primary references missing eval evidence", false},
+		{"malformed", ref, "not front matter\n", runPath, "pin codex.primary references malformed eval evidence", true},
+		{"stale", ref, d17Run("2020-01-01", "gpt-5.6-sol", d17PassingBattery()), runPath, "pin codex.primary references stale eval evidence", true},
+		{"mismatch", ref, d17Run(today, "gpt-5.6-sol-preview", d17PassingBattery()), runPath, "pin codex.primary eval model does not exactly match pinned model", true},
+		{"no battery", ref, d17Run(today, "gpt-5.6-sol", ""), runPath, "pin codex.primary eval evidence has no battery record", true},
+		{"failed battery", ref, d17Run(today, "gpt-5.6-sol", d17FailedBattery()), runPath, "pin codex.primary eval battery verdict is fail", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			if tc.write {
+				d17Write(t, filepath.Join(repo, evalPath), "---\ntitle: demo\ncreated: "+today+"\nprompt: prompt.md\nrubric: rubric.md\n---\n")
+				d17Write(t, filepath.Join(repo, runPath), tc.run)
+			}
+			path := d17HostConfig(t, tc.ref)
+			findings := hostRoutingCheck(repo, path, func(string) (string, error) { return "/bin/codex", nil })
+			var d16, d17 []Finding
+			for _, finding := range findings {
+				if finding.ID == "D16" {
+					d16 = append(d16, finding)
+				}
+				if finding.ID == "D17" {
+					d17 = append(d17, finding)
+				}
+			}
+			if len(d17) != 1 || !reflect.DeepEqual(d17[0], Finding{"D17", "warn", tc.wantPath, tc.wantMessage}) {
+				t.Fatalf("D17 findings = %#v", d17)
+			}
+			for i, finding := range findings {
+				if finding.ID == "D17" && i < len(d16) {
+					t.Fatalf("D17 before D16: %#v", findings)
+				}
+				if strings.Contains(finding.Message, tc.ref) || strings.Contains(finding.Message, "gpt-5.6-sol-preview") {
+					t.Fatalf("finding leaked evidence value: %#v", finding)
+				}
+			}
+		})
+	}
+}
+
+func TestHostRoutingCheckD17LeavesHealthyEvidenceQuiet(t *testing.T) {
+	today := time.Now().UTC().Format("2006-01-02")
+	repo := t.TempDir()
+	evalDir := today + "-routing-check"
+	d17Write(t, filepath.Join(repo, "docs", "evals", evalDir, "eval.md"), "---\ntitle: demo\ncreated: "+today+"\nprompt: prompt.md\nrubric: rubric.md\n---\n")
+	d17Write(t, filepath.Join(repo, "docs", "evals", evalDir, "runs", "gpt-5-6-sol.md"), d17Run(today, "gpt-5.6-sol", d17PassingBattery()))
+	findings := hostRoutingCheck(repo, d17HostConfig(t, "eval:"+evalDir+"/runs/gpt-5-6-sol.md"), func(string) (string, error) { return "/bin/codex", nil })
+	for _, finding := range findings {
+		if finding.ID == "D17" {
+			t.Fatalf("healthy evidence produced D17: %#v", findings)
+		}
+	}
+}
+
+func d17HostConfig(t *testing.T, ref string) string {
+	t.Helper()
+	return writeDoctorHostConfig(t, `{"schema_version":1,"host_id":"doctor-host","harnesses":{"codex":{"available":true,"executable":"codex","launch_contract_ref":"fleet:codex","models":{"gpt-5.6-sol":{"efforts":["xhigh"]}}}},"pins":{"codex.primary":{"model":"gpt-5.6-sol","effort":"xhigh","evidence_refs":[`+strconv.Quote(ref)+`]}}}`)
+}
+
+func d17Run(created, model, battery string) string {
+	return "---\nname: gpt-5-6-sol\ncreated: " + created + "\nmodel: " + model + "\nstage: raw\nscore: 1\n" + battery + "---\n"
+}
+
+func d17PassingBattery() string {
+	return "battery_version: 1\nbattery_verdict: pass\nbattery_results: invocation=KILLED,wiring=KILLED,flag-honoured=KILLED,column-presence=KILLED,column-order=KILLED,ordering=KILLED,units-labels=KILLED,security-default=REPORT-ONLY,lifecycle=REPORT-ONLY,error-path-behaviour=KILLED\n"
+}
+
+func d17FailedBattery() string {
+	return strings.Replace(strings.Replace(d17PassingBattery(), "battery_verdict: pass", "battery_verdict: fail", 1), "invocation=KILLED", "invocation=SURVIVED", 1)
+}
+
+func d17Write(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
