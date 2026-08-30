@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Record is one valid approved-untested acceptance criterion.
@@ -81,18 +82,40 @@ func ScanTicket(repoRoot, ticketPath string) Summary {
 	if err != nil {
 		return Summary{ScanErrors: []ScanError{{Path: rel, Err: err}}}
 	}
-	defer f.Close()
-	return scanReader(absRoot, rel, f)
+	out := scanReader(absRoot, rel, f)
+	if err := f.Close(); err != nil {
+		out.ScanErrors = append(out.ScanErrors, ScanError{Path: rel, Err: err})
+	}
+	return out
 }
 
 func scanReader(repoRoot, ticketPath string, source io.Reader) Summary {
+	out, _, _ := scanReaderWithIdentity(repoRoot, ticketPath, source)
+	return out
+}
+
+func scanReaderWithIdentity(repoRoot, ticketPath string, source io.Reader) (Summary, string, bool) {
 	var out Summary
 	inAcceptance := false
+	inFrontmatter := false
+	var ticketID string
+	identityKnown := false
 	reader := bufio.NewReader(source)
 	for lineNo := 1; ; lineNo++ {
 		line, readErr := reader.ReadString('\n')
 		line = strings.TrimSuffix(line, "\n")
 		line = strings.TrimSuffix(line, "\r")
+		trimmed := strings.TrimSpace(line)
+		if lineNo == 1 && trimmed == "---" {
+			inFrontmatter = true
+		} else if inFrontmatter {
+			if trimmed == "---" {
+				inFrontmatter = false
+			} else if strings.HasPrefix(line, "id:") {
+				ticketID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+				identityKnown = ticketID != ""
+			}
+		}
 		if line != "" {
 			inAcceptance = scanLine(repoRoot, ticketPath, lineNo, line, inAcceptance, &out)
 		}
@@ -103,7 +126,7 @@ func scanReader(repoRoot, ticketPath string, source io.Reader) Summary {
 			break
 		}
 	}
-	return out
+	return out, ticketID, identityKnown
 }
 
 func scanLine(repoRoot, ticketPath string, lineNo int, line string, inAcceptance bool, out *Summary) bool {
@@ -150,6 +173,12 @@ func ScanTicketIDs(repoRoot string, ids []string) Summary {
 }
 
 func scanTickets(repoRoot string, wanted map[string]bool) Summary {
+	return scanTicketsWithOpen(repoRoot, wanted, func(name string) (io.ReadCloser, error) {
+		return os.Open(name)
+	})
+}
+
+func scanTicketsWithOpen(repoRoot string, wanted map[string]bool, openFile func(string) (io.ReadCloser, error)) Summary {
 	absRoot, err := filepath.Abs(repoRoot)
 	if err != nil {
 		return Summary{ScanErrors: []ScanError{{Path: filepath.ToSlash(repoRoot), Err: err}}}
@@ -157,6 +186,9 @@ func scanTickets(repoRoot string, wanted map[string]bool) Summary {
 	issuesDir := filepath.Join(absRoot, "docs", "issues")
 	entries, err := os.ReadDir(issuesDir)
 	if err != nil {
+		if wanted != nil {
+			return Summary{}
+		}
 		if !os.IsNotExist(err) {
 			return Summary{ScanErrors: []ScanError{{Path: "docs/issues", Err: err}}}
 		}
@@ -169,55 +201,64 @@ func scanTickets(repoRoot string, wanted map[string]bool) Summary {
 			continue
 		}
 		p := filepath.Join(issuesDir, name)
-		if wanted != nil {
-			raw, err := os.ReadFile(p)
-			if err != nil {
-				paths = append(paths, p)
-				continue
-			}
-			if !wanted[frontmatterID(string(raw))] {
-				continue
-			}
-		}
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
 	var out Summary
 	for _, p := range paths {
-		part := ScanTicket(absRoot, p)
-		out.Records = append(out.Records, part.Records...)
-		out.Problems = append(out.Problems, part.Problems...)
-		out.ScanErrors = append(out.ScanErrors, part.ScanErrors...)
+		rel, err := filepath.Rel(absRoot, p)
+		if err != nil {
+			if wanted == nil {
+				out.ScanErrors = append(out.ScanErrors, ScanError{Path: filepath.ToSlash(p), Err: err})
+			}
+			continue
+		}
+		rel = filepath.ToSlash(rel)
+		f, err := openFile(p)
+		if err != nil {
+			if wanted == nil {
+				out.ScanErrors = append(out.ScanErrors, ScanError{Path: rel, Err: err})
+			}
+			continue
+		}
+		part, ticketID, identityKnown := scanReaderWithIdentity(absRoot, rel, f)
+		if err := f.Close(); err != nil {
+			part.ScanErrors = append(part.ScanErrors, ScanError{Path: rel, Err: err})
+		}
+		if wanted != nil && (!identityKnown || !wanted[ticketID]) {
+			continue
+		}
+		appendSummary(&out, part)
 	}
 	return out
 }
 
-func frontmatterID(content string) string {
-	lines := strings.Split(content, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return ""
-	}
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			break
-		}
-		if strings.HasPrefix(line, "id:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "id:"))
-		}
-	}
-	return ""
+func appendSummary(dst *Summary, src Summary) {
+	dst.Records = append(dst.Records, src.Records...)
+	dst.Problems = append(dst.Problems, src.Problems...)
+	dst.ScanErrors = append(dst.ScanErrors, src.ScanErrors...)
 }
 
 func parseLine(repoRoot, ticketPath string, lineNo int, line string, inAcceptance bool) (Record, []string) {
 	record := Record{Path: ticketPath, Line: lineNo}
 	var failed []string
-	const marker = "APPROVED-UNTESTED"
+	const (
+		marker           = "APPROVED-UNTESTED"
+		structuralMarker = " -- APPROVED-UNTESTED "
+	)
 	markerAt := strings.Index(line, marker)
+	structuralCount := strings.Count(line, structuralMarker)
+	if structuralAt := strings.Index(line, structuralMarker); structuralAt >= 0 {
+		markerAt = structuralAt + len(" -- ")
+	}
 	beforeMarker := line[:markerAt]
 	afterMarker := line[markerAt+len(marker):]
 
 	if !strings.HasPrefix(line, "- [ ] ") {
 		failed = append(failed, "record must start at column 0 with the exact - [ ] prefix")
+	}
+	if structuralCount > 1 {
+		failed = append(failed, "record must contain exactly one ` -- APPROVED-UNTESTED ` structural marker")
 	}
 	criterionText := beforeMarker
 	if checkboxEnd := strings.Index(criterionText, "]"); checkboxEnd >= 0 {
@@ -264,10 +305,15 @@ func parseLine(repoRoot, ticketPath string, lineNo int, line string, inAcceptanc
 	}
 	if record.Approver == "" {
 		failed = append(failed, "approver is required")
+	} else if strings.IndexFunc(record.Approver, unicode.IsSpace) >= 0 {
+		failed = append(failed, "approver must be a whitespace-free token")
 	}
 	if record.Reference == "" {
 		failed = append(failed, "reference is required")
 	} else {
+		if strings.IndexFunc(record.Reference, unicode.IsSpace) >= 0 {
+			failed = append(failed, "reference must be a whitespace-free token")
+		}
 		failed = append(failed, validateReference(repoRoot, record.Reference)...)
 	}
 	if record.Reason == "" {

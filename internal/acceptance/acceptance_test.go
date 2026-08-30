@@ -54,6 +54,68 @@ func TestScanTicketAggregatesMissingFieldsPerCandidate(t *testing.T) {
 	}
 }
 
+func TestScanTicketRejectsWhitespaceInApproverAndReferenceToken(t *testing.T) {
+	dir := ticketRepo(t)
+	for _, rel := range []string{
+		"docs/reviews/2026-08-29-ok.md",
+		"docs/review notes/2026-08-29-ok.md",
+		"docs/review\tnotes/2026-08-29-ok.md",
+		"docs/review\u2003notes/2026-08-29-ok.md",
+	} {
+		write(t, dir, rel, "# Approval\n")
+	}
+	cases := []struct {
+		name string
+		line string
+		want []string
+	}{
+		{"approver ASCII space", "- [ ] C -- APPROVED-UNTESTED 2026-08-29 by owner team ref: docs/reviews/2026-08-29-ok.md#a reason: why", []string{"approver must be a whitespace-free token"}},
+		{"approver tab", "- [ ] C -- APPROVED-UNTESTED 2026-08-29 by owner\tteam ref: docs/reviews/2026-08-29-ok.md#a reason: why", []string{"approver must be a whitespace-free token"}},
+		{"approver Unicode whitespace", "- [ ] C -- APPROVED-UNTESTED 2026-08-29 by owner\u2003team ref: docs/reviews/2026-08-29-ok.md#a reason: why", []string{"approver must be a whitespace-free token"}},
+		{"reference base ASCII space", "- [ ] C -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/review notes/2026-08-29-ok.md#a reason: why", []string{"reference must be a whitespace-free token"}},
+		{"reference base tab", "- [ ] C -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/review\tnotes/2026-08-29-ok.md#a reason: why", []string{"reference must be a whitespace-free token"}},
+		{"reference base Unicode whitespace", "- [ ] C -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/review\u2003notes/2026-08-29-ok.md#a reason: why", []string{"reference must be a whitespace-free token"}},
+		{"reference fragment ASCII space", "- [ ] C -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/reviews/2026-08-29-ok.md#a b reason: why", []string{"reference must be a whitespace-free token"}},
+		{"reference fragment tab", "- [ ] C -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/reviews/2026-08-29-ok.md#a\tb reason: why", []string{"reference must be a whitespace-free token"}},
+		{"reference fragment Unicode whitespace", "- [ ] C -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/reviews/2026-08-29-ok.md#a\u2003b reason: why", []string{"reference must be a whitespace-free token"}},
+		{"ordered token failures", "- [ ] C -- APPROVED-UNTESTED 2026-08-29 by owner team ref: docs/reviews/2026-08-29-ok.md#a b reason: why", []string{"approver must be a whitespace-free token", "reference must be a whitespace-free token"}},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeTicket(t, dir, fmt.Sprintf("I3%02d-whitespace.md", i), "I300", "open", "## Acceptance criteria\n"+tc.line+"\n")
+			got := ScanTicket(dir, path)
+			if got.ValidCount() != 0 || got.InvalidCount() != 1 || !slicesEqual(got.Problems[0].Failed, tc.want) {
+				t.Fatalf("whitespace token failures:\n got %#v\nwant %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestScanTicketSelectsUniqueStructuralMarker(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/reviews/2026-08-29-ok.md", "# Approval\n")
+	line := "- [ ] Document APPROVED-UNTESTED semantics -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/reviews/2026-08-29-ok.md#a reason: why"
+	path := writeTicket(t, dir, "I310-structural.md", "I310", "open", "## Acceptance criteria\n"+line+"\n")
+
+	got := ScanTicket(dir, path)
+	if got.ValidCount() != 1 || got.InvalidCount() != 0 || got.Records[0].Criterion != "Document APPROVED-UNTESTED semantics" {
+		t.Fatalf("structural marker selection = %#v", got)
+	}
+}
+
+func TestScanTicketRejectsAmbiguousStructuralMarkers(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/reviews/2026-08-29-ok.md", "# Approval\n")
+	line := "- [ ] First -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/reviews/2026-08-29-ok.md#a reason: why -- APPROVED-UNTESTED 2026-08-30 by other ref: docs/reviews/2026-08-29-ok.md#b reason: second"
+	path := writeTicket(t, dir, "I311-ambiguous.md", "I311", "open", "## Acceptance criteria\n"+line+"\n")
+
+	got := ScanTicket(dir, path)
+	want := []string{"record must contain exactly one ` -- APPROVED-UNTESTED ` structural marker"}
+	if got.ValidCount() != 0 || got.InvalidCount() != 1 || !slicesEqual(got.Problems[0].Failed, want) {
+		t.Fatalf("ambiguous structural markers:\n got %#v\nwant %#v", got, want)
+	}
+}
+
 func TestScanTicketRejectsCheckboxAndSectionDamage(t *testing.T) {
 	dir := ticketRepo(t)
 	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")
@@ -171,6 +233,108 @@ func TestScanTicketIDsUsesExactFrontmatterIDs(t *testing.T) {
 	got := ScanTicketIDs(dir, []string{"I090"})
 	if got.ValidCount() != 1 || got.Records[0].Path != "docs/issues/I090-picked.md" {
 		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestScanTicketIDsSkipsPreIDFailures(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")
+	writeTicket(t, dir, "I090-picked.md", "I090", "open", "## Acceptance criteria\n"+canonical+"\n")
+	writeTicket(t, dir, "I091-unscoped.md", "I091", "open", "## Acceptance criteria\n"+strings.TrimSuffix(canonical, "lab hardware unavailable; I123 tracks the deferred run")+"\n")
+	if err := os.Symlink(filepath.Join(dir, "missing-ticket.md"), filepath.Join(dir, "docs", "issues", "I092-broken.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	scoped := ScanTicketIDs(dir, []string{"I090"})
+	if scoped.ValidCount() != 1 || scoped.InvalidCount() != 0 || len(scoped.ScanErrors) != 0 {
+		t.Fatalf("scoped scan leaked unknown or unscoped tickets: %#v", scoped)
+	}
+	estate := ScanAllTickets(dir)
+	if estate.ValidCount() != 1 || estate.InvalidCount() != 1 || len(estate.ScanErrors) != 1 || estate.ScanErrors[0].Path != "docs/issues/I092-broken.md" {
+		t.Fatalf("estate scan lost unscoped failures: %#v", estate)
+	}
+}
+
+func TestScanTicketIDsSkipsPreIDFailuresAndSurfacesWantedPostIDFailures(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/handoffs/2026-08-29-i050-approval.md", "# Approval\n")
+	for _, name := range []string{"I400-wanted.md", "I401-unscoped.md", "I402-pre-id.md"} {
+		write(t, dir, filepath.Join("docs", "issues", name), "placeholder\n")
+	}
+	wantedErr := errors.New("wanted post-ID read failure")
+	unscopedErr := errors.New("unscoped post-ID read failure")
+	preIDErr := errors.New("pre-ID read failure")
+	openFile := func(name string) (io.ReadCloser, error) {
+		var reader io.Reader
+		switch filepath.Base(name) {
+		case "I400-wanted.md":
+			reader = &errorAfterReader{data: []byte("---\nid: I400\n---\n\n## Acceptance criteria\n" + canonical), err: wantedErr}
+		case "I401-unscoped.md":
+			reader = &errorAfterReader{data: []byte("---\nid: I401\n---\n"), err: unscopedErr}
+		case "I402-pre-id.md":
+			reader = &errorAfterReader{data: []byte("---\n"), err: preIDErr}
+		default:
+			return os.Open(name)
+		}
+		return &trackingReadCloser{Reader: reader}, nil
+	}
+
+	got := scanTicketsWithOpen(dir, map[string]bool{"I400": true}, openFile)
+	if got.ValidCount() != 1 || got.InvalidCount() != 0 || len(got.ScanErrors) != 1 || !errors.Is(got.ScanErrors[0].Err, wantedErr) {
+		t.Fatalf("identity-scoped post-ID errors = %#v", got)
+	}
+}
+
+func TestScanTicketIDsClosesEachDiscoveredTicketPerIteration(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/issues/I410-first.md", "first\n")
+	write(t, dir, "docs/issues/I411-second.md", "second\n")
+	var first *trackingReadCloser
+	openFile := func(name string) (io.ReadCloser, error) {
+		switch filepath.Base(name) {
+		case "I410-first.md":
+			first = &trackingReadCloser{Reader: strings.NewReader("---\nid: I410\n---\n")}
+			return first, nil
+		case "I411-second.md":
+			if first == nil || !first.closed {
+				t.Fatal("first ticket remained open when the next iteration began")
+			}
+			return &trackingReadCloser{Reader: strings.NewReader("---\nid: I411\n---\n")}, nil
+		default:
+			return os.Open(name)
+		}
+	}
+
+	got := scanTicketsWithOpen(dir, nil, openFile)
+	if len(got.ScanErrors) != 0 || first == nil || !first.closed {
+		t.Fatalf("per-iteration close contract = %#v, first=%#v", got, first)
+	}
+}
+
+func TestTicketCloseErrorsFollowIdentityScope(t *testing.T) {
+	dir := ticketRepo(t)
+	write(t, dir, "docs/issues/I420-wanted.md", "placeholder\n")
+	write(t, dir, "docs/issues/I421-unscoped.md", "placeholder\n")
+	wantedCloseErr := errors.New("wanted close failure")
+	unscopedCloseErr := errors.New("unscoped close failure")
+	openFile := func(name string) (io.ReadCloser, error) {
+		switch filepath.Base(name) {
+		case "I420-wanted.md":
+			return &trackingReadCloser{Reader: strings.NewReader("---\nid: I420\n---\n"), closeErr: wantedCloseErr}, nil
+		case "I421-unscoped.md":
+			return &trackingReadCloser{Reader: strings.NewReader("---\nid: I421\n---\n"), closeErr: unscopedCloseErr}, nil
+		default:
+			return os.Open(name)
+		}
+	}
+
+	scoped := scanTicketsWithOpen(dir, map[string]bool{"I420": true}, openFile)
+	if len(scoped.ScanErrors) != 1 || !errors.Is(scoped.ScanErrors[0].Err, wantedCloseErr) {
+		t.Fatalf("scoped close errors = %#v", scoped)
+	}
+	estate := scanTicketsWithOpen(dir, nil, openFile)
+	if len(estate.ScanErrors) != 2 || !errors.Is(estate.ScanErrors[0].Err, wantedCloseErr) || !errors.Is(estate.ScanErrors[1].Err, unscopedCloseErr) {
+		t.Fatalf("estate close errors = %#v", estate)
 	}
 }
 
@@ -349,6 +513,17 @@ func (r *errorAfterReader) Read(p []byte) (int, error) {
 }
 
 var _ io.Reader = (*errorAfterReader)(nil)
+
+type trackingReadCloser struct {
+	io.Reader
+	closed   bool
+	closeErr error
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed = true
+	return r.closeErr
+}
 
 func ticketRepo(t *testing.T) string {
 	t.Helper()

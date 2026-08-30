@@ -35,6 +35,19 @@ func TestD15WarnsOnceForReasonlessRecord(t *testing.T) {
 	}
 }
 
+func TestD15WarnsForWhitespaceAcceptanceTokens(t *testing.T) {
+	dir := acceptanceRepo(t)
+	writeAcceptanceFile(t, dir, "docs/handoffs/2026-08-29-approval.md", "# Approval\n")
+	line := "- [ ] Exercise failover -- APPROVED-UNTESTED 2026-08-29 by owner team ref: docs/handoffs/2026-08-29-approval.md#fail over reason: lab unavailable"
+	writeAcceptanceTicket(t, dir, "I002-whitespace.md", "open", "## Acceptance criteria\n"+line+"\n")
+
+	got := acceptanceCheck(dir)
+	const want = "line 9: invalid APPROVED-UNTESTED record: approver must be a whitespace-free token; reference must be a whitespace-free token"
+	if len(got) != 1 || got[0].ID != "D15" || got[0].Severity != "warn" || got[0].Message != want {
+		t.Fatalf("whitespace D15 = %#v, want one ordered warning %q", got, want)
+	}
+}
+
 func TestD15WarnsForMissingArtifactAndClosedTicket(t *testing.T) {
 	dir := acceptanceRepo(t)
 	writeAcceptanceTicket(t, dir, "I003-closed.md", "fixed", "## Acceptance criteria\n"+validAcceptanceLine+"\n")

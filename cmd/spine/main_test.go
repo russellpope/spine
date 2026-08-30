@@ -479,6 +479,25 @@ func TestDoctorD15JSONShape(t *testing.T) {
 	}
 }
 
+func TestDoctorD15WhitespaceTokensTextAndJSON(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, errs := runCmd(t, "init", "--dir", dir, "--profile", "rust", "--name", "demo"); code != 0 {
+		t.Fatal(errs)
+	}
+	line := "- [ ] Exercise failover -- APPROVED-UNTESTED 2026-08-29 by owner team ref: docs/handoffs/2026-08-29-approval.md#fail over reason: lab unavailable"
+	writeDoctorAcceptanceFixture(t, dir, line)
+	const message = "approver must be a whitespace-free token; reference must be a whitespace-free token"
+
+	code, out, errs := runCmd(t, "doctor", "--dir", dir)
+	if code != 1 || errs != "" || !strings.Contains(out, "D15 warn") || !strings.Contains(out, message) {
+		t.Fatalf("whitespace D15 text: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCmd(t, "doctor", "--dir", dir, "--json")
+	if code != 1 || errs != "" || !strings.Contains(out, `"id":"D15"`) || !strings.Contains(out, message) {
+		t.Fatalf("whitespace D15 JSON: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
 func validDoctorAcceptanceLine() string {
 	return "- [ ] Exercise failover -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/handoffs/2026-08-29-approval.md#failover reason: lab unavailable"
 }
@@ -1280,6 +1299,87 @@ func TestAuditStagesInvalidAcceptanceWarnsWithoutBlocking(t *testing.T) {
 	}
 }
 
+func TestAuditStagesWarnsForWhitespaceAcceptanceTokensAndCountsInvalid(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	line := "- [ ] Exercise failover -- APPROVED-UNTESTED 2026-08-29 by owner team ref: docs/handoffs/2026-08-29-approval.md#fail over reason: lab unavailable"
+	writeAuditAcceptanceTicket(t, dir, "I001-whitespace.md", "I001", line)
+
+	code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
+	const message = "approver must be a whitespace-free token; reference must be a whitespace-free token"
+	if code != 0 || !strings.Contains(out, "acceptance: approved-untested=0 invalid=1\n") ||
+		strings.Count(errs, "warning:") != 1 || !strings.Contains(errs, message) {
+		t.Fatalf("whitespace audit: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+func TestCompiledCLIRejectsWhitespaceAcceptanceTokens(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	line := "- [ ] Exercise failover -- APPROVED-UNTESTED 2026-08-29 by owner\u2003team ref: docs/handoffs/2026-08-29-approval.md#fail over reason: lab unavailable"
+	writeAuditAcceptanceTicket(t, dir, "I001-whitespace.md", "I001", line)
+	bin := filepath.Join(t.TempDir(), "spine")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build compiled CLI: %v\n%s", err, out)
+	}
+	const message = "approver must be a whitespace-free token; reference must be a whitespace-free token"
+
+	code, out, errs := runCompiledSpine(t, bin, dir, "doctor", "--dir", ".")
+	if code != 1 || errs != "" || !strings.Contains(out, "D15 warn") || !strings.Contains(out, message) {
+		t.Fatalf("compiled doctor whitespace: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCompiledSpine(t, bin, dir, "audit", "stages", "--dir", ".")
+	if code != 0 || !strings.Contains(out, "acceptance: approved-untested=0 invalid=1\n") || !strings.Contains(errs, message) {
+		t.Fatalf("compiled audit whitespace: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+func TestDoctorAndAuditUseStructuralAcceptanceMarker(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	valid := "- [ ] Document APPROVED-UNTESTED semantics -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/handoffs/2026-08-29-approval.md#a reason: why"
+	writeAuditAcceptanceTicket(t, dir, "I001-structural.md", "I001", valid)
+
+	code, out, errs := runCmd(t, "doctor", "--dir", dir)
+	if code != 1 || errs != "" || strings.Contains(out, "D15") {
+		t.Fatalf("structural doctor control: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 0 || errs != "" || !strings.Contains(out, "acceptance: approved-untested=1 invalid=0\n") {
+		t.Fatalf("structural audit control: code=%d out=%q stderr=%q", code, out, errs)
+	}
+
+	ambiguous := valid + " -- APPROVED-UNTESTED 2026-08-30 by other ref: docs/handoffs/2026-08-29-approval.md#b reason: second"
+	writeAuditAcceptanceTicket(t, dir, "I001-structural.md", "I001", ambiguous)
+	const message = "record must contain exactly one ` -- APPROVED-UNTESTED ` structural marker"
+	code, out, errs = runCmd(t, "doctor", "--dir", dir)
+	if code != 1 || errs != "" || !strings.Contains(out, "D15 warn") || !strings.Contains(out, message) {
+		t.Fatalf("ambiguous doctor: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCmd(t, "audit", "stages", "--dir", dir)
+	if code != 0 || !strings.Contains(out, "acceptance: approved-untested=0 invalid=1\n") || !strings.Contains(errs, message) {
+		t.Fatalf("ambiguous audit: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+func TestCompiledCLIUsesStructuralAcceptanceMarker(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	line := "- [ ] Document APPROVED-UNTESTED semantics -- APPROVED-UNTESTED 2026-08-29 by owner ref: docs/handoffs/2026-08-29-approval.md#a reason: why"
+	writeAuditAcceptanceTicket(t, dir, "I001-structural.md", "I001", line)
+	bin := filepath.Join(t.TempDir(), "spine")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build compiled CLI: %v\n%s", err, out)
+	}
+
+	code, out, errs := runCompiledSpine(t, bin, dir, "audit", "stages", "--dir", ".")
+	if code != 0 || errs != "" || !strings.Contains(out, "acceptance: approved-untested=1 invalid=0\n") {
+		t.Fatalf("compiled structural marker: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	writeAuditAcceptanceTicket(t, dir, "I001-structural.md", "I001", line+" -- APPROVED-UNTESTED 2026-08-30 by other ref: docs/handoffs/2026-08-29-approval.md#b reason: second")
+	code, out, errs = runCompiledSpine(t, bin, dir, "audit", "stages", "--dir", ".")
+	if code != 0 || !strings.Contains(out, "acceptance: approved-untested=0 invalid=1\n") ||
+		!strings.Contains(errs, "record must contain exactly one ` -- APPROVED-UNTESTED ` structural marker") {
+		t.Fatalf("compiled ambiguous marker: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
 func TestAuditStagesOmitsAcceptanceLineWhenNoCandidates(t *testing.T) {
 	code, out, errs := runCmd(t, "audit", "stages", "--dir", stagesFixture("clean"))
 	const want = "stage            state    verdict     detail\n" +
@@ -1394,16 +1494,43 @@ func TestCompiledAcceptanceCommandsRejectOutsideRootSymlink(t *testing.T) {
 	}
 }
 
-func TestAuditStagesPrintsAcceptanceReadErrorsWithoutBlocking(t *testing.T) {
+func TestAuditStagesSkipsAcceptanceReadErrorsBeforeIdentity(t *testing.T) {
 	dir := auditAcceptanceRepo(t, "I001")
 	if err := os.Symlink(filepath.Join(dir, "missing-ticket.md"), filepath.Join(dir, "docs", "issues", "I001-broken.md")); err != nil {
 		t.Fatal(err)
 	}
 
 	code, out, errs := runCmd(t, "audit", "stages", "--dir", dir)
-	if code != 0 || strings.Contains(out, "acceptance: approved-untested=") ||
-		!strings.Contains(errs, "warning: docs/issues/I001-broken.md: unable to read ticket:") {
-		t.Fatalf("acceptance read error output: code=%d out=%q stderr=%q", code, out, errs)
+	if code != 0 || strings.Contains(out, "acceptance: approved-untested=") || errs != "" {
+		t.Fatalf("pre-ID acceptance error leaked into audit: code=%d out=%q stderr=%q", code, out, errs)
+	}
+}
+
+func TestCompiledCLIAcceptanceIdentityScoping(t *testing.T) {
+	dir := auditAcceptanceRepo(t, "I001")
+	writeAuditAcceptanceTicket(t, dir, "I001-wanted.md", "I001", validDoctorAcceptanceLine())
+	writeAuditAcceptanceTicket(t, dir, "I999-unscoped.md", "I999", strings.TrimSuffix(validDoctorAcceptanceLine(), "lab unavailable"))
+	if err := os.Symlink(filepath.Join(dir, "missing-ticket.md"), filepath.Join(dir, "docs", "issues", "I998-broken.md")); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "spine")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build compiled CLI: %v\n%s", err, out)
+	}
+
+	code, out, errs := runCompiledSpine(t, bin, dir, "audit", "stages", "--dir", ".")
+	if code != 0 || errs != "" || !strings.Contains(out, "acceptance: approved-untested=1 invalid=0\n") {
+		t.Fatalf("compiled scoped audit: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCompiledSpine(t, bin, dir, "doctor", "--dir", ".")
+	if code != 1 || errs != "" || strings.Count(out, "D15 warn") != 2 ||
+		!strings.Contains(out, "docs/issues/I998-broken.md") || !strings.Contains(out, "docs/issues/I999-unscoped.md") {
+		t.Fatalf("compiled estate doctor: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	code, out, errs = runCompiledSpine(t, bin, dir, "doctor", "--dir", ".", "--json")
+	if code != 1 || errs != "" || strings.Count(out, `"id":"D15"`) != 2 ||
+		!strings.Contains(out, "I998-broken.md") || !strings.Contains(out, "I999-unscoped.md") {
+		t.Fatalf("compiled estate doctor JSON: code=%d out=%q stderr=%q", code, out, errs)
 	}
 }
 

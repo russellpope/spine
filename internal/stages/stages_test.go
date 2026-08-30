@@ -3,6 +3,7 @@ package stages_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -346,7 +347,24 @@ func TestAcceptanceProblemsNeverAffectBlocking(t *testing.T) {
 	}
 }
 
-func TestAcceptanceReadErrorsAreAdvisoryAndSurfaced(t *testing.T) {
+func TestAuditStagesWarnsForWhitespaceAcceptanceTokensAndCountsInvalid(t *testing.T) {
+	dir := acceptanceStageRepo(t, "I001")
+	writeFile(t, dir, "docs/handoffs/2026-08-29-approval.md", "# Approval\n")
+	line := "- [ ] Exercise failover -- APPROVED-UNTESTED 2026-08-29 by owner team ref: docs/handoffs/2026-08-29-approval.md#fail over reason: lab unavailable"
+	writeAcceptanceStageTicket(t, dir, "I001-whitespace.md", "I001", line)
+
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"approver must be a whitespace-free token", "reference must be a whitespace-free token"}
+	if rep.Acceptance.ValidCount() != 0 || rep.Acceptance.InvalidCount() != 1 ||
+		!slices.Equal(rep.Acceptance.Problems[0].Failed, want) || rep.Blocking() {
+		t.Fatalf("whitespace acceptance audit summary = %#v", rep)
+	}
+}
+
+func TestAcceptanceSummaryExcludesUnreadableUnknownIDTickets(t *testing.T) {
 	dir := acceptanceStageRepo(t, "I001")
 	if err := os.MkdirAll(filepath.Join(dir, "docs", "issues"), 0o755); err != nil {
 		t.Fatal(err)
@@ -359,8 +377,8 @@ func TestAcceptanceReadErrorsAreAdvisoryAndSurfaced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.Acceptance.ScanErrors) != 1 || rep.Acceptance.CandidateCount() != 0 || rep.Blocking() {
-		t.Fatalf("acceptance read error contract = %#v", rep)
+	if len(rep.Acceptance.ScanErrors) != 0 || rep.Acceptance.CandidateCount() != 0 || rep.Blocking() {
+		t.Fatalf("unknown-ID ticket leaked into scoped acceptance: %#v", rep)
 	}
 }
 
