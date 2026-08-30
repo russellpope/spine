@@ -61,6 +61,7 @@ package model
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -596,12 +597,17 @@ func readLaunchSnapshot(repoDir string, maxTemplateVersion int) (launchSnapshot,
 	if repoDir == "" {
 		return launchSnapshot{rows: map[string][]string{}}, nil
 	}
-	raw, err := os.ReadFile(filepath.Join(repoDir, "WORKFLOW.md"))
+	workflowPath := filepath.Join(repoDir, "WORKFLOW.md")
+	raw, err := os.ReadFile(workflowPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return launchSnapshot{rows: map[string][]string{}}, nil
 		}
-		return launchSnapshot{}, fmt.Errorf("read WORKFLOW.md: %w", err)
+		var pathErr *os.PathError
+		if errors.As(err, &pathErr) {
+			return launchSnapshot{}, fmt.Errorf("read WORKFLOW.md at %q: %w", pathErr.Path, pathErr.Err)
+		}
+		return launchSnapshot{}, fmt.Errorf("read WORKFLOW.md at %q: %w", workflowPath, err)
 	}
 	return parseLaunchRouting(string(raw), maxTemplateVersion)
 }
