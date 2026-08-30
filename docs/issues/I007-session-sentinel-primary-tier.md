@@ -3,6 +3,7 @@ id: I007
 title: "`primary: session` sentinel — let the primary tier track the harness session model"
 severity: low
 status: superseded
+commits: [eeadddf]
 affects: [I006]
 blocked-by: []
 execution-mode:
