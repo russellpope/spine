@@ -22,6 +22,21 @@
   "effortVocabulary": {
     "pi": ["low", "medium", "xhigh"]
   },
+  "modelValidation": {
+    "idPattern": "^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,127}$",
+    "forbiddenTokens": [
+      "auto", "default", "latest",
+      "fable", "opus", "sonnet", "haiku",
+      "sol", "terra", "luna",
+      "kimi-k3", "deepseek-v4-pro", "glm-5.2",
+      "qwen3.8", "qwen"
+    ],
+    "forbiddenPatterns": [
+      {"name": "generic-selector", "re": "(?i)^(auto|default|latest)$"},
+      {"name": "bare-family", "re": "(?i)^(fable|opus|sonnet|haiku|sol|terra|luna|qwen)$"},
+      {"name": "vendor-auto", "re": "(?i)(^|[-._/:])auto($|[-._/:])"}
+    ]
+  },
   "flavors": {
     "claude": {
       "primary": {

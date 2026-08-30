@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -580,6 +581,133 @@ func TestValidateTable_PanicsOnMissingTierDefaultEffort(t *testing.T) {
 		TierDefaultEffort: map[string]string{"primary": "high"}, // routine/mechanical/fallback missing
 		Flavors:           map[string]map[string]tableEntry{"claude": complete},
 	})
+}
+
+func cloneDefaultTable(t *testing.T) table {
+	t.Helper()
+	raw, err := json.Marshal(defaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cloned table
+	if err := json.Unmarshal(raw, &cloned); err != nil {
+		t.Fatal(err)
+	}
+	return cloned
+}
+
+// Each case names a build invariant whose removal would make an ambiguous or
+// unsafe selector launchable. The policy is compiled into the binary, so a
+// malformed policy must panic during table validation rather than survive to
+// a runtime request.
+func TestValidateTableModelValidationRejectsInvalidPolicy(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*table)
+	}{
+		{
+			name: "missing id pattern",
+			mutate: func(tbl *table) {
+				tbl.ModelValidation.IDPattern = ""
+			},
+		},
+		{
+			name: "invalid id pattern",
+			mutate: func(tbl *table) {
+				tbl.ModelValidation.IDPattern = "["
+			},
+		},
+		{
+			name: "empty token",
+			mutate: func(tbl *table) {
+				tbl.ModelValidation.ForbiddenTokens = append(tbl.ModelValidation.ForbiddenTokens, "")
+			},
+		},
+		{
+			name: "duplicate token",
+			mutate: func(tbl *table) {
+				tbl.ModelValidation.ForbiddenTokens = append(tbl.ModelValidation.ForbiddenTokens, "opus")
+			},
+		},
+		{
+			name: "empty pattern name",
+			mutate: func(tbl *table) {
+				tbl.ModelValidation.ForbiddenPatterns[0].Name = ""
+			},
+		},
+		{
+			name: "duplicate pattern name",
+			mutate: func(tbl *table) {
+				tbl.ModelValidation.ForbiddenPatterns[1].Name = tbl.ModelValidation.ForbiddenPatterns[0].Name
+			},
+		},
+		{
+			name: "invalid RE2",
+			mutate: func(tbl *table) {
+				tbl.ModelValidation.ForbiddenPatterns[0].RE = "["
+			},
+		},
+		{
+			name: "current id syntax failure",
+			mutate: func(tbl *table) {
+				entry := tbl.Flavors["codex"]["primary"]
+				entry.ID = "bad id"
+				tbl.Flavors["codex"]["primary"] = entry
+			},
+		},
+		{
+			name: "current id deny overlap",
+			mutate: func(tbl *table) {
+				tbl.ModelValidation.ForbiddenTokens = append(tbl.ModelValidation.ForbiddenTokens, "DeepSeek-V4-Pro")
+			},
+		},
+		{
+			name: "historical id syntax failure",
+			mutate: func(tbl *table) {
+				entry := tbl.Flavors["claude"]["routine"]
+				entry.History[0].ID = "bad id"
+				tbl.Flavors["claude"]["routine"] = entry
+			},
+		},
+		{
+			name: "shorthand alias absent from forbidden tokens",
+			mutate: func(tbl *table) {
+				var kept []string
+				for _, token := range tbl.ModelValidation.ForbiddenTokens {
+					if token != "opus" {
+						kept = append(kept, token)
+					}
+				}
+				tbl.ModelValidation.ForbiddenTokens = kept
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tbl := cloneDefaultTable(t)
+			tc.mutate(&tbl)
+			defer func() {
+				if recover() == nil {
+					t.Errorf("validateTable accepted invalid modelValidation policy")
+				}
+			}()
+			validateTable(tbl)
+		})
+	}
+}
+
+func TestValidateTableModelValidationRejectsUnknownJSONMembers(t *testing.T) {
+	_, err := decodeTable([]byte(`{
+		"modelValidation": {
+			"idPattern": "^[a-z]+$",
+			"forbiddenTokens": ["auto"],
+			"forbiddenPatterns": [{"name": "selector", "re": "^auto$", "unknown": true}]
+		}
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("decodeTable unknown policy member error = %v, want strict rejection", err)
+	}
 }
 
 // I036 (D9): a mirror value parses in every emitted shape — bare id (neither

@@ -59,10 +59,13 @@
 package model
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -137,6 +140,21 @@ type historyEntry struct {
 	Alternate *Alternate `json:"alternate,omitempty"`
 }
 
+type forbiddenPattern struct {
+	Name string `json:"name"`
+	RE   string `json:"re"`
+
+	compiled *regexp.Regexp
+}
+
+type modelValidationPolicy struct {
+	IDPattern         string             `json:"idPattern"`
+	ForbiddenTokens   []string           `json:"forbiddenTokens"`
+	ForbiddenPatterns []forbiddenPattern `json:"forbiddenPatterns"`
+
+	idPattern *regexp.Regexp
+}
+
 type table struct {
 	TierDefaultEffort map[string]string `json:"tierDefaultEffort"`
 	// TierDefaultEffortByFlavor overrides TierDefaultEffort for one flavor
@@ -147,6 +165,7 @@ type table struct {
 	// every flavor absent from the map, falls back to the global map.
 	TierDefaultEffortByFlavor map[string]map[string]string     `json:"tierDefaultEffortByFlavor"`
 	EffortVocabulary          map[string][]string              `json:"effortVocabulary"`
+	ModelValidation           *modelValidationPolicy           `json:"modelValidation"`
 	Flavors                   map[string]map[string]tableEntry `json:"flavors"`
 }
 
@@ -162,12 +181,29 @@ func mustLoadDefaults() table {
 	if err != nil {
 		panic("models/defaults.json missing from embed: " + err.Error())
 	}
-	var t table
-	if err := json.Unmarshal(raw, &t); err != nil {
+	t, err := decodeTable(raw)
+	if err != nil {
 		panic("models/defaults.json invalid: " + err.Error())
 	}
 	validateTable(t)
 	return t
+}
+
+func decodeTable(raw []byte) (table, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var t table
+	if err := dec.Decode(&t); err != nil {
+		return table{}, err
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return table{}, fmt.Errorf("multiple JSON values")
+		}
+		return table{}, err
+	}
+	return t, nil
 }
 
 // validateTable enforces the completeness Resolve depends on: every flavor
@@ -176,6 +212,7 @@ func mustLoadDefaults() table {
 // tier table would resolve silently to an empty id at runtime instead of
 // failing the build's own tests (task review Important #2 / Minor #6).
 func validateTable(t table) {
+	validateModelPolicy(t)
 	for _, tier := range Tiers {
 		if t.TierDefaultEffort[tier] == "" {
 			panic(fmt.Sprintf("models/defaults.json: tierDefaultEffort has no default for tier %q", tier))
@@ -186,6 +223,7 @@ func validateTable(t table) {
 			if tiers[tier].ID == "" {
 				panic(fmt.Sprintf("models/defaults.json: flavor %q has no id for tier %q", flavor, tier))
 			}
+			validateShippedModelIDs(t, flavor, tier, tiers[tier])
 			checkAlternate := func(what string, alt *Alternate) {
 				if alt == nil {
 					return
@@ -220,6 +258,94 @@ func validateTable(t table) {
 			}
 		}
 	}
+}
+
+func validateModelPolicy(t table) {
+	p := t.ModelValidation
+	if p == nil {
+		panic("models/defaults.json: modelValidation is missing")
+	}
+	if p.IDPattern == "" {
+		panic("models/defaults.json: modelValidation.idPattern is empty")
+	}
+	idPattern, err := regexp.Compile(p.IDPattern)
+	if err != nil {
+		panic("models/defaults.json: modelValidation.idPattern: " + err.Error())
+	}
+	p.idPattern = idPattern
+	if len(p.ForbiddenTokens) == 0 {
+		panic("models/defaults.json: modelValidation.forbiddenTokens is empty")
+	}
+	tokens := map[string]bool{}
+	for _, token := range p.ForbiddenTokens {
+		if token == "" {
+			panic("models/defaults.json: modelValidation.forbiddenTokens contains an empty token")
+		}
+		if tokens[token] {
+			panic(fmt.Sprintf("models/defaults.json: duplicate forbidden token %q", token))
+		}
+		tokens[token] = true
+	}
+	if len(p.ForbiddenPatterns) == 0 {
+		panic("models/defaults.json: modelValidation.forbiddenPatterns is empty")
+	}
+	names := map[string]bool{}
+	for i := range p.ForbiddenPatterns {
+		pattern := &p.ForbiddenPatterns[i]
+		if pattern.Name == "" {
+			panic("models/defaults.json: modelValidation.forbiddenPatterns contains an empty name")
+		}
+		if names[pattern.Name] {
+			panic(fmt.Sprintf("models/defaults.json: duplicate forbidden pattern name %q", pattern.Name))
+		}
+		names[pattern.Name] = true
+		if pattern.RE == "" {
+			panic(fmt.Sprintf("models/defaults.json: forbidden pattern %q has an empty re", pattern.Name))
+		}
+		compiled, err := regexp.Compile(pattern.RE)
+		if err != nil {
+			panic(fmt.Sprintf("models/defaults.json: forbidden pattern %q: %v", pattern.Name, err))
+		}
+		pattern.compiled = compiled
+	}
+}
+
+func validateShippedModelIDs(t table, flavor, tier string, entry tableEntry) {
+	p := t.ModelValidation
+	if !p.idPattern.MatchString(entry.ID) {
+		panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q current id %q fails modelValidation.idPattern", flavor, tier, entry.ID))
+	}
+	if rule := deniedModelRule(p, entry.ID); rule != "" {
+		panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q current id %q matches deny rule %q", flavor, tier, entry.ID, rule))
+	}
+	for _, h := range entry.History {
+		if !p.idPattern.MatchString(h.ID) {
+			panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q historical id %q fails modelValidation.idPattern", flavor, tier, h.ID))
+		}
+	}
+	tokens := map[string]bool{}
+	for _, token := range p.ForbiddenTokens {
+		tokens[token] = true
+	}
+	for _, alias := range entry.Aliases {
+		if alias != entry.ID && !tokens[alias] {
+			panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q shorthand alias %q is absent from forbiddenTokens", flavor, tier, alias))
+		}
+	}
+}
+
+func deniedModelRule(p *modelValidationPolicy, id string) string {
+	for _, token := range p.ForbiddenTokens {
+		if id == token {
+			return "token:" + token
+		}
+	}
+	for _, pattern := range p.ForbiddenPatterns {
+		if pattern.compiled.MatchString(id) {
+			return pattern.Name
+		}
+	}
+	return ""
 }
 
 // shippedEfforts lists every effort a shipped cell names — its own, its
