@@ -2,7 +2,8 @@
 id: I121
 title: "audit routing: a ticket-range token attributes only its endpoint ids"
 severity: med
-status: open
+status: fixed
+commits: [fca3ced, 13859a1, 0abd5b3, c8d88cf, b4cd4a1]
 affects: []
 blocked-by: []
 execution-mode: inline
@@ -36,3 +37,15 @@ string does not over-attribute (negative control).
 
 - I114 — cursor tickets range grammar limits (shared grammar decision).
 - maikanban `.superpowers/sdd/progress.md` ROUTING AUDIT FACTS entry, 2026-08-29.
+
+## Resolution
+
+Fixed 2026-08-30 at final I121 product SHA `b4cd4a1`. Shared ticket-reference
+parsing now applies the cursor-compatible inclusive range grammar through
+bounded arithmetic membership across Claude, Codex, workflow, and discovery
+paths. It rejects every endpoint of chained, partial, or surrounding-hyphen
+forms while preserving the exact `dispatch-task-I###.md` compatibility
+carrier, lowercase Codex behavior, and later-message near misses. A fresh
+primary review and a different independent primary verifier passed hostile
+cross-source fixtures plus full/race/vet/build gates at `b4cd4a1`. The single
+batch-final exact-SHA maipipe lane remains the ship gate.

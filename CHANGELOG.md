@@ -8,6 +8,7 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Fixed
 
+- **Routing audit now attributes every member of a ticket range without accepting malformed hyphen chains.** Shared bounded range matching covers Claude, Codex, workflow, and discovery paths, including interior-only Codex evidence and huge ranges without materializing them. Chained, partial, or surrounding-hyphen forms attribute no endpoint; the exact `dispatch-task-I###.md` carrier and existing lowercase/later-message behavior remain compatible. (I121)
 - **`spine doctor` now advises on meaningful Go toolchain skew.** D14 compares
   the binary's Go release with `go env GOVERSION` on PATH at major/minor
   precision, names both values and `make install` when they differ, and leaves
