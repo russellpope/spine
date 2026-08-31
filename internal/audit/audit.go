@@ -1984,10 +1984,11 @@ var workflowMetadataBeforeOpen func(string)
 // seam for workflow JSONL tests. Production leaves it nil.
 var workflowTranscriptBeforeOpen func(string)
 
-// workflowSidecarAfterRead and workflowTranscriptAfterRead make cross-read
-// replacement attacks deterministic in tests. Production leaves them nil.
+// The after-read hooks make cross-read replacement attacks deterministic in
+// tests. Production leaves them nil.
 var workflowSidecarAfterRead func()
 var workflowTranscriptAfterRead func()
+var workflowRunAfterRead func()
 
 type workflowMetadataReadKind uint8
 
@@ -2015,6 +2016,12 @@ type workflowPathComponent struct {
 	info os.FileInfo
 }
 
+type workflowFileComponent struct {
+	parent *os.Root
+	name   string
+	info   os.FileInfo
+}
+
 // workflowSnapshot retains the configured root, session, and workflow branch
 // for one worker. It makes a sidecar admission, JSONL evidence, and optional
 // sibling run metadata one atomic identity bundle rather than independent
@@ -2025,6 +2032,7 @@ type workflowSnapshot struct {
 	workflow      string
 	chain         []workflowPathComponent // root, session, subagents, workflows, workflow
 	runWorkflows  *workflowPathComponent
+	files         []workflowFileComponent
 }
 
 func openWorkflowSnapshot(transcriptDir, session, workflow string) (*workflowSnapshot, error) {
@@ -2162,7 +2170,7 @@ func (s *workflowSnapshot) stillBound() bool {
 		}
 	}
 	if s.runWorkflows == nil {
-		return true
+		return s.filesStillBound()
 	}
 	if freshSession == nil {
 		return false
@@ -2181,7 +2189,21 @@ func (s *workflowSnapshot) stillBound() bool {
 	}
 	defer func() { _ = child.Close() }()
 	childInfo, err := child.Stat(".")
-	return err == nil && childInfo.IsDir() && os.SameFile(s.runWorkflows.info, childInfo)
+	return err == nil && childInfo.IsDir() && os.SameFile(s.runWorkflows.info, childInfo) && s.filesStillBound()
+}
+
+// filesStillBound re-resolves every previously opened evidence file through
+// its retained directory descriptor. It rejects symlinks and requires the
+// current name to retain its regular-file identity, so later evidence cannot
+// be combined with bytes read before an atomic replacement.
+func (s *workflowSnapshot) filesStillBound() bool {
+	for _, retained := range s.files {
+		current, err := retained.parent.Lstat(retained.name)
+		if err != nil || current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || !os.SameFile(retained.info, current) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *workflowSnapshot) openRunWorkflows() (*os.Root, error) {
@@ -2236,6 +2258,12 @@ func (s *workflowSnapshot) openFile(parent *os.Root, name, path string, beforeOp
 	opened, statErr := file.Stat()
 	current, currentErr := parent.Lstat(name)
 	if statErr != nil || currentErr != nil || !opened.Mode().IsRegular() || current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || !os.SameFile(info, opened) || !os.SameFile(info, current) || !s.stillBound() {
+		_ = file.Close()
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
+	s.files = append(s.files, workflowFileComponent{parent: parent, name: name, info: opened})
+	if !s.stillBound() {
+		s.files = s.files[:len(s.files)-1]
 		_ = file.Close()
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 	}
@@ -2301,6 +2329,9 @@ func workflowRunModel(snapshot *workflowSnapshot, agentID string, warnings *[]st
 		data, readErr := snapshot.readMetadataFile(runWorkflows, snapshot.workflow+".json", path)
 		err = readErr
 		if err == nil {
+			if workflowRunAfterRead != nil {
+				workflowRunAfterRead()
+			}
 			return parseWorkflowRunModel(path, data, agentID, warnings)
 		}
 	}

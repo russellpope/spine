@@ -434,6 +434,238 @@ func TestWorkflowEvidenceAcceptsCrossReadSameObjectRestoration(t *testing.T) {
 	}
 }
 
+// A retained workflow directory is not enough to make the evidence atomic:
+// every artifact already read through it must still name the same regular file
+// before later artifacts or assembled evidence are accepted. Without that
+// binding, admission, transcript, and fallback bytes can come from different
+// temporal versions of the same workflow directory.
+func TestWorkflowSnapshotRejectsPreviouslyReadArtifactReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		read func(t *testing.T, snapshot *workflowSnapshot, transcripts string)
+		path func(string) string
+	}{
+		{
+			name: "sidecar",
+			read: func(t *testing.T, snapshot *workflowSnapshot, transcripts string) {
+				t.Helper()
+				_, err := snapshot.readMetadataFile(snapshot.workflowRoot(), "agent-worker.meta.json", filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.meta.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+			},
+			path: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.meta.json")
+			},
+		},
+		{
+			name: "JSONL",
+			read: func(t *testing.T, snapshot *workflowSnapshot, transcripts string) {
+				t.Helper()
+				path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+				file, err := snapshot.openFile(snapshot.workflowRoot(), "agent-worker.jsonl", path, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := file.Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+			path: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+			},
+		},
+		{
+			name: "run metadata",
+			read: func(t *testing.T, snapshot *workflowSnapshot, transcripts string) {
+				t.Helper()
+				root, err := snapshot.openRunWorkflows()
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = snapshot.readMetadataFile(root, "wf_1.json", filepath.Join(transcripts, "session-1", "workflows", "wf_1.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+			},
+			path: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-1", "workflows", "wf_1.json")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I921", "claude-sonnet-5", "workflow-subagent")
+			writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-sonnet-5")
+
+			snapshot, err := openWorkflowSnapshot(transcripts, "session-1", "wf_1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(snapshot.Close)
+			tc.read(t, snapshot, transcripts)
+			replaceWorkflowArtifactFile(t, tc.path(transcripts))
+			if snapshot.stillBound() {
+				t.Fatalf("snapshot remained bound after %s replacement", tc.name)
+			}
+		})
+	}
+}
+
+func TestWorkflowSnapshotAcceptsSameArtifactRestoration(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		read func(t *testing.T, snapshot *workflowSnapshot, transcripts string)
+		path func(string) string
+	}{
+		{
+			name: "sidecar",
+			read: func(t *testing.T, snapshot *workflowSnapshot, transcripts string) {
+				t.Helper()
+				_, err := snapshot.readMetadataFile(snapshot.workflowRoot(), "agent-worker.meta.json", filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.meta.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+			},
+			path: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.meta.json")
+			},
+		},
+		{
+			name: "JSONL",
+			read: func(t *testing.T, snapshot *workflowSnapshot, transcripts string) {
+				t.Helper()
+				path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+				file, err := snapshot.openFile(snapshot.workflowRoot(), "agent-worker.jsonl", path, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := file.Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+			path: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+			},
+		},
+		{
+			name: "run metadata",
+			read: func(t *testing.T, snapshot *workflowSnapshot, transcripts string) {
+				t.Helper()
+				root, err := snapshot.openRunWorkflows()
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = snapshot.readMetadataFile(root, "wf_1.json", filepath.Join(transcripts, "session-1", "workflows", "wf_1.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+			},
+			path: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-1", "workflows", "wf_1.json")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I921", "claude-sonnet-5", "workflow-subagent")
+			writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-sonnet-5")
+
+			snapshot, err := openWorkflowSnapshot(transcripts, "session-1", "wf_1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(snapshot.Close)
+			tc.read(t, snapshot, transcripts)
+			restoreWorkflowArtifactFile(t, tc.path(transcripts))
+			if !snapshot.stillBound() {
+				t.Fatalf("snapshot became unsafe after restoring the same %s", tc.name)
+			}
+		})
+	}
+}
+
+func TestWorkflowEvidenceRejectsCrossReadArtifactReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(t *testing.T, swap func())
+		run  bool
+		path func(string) string
+	}{
+		{
+			name: "sidecar before JSONL",
+			set:  setWorkflowSidecarAfterRead,
+			path: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.meta.json")
+			},
+		},
+		{
+			name: "JSONL before combination",
+			set:  setWorkflowTranscriptAfterRead,
+			path: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+			},
+		},
+		{
+			name: "run metadata before final combination",
+			set:  setWorkflowRunAfterRead,
+			run:  true,
+			path: func(transcripts string) string {
+				return filepath.Join(transcripts, "session-1", "workflows", "wf_1.json")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for attempt := 0; attempt < 8; attempt++ {
+				repo := t.TempDir()
+				writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I921": "routine"})
+				transcripts := t.TempDir()
+				model := "claude-sonnet-5"
+				if tc.run {
+					model = ""
+				}
+				writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I921", model, "workflow-subagent")
+				if tc.run {
+					writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-sonnet-5")
+				}
+				tc.set(t, func() { replaceWorkflowArtifactFile(t, tc.path(transcripts)) })
+
+				rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if row := rowsByID(t, rep)["I921"]; row.Verdict != VerdictNoTranscript {
+					t.Fatalf("attempt %d: I921 = %+v, want no-transcript after %s replacement", attempt, row, tc.name)
+				}
+			}
+		})
+	}
+}
+
+func replaceWorkflowArtifactFile(t *testing.T, target string) {
+	t.Helper()
+	replacement := target + ".replacement"
+	if err := os.WriteFile(replacement, []byte("replacement"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, target); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func restoreWorkflowArtifactFile(t *testing.T, target string) {
+	t.Helper()
+	staged := target + ".staged"
+	if err := os.Rename(target, staged); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(staged, target); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func restoreWorkflowCrossReadPath(t *testing.T, component, transcripts string) {
 	t.Helper()
 	var target string
@@ -1487,4 +1719,11 @@ func setWorkflowTranscriptAfterRead(t *testing.T, hook func()) {
 	previous := workflowTranscriptAfterRead
 	workflowTranscriptAfterRead = hook
 	t.Cleanup(func() { workflowTranscriptAfterRead = previous })
+}
+
+func setWorkflowRunAfterRead(t *testing.T, hook func()) {
+	t.Helper()
+	previous := workflowRunAfterRead
+	workflowRunAfterRead = hook
+	t.Cleanup(func() { workflowRunAfterRead = previous })
 }
