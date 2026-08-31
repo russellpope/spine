@@ -77,6 +77,117 @@ func TestAuditHostDeclarationUsesFinalPinAndLeavesAbsentObservedEffortUnconfirma
 	}
 }
 
+func TestAuditHostDeclarationResolutionFailuresRemainExplainableUnconfirmable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		host string
+	}{
+		{
+			name: "configured unavailable harness",
+			host: `{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": false, "executable": "claude", "launch_contract_ref": "fleet:x", "models": {}}
+  }, "pins": {}}
+`,
+		},
+		{
+			name: "unreachable unpinned final route",
+			host: `{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:x", "models": {
+      "other": {"efforts": ["high"]}
+    }}
+  }, "pins": {}}
+`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I074": "routine"})
+			transcripts := t.TempDir()
+			writeAuditHostDispatch(t, transcripts, repo, "gateway/pinned")
+
+			rep, err := runWithHostPath(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts}, writeAuditHostConfig(t, tc.host), func(string) (string, error) { return "/bin/claude", nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := rowsByID(t, rep)["I074"]
+			if row.Verdict != VerdictDeclarationUnconfirmable || rep.Blocking() {
+				t.Fatalf("verdict = %q (%s), blocking=%v; want explainable nonblocking %q", row.Verdict, row.Detail, rep.Blocking(), VerdictDeclarationUnconfirmable)
+			}
+			if len(row.DeclarationEvents) != 1 {
+				t.Fatalf("declaration events = %#v, want one retained completed declaration", row.DeclarationEvents)
+			}
+			event := row.DeclarationEvents[0]
+			if event.Harness != "claude" || event.Model != "gateway-pinned" || event.DeclaredEffort != "high" || event.Correlation != "source:claude session:s1 dispatch:toolu_1" {
+				t.Fatalf("raw declaration = %#v, want retained triple and exact identity", event)
+			}
+			if event.ExpectedModel != "" || event.ExpectedEffort != "" || event.ModelStatus != DeclarationModelUnconfirmable || event.Verdict != VerdictDeclarationUnconfirmable {
+				t.Fatalf("resolution failure event = %#v, want missing expected route and unconfirmable proof", event)
+			}
+		})
+	}
+}
+
+func TestAuditNoHostKeepsDeclaredAndLegacyModelOnlyPathsByteCompatible(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I074": "routine"})
+	transcripts := t.TempDir()
+	writeAuditHostDispatch(t, transcripts, repo, "gateway/pinned")
+	missingHost := filepath.Join(t.TempDir(), "missing-routing-host.json")
+
+	rep, err := runWithHostPath(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts}, missingHost, func(string) (string, error) { return "/bin/claude", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I074"]
+	if len(row.DeclarationEvents) != 0 {
+		t.Fatalf("no-host declaration events = %#v, want the existing declared-only path", row.DeclarationEvents)
+	}
+	if row.ExpectedEffort != "medium" || row.DeclaredEffort != "high" || row.DeclarationStatus != "unauthorized-declaration" || row.ObservedEffort != "-" {
+		t.Fatalf("no-host declaration = %#v, want existing declared-only effort fields", row)
+	}
+
+	legacyRepo := filepath.Join("testdata", "clean", "repo")
+	legacyTranscripts := filepath.Join("testdata", "clean", "transcripts")
+	first, err := runWithHostPath(Options{RepoDir: legacyRepo, ClaudeTranscriptsDir: legacyTranscripts}, filepath.Join(t.TempDir(), "missing-one.json"), func(string) (string, error) { return "/bin/claude", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := runWithHostPath(Options{RepoDir: legacyRepo, ClaudeTranscriptsDir: legacyTranscripts}, filepath.Join(t.TempDir(), "missing-two.json"), func(string) (string, error) { return "/bin/claude", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameAuditReport(first, second) {
+		t.Fatalf("legacy model-only no-host report changed\nfirst=%#v\nsecond=%#v", first, second)
+	}
+}
+
+func TestAuditHostDeclarationFiltersOnlyItsOwnLegacyIdentity(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I074": "routine"})
+	transcripts := t.TempDir()
+	writeAuditHostDispatch(t, transcripts, repo, "gateway/pinned")
+	writeOrphanSubagent(t, transcripts, "s1", "independent", "other-dispatch", repo, "I074 independent legacy evidence", "claude-haiku-4-5")
+	host := writeAuditHostConfig(t, `{
+  "schema_version": 1, "host_id": "host", "harnesses": {
+    "claude": {"available": false, "executable": "claude", "launch_contract_ref": "fleet:x", "models": {}}
+  }, "pins": {}}
+`)
+
+	rep, err := runWithHostPath(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts}, host, func(string) (string, error) { return "/bin/claude", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I074"]
+	if len(row.DeclarationEvents) != 1 || row.DeclarationEvents[0].Verdict != VerdictDeclarationUnconfirmable {
+		t.Fatalf("declaration events = %#v, want one unconfirmable completed declaration", row.DeclarationEvents)
+	}
+	if row.Verdict != VerdictSilentDescent || !rep.Blocking() {
+		t.Fatalf("combined verdict = %q (%s), blocking=%v; want independent legacy silent descent", row.Verdict, row.Detail, rep.Blocking())
+	}
+}
+
 func writeAuditHostDispatch(t *testing.T, transcripts, repo, observedModel string) {
 	t.Helper()
 	line := `{"type":"assistant","cwd":` + mustJSON(t, repo) + `,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"herdr agent start worker --kind claude --pane 1 -- claude --model gateway-pinned --effort high I074"}}]}}` + "\n"

@@ -366,40 +366,39 @@ func judgeHostDeclarations(repoDir, hostPath string, t ticket, dispatches []disp
 		if d.harness == "" || d.model == "" || d.effort == "" || !d.identity.usable() {
 			continue
 		}
-		resolution, err := model.ResolveForHost(repoDir, hostPath, d.harness, t.tier, nil)
-		if err != nil {
-			continue
-		}
 		evidence := DeclarationEvidence{
 			Identity:       d.identity,
 			Harness:        d.harness,
 			Model:          d.model,
-			ExpectedModel:  resolution.Entry.ID,
-			ExpectedEffort: resolution.Entry.Effort,
 			DeclaredEffort: d.effort,
 			ObservedEffort: "-",
 			ModelStatus:    DeclarationModelUnconfirmable,
 			Correlation:    formatEvidenceIdentity(d.identity),
 		}
-		for _, a := range agents {
-			if !a.identity.usable() || a.identity != d.identity {
-				continue
-			}
-			for _, observedModel := range a.models {
-				state := judgeDeclarationModel(evidence, declarationObservation{identity: a.identity, model: observedModel, linkedWorker: true}, routes)
-				if state == DeclarationModelMismatch {
-					evidence.ModelStatus = state
-					evidence.ObservedModel = observedModel
-					evidence.Verdict = VerdictDeclarationObservedMismatch
+		resolution, err := model.ResolveForHost(repoDir, hostPath, d.harness, t.tier, nil)
+		if err == nil {
+			evidence.ExpectedModel = resolution.Entry.ID
+			evidence.ExpectedEffort = resolution.Entry.Effort
+			for _, a := range agents {
+				if !a.identity.usable() || a.identity != d.identity {
+					continue
+				}
+				for _, observedModel := range a.models {
+					state := judgeDeclarationModel(evidence, declarationObservation{identity: a.identity, model: observedModel, linkedWorker: true}, routes)
+					if state == DeclarationModelMismatch {
+						evidence.ModelStatus = state
+						evidence.ObservedModel = observedModel
+						evidence.Verdict = VerdictDeclarationObservedMismatch
+						break
+					}
+					if state == DeclarationModelConfirmed {
+						evidence.ModelStatus = state
+						evidence.ObservedModel = observedModel
+					}
+				}
+				if evidence.ModelStatus == DeclarationModelMismatch {
 					break
 				}
-				if state == DeclarationModelConfirmed {
-					evidence.ModelStatus = state
-					evidence.ObservedModel = observedModel
-				}
-			}
-			if evidence.ModelStatus == DeclarationModelMismatch {
-				break
 			}
 		}
 		evidence = judgeDeclarationEvidence(evidence, effortAuthorized(l, t.id, evidence.ExpectedEffort, evidence.DeclaredEffort))

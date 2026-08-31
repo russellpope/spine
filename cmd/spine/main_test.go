@@ -1433,6 +1433,32 @@ func TestAuditRoutingAppendsExplainableHostDeclarationFields(t *testing.T) {
 	}
 }
 
+func TestAuditRoutingRendersMissingFinalRouteAsMissingProof(t *testing.T) {
+	var out bytes.Buffer
+	report := audit.Report{Tickets: []audit.TicketRow{{
+		ID: "I074", Tier: "routine", Verdict: audit.VerdictDeclarationUnconfirmable,
+		DeclarationEvents: []audit.DeclarationEvidence{{
+			Harness: "claude", Model: "gateway-pinned", DeclaredEffort: "high",
+			ObservedEffort: "-", ModelStatus: audit.DeclarationModelUnconfirmable, ObservedEffortStatus: "unconfirmable",
+			Correlation: "source:claude session:s1 dispatch:toolu_1",
+		}},
+	}}}
+	if code := printAuditRoutingReport(&out, report); code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+	row := auditRoutingRow(t, out.String(), "I074")
+	for _, want := range []string{
+		"expected-pair=-@-",
+		"declared=claude,gateway-pinned,high",
+		"model-confirmation=unconfirmable",
+		"correlation=source:claude session:s1 dispatch:toolu_1",
+	} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("row = %q, want %q", row, want)
+		}
+	}
+}
+
 func TestAuditRoutingDeclarationExitBehaviorPreservesLegacyBlocking(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

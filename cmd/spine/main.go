@@ -1028,12 +1028,18 @@ func declarationEventOutput(events []audit.DeclarationEvidence) string {
 	if len(events) == 0 {
 		return ""
 	}
+	dash := func(value string) string {
+		if value == "" {
+			return "-"
+		}
+		return value
+	}
 	parts := make([]string, 0, len(events))
 	for _, event := range events {
 		parts = append(parts, fmt.Sprintf(
 			"expected-pair=%s@%s declared=%s,%s,%s model-confirmation=%s observed-effort-status=%s correlation=%s",
-			event.ExpectedModel, event.ExpectedEffort, event.Harness, event.Model, event.DeclaredEffort,
-			event.ModelStatus, event.ObservedEffortStatus, event.Correlation))
+			dash(event.ExpectedModel), dash(event.ExpectedEffort), dash(event.Harness), dash(event.Model), dash(event.DeclaredEffort),
+			dash(string(event.ModelStatus)), dash(event.ObservedEffortStatus), dash(event.Correlation)))
 	}
 	return " " + strings.Join(parts, ";")
 }
