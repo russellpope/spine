@@ -127,28 +127,34 @@ type Verdict string
 
 // Verdict values, worst first.
 const (
-	VerdictSilentDescent          Verdict = "silent-descent"          // blocking
-	VerdictUnmappedDispatch       Verdict = "unmapped-dispatch"       // warn
-	VerdictUnexplainedFallback    Verdict = "unexplained-fallback"    // warn
-	VerdictEscalatedNoReason      Verdict = "escalated-no-reason"     // warn
-	VerdictNoTranscript           Verdict = "no-transcript"           // warn
-	VerdictUnattributedTranscript Verdict = "unattributed-transcript" // warn (D24, ticket I044)
-	VerdictEscalatedWithReason    Verdict = "escalated-with-reason"   // advisory
-	VerdictDiscardedWithReason    Verdict = "discarded-with-reason"   // advisory
-	VerdictMatch                  Verdict = "match"
-	VerdictExempt                 Verdict = "exempt"      // informational (D27, ticket I046): tier: n/a opts out
-	VerdictUnannotated            Verdict = "unannotated" // informational
+	VerdictSilentDescent               Verdict = "silent-descent"             // blocking
+	VerdictDeclarationObservedMismatch Verdict = "declared-observed-mismatch" // blocking
+	VerdictDeclarationEffortMismatch   Verdict = "declared-effort-mismatch"   // blocking
+	VerdictDeclarationUnconfirmable    Verdict = "unconfirmable"              // advisory
+	VerdictUnmappedDispatch            Verdict = "unmapped-dispatch"          // warn
+	VerdictUnexplainedFallback         Verdict = "unexplained-fallback"       // warn
+	VerdictEscalatedNoReason           Verdict = "escalated-no-reason"        // warn
+	VerdictNoTranscript                Verdict = "no-transcript"              // warn
+	VerdictUnattributedTranscript      Verdict = "unattributed-transcript"    // warn (D24, ticket I044)
+	VerdictEscalatedWithReason         Verdict = "escalated-with-reason"      // advisory
+	VerdictDiscardedWithReason         Verdict = "discarded-with-reason"      // advisory
+	VerdictMatch                       Verdict = "match"
+	VerdictExempt                      Verdict = "exempt"      // informational (D27, ticket I046): tier: n/a opts out
+	VerdictUnannotated                 Verdict = "unannotated" // informational
 )
 
 // severity orders verdicts for worst-token aggregation; higher is worse.
 var severity = map[Verdict]int{
-	VerdictMatch:               0,
-	VerdictEscalatedWithReason: 1,
-	VerdictDiscardedWithReason: 1,
-	VerdictEscalatedNoReason:   2,
-	VerdictUnexplainedFallback: 3,
-	VerdictUnmappedDispatch:    4,
-	VerdictSilentDescent:       5,
+	VerdictMatch:                       0,
+	VerdictEscalatedWithReason:         1,
+	VerdictDiscardedWithReason:         1,
+	VerdictEscalatedNoReason:           2,
+	VerdictUnexplainedFallback:         3,
+	VerdictUnmappedDispatch:            4,
+	VerdictSilentDescent:               5,
+	VerdictDeclarationUnconfirmable:    2,
+	VerdictDeclarationObservedMismatch: 6,
+	VerdictDeclarationEffortMismatch:   6,
 }
 
 // TicketRow is one ticket's audit outcome.
@@ -162,6 +168,7 @@ type TicketRow struct {
 	DeclaredEffort    string
 	DeclarationStatus string
 	ObservedEffort    string
+	DeclarationEvents []DeclarationEvidence
 }
 
 // DispatchInfo is an informational, never-judged dispatch record.
@@ -199,7 +206,7 @@ type Report struct {
 // Blocking reports whether any ticket carries a blocking verdict.
 func (r Report) Blocking() bool {
 	for _, t := range r.Tickets {
-		if t.Verdict == VerdictSilentDescent {
+		if t.Verdict == VerdictSilentDescent || t.Verdict == VerdictDeclarationObservedMismatch || t.Verdict == VerdictDeclarationEffortMismatch {
 			return true
 		}
 	}
@@ -231,6 +238,165 @@ type evidenceIdentity struct {
 
 func (i evidenceIdentity) usable() bool {
 	return i.source != "" && i.session != "" && i.dispatch != ""
+}
+
+// DeclarationEvidence keeps the separate raw facts needed to explain an
+// I074 declaration judgment. Empty observation fields mean no transcript
+// evidence was available; they never stand for a transport default.
+type DeclarationEvidence struct {
+	Identity             evidenceIdentity
+	Harness              string
+	Model                string
+	ExpectedModel        string
+	ExpectedEffort       string
+	DeclaredEffort       string
+	ObservedModel        string
+	ObservedEffort       string
+	ModelStatus          declarationModelState
+	DeclarationStatus    string
+	ObservedEffortStatus string
+	Verdict              Verdict
+}
+
+type declarationModelState string
+
+const (
+	declarationModelConfirmed     declarationModelState = "confirmed"
+	declarationModelMismatch      declarationModelState = "mismatch"
+	declarationModelUnconfirmable declarationModelState = "unconfirmable"
+)
+
+type observedRoute struct {
+	harness string
+	model   string
+	effort  string
+}
+
+// observedRouteIndex is deliberately host-local. It is built exclusively
+// from the validated I072 configuration and has no alias/history fallback.
+type observedRouteIndex map[string]observedRoute
+
+func newObservedRouteIndex(config hostconfig.Config) observedRouteIndex {
+	routes := observedRouteIndex{}
+	for harnessName, harness := range config.Harnesses {
+		for modelID, route := range harness.Models {
+			for _, observedID := range route.ObservedIDs {
+				routes[observedID] = observedRoute{harness: harnessName, model: modelID}
+			}
+		}
+	}
+	return routes
+}
+
+type declarationObservation struct {
+	identity     evidenceIdentity
+	model        string
+	effort       string
+	linkedWorker bool
+}
+
+// judgeDeclarationModel permits confirmation only from one linked worker
+// event with the complete controller dispatch identity. A root/session match
+// is intentionally insufficient, even when its raw model happens to match.
+func judgeDeclarationModel(declared DeclarationEvidence, observed declarationObservation, routes observedRouteIndex) declarationModelState {
+	if !declared.Identity.usable() || !observed.identity.usable() || !observed.linkedWorker || declared.Identity != observed.identity || declared.Harness == "" || observed.model == "" {
+		return declarationModelUnconfirmable
+	}
+	route, ok := routes[observed.model]
+	if !ok || route.harness != declared.Harness {
+		return declarationModelUnconfirmable
+	}
+	if declared.Model != declared.ExpectedModel || route.model != declared.ExpectedModel {
+		return declarationModelMismatch
+	}
+	return declarationModelConfirmed
+}
+
+func judgeHostDeclarations(repoDir, hostPath string, t ticket, dispatches []dispatch, agents []subagent, routes observedRouteIndex, l ledger) []DeclarationEvidence {
+	if t.tier == "" || t.tier == "n/a" {
+		return nil
+	}
+	var out []DeclarationEvidence
+	for _, d := range dispatches {
+		if d.harness == "" || d.model == "" || d.effort == "" || !d.identity.usable() {
+			continue
+		}
+		resolution, err := model.ResolveForHost(repoDir, hostPath, d.harness, t.tier, nil)
+		if err != nil {
+			continue
+		}
+		evidence := DeclarationEvidence{
+			Identity:             d.identity,
+			Harness:              d.harness,
+			Model:                d.model,
+			ExpectedModel:        resolution.Entry.ID,
+			ExpectedEffort:       resolution.Entry.Effort,
+			DeclaredEffort:       d.effort,
+			ObservedEffort:       "-",
+			ModelStatus:          declarationModelUnconfirmable,
+			DeclarationStatus:    "unconfirmable",
+			ObservedEffortStatus: "unconfirmable",
+			Verdict:              VerdictDeclarationUnconfirmable,
+		}
+		if d.effort == evidence.ExpectedEffort {
+			evidence.DeclarationStatus = "target-match"
+		} else if effortAuthorized(l, t.id, evidence.ExpectedEffort, d.effort) {
+			evidence.DeclarationStatus = "exact-authorized-deviation"
+		} else {
+			evidence.DeclarationStatus = "unauthorized-declaration"
+			evidence.Verdict = VerdictDeclarationEffortMismatch
+		}
+		for _, a := range agents {
+			if !a.identity.usable() || a.identity != d.identity {
+				continue
+			}
+			for _, observedModel := range a.models {
+				state := judgeDeclarationModel(evidence, declarationObservation{identity: a.identity, model: observedModel, linkedWorker: true}, routes)
+				if state == declarationModelMismatch {
+					evidence.ModelStatus = state
+					evidence.ObservedModel = observedModel
+					evidence.Verdict = VerdictDeclarationObservedMismatch
+					break
+				}
+				if state == declarationModelConfirmed {
+					evidence.ModelStatus = state
+					evidence.ObservedModel = observedModel
+				}
+			}
+			if evidence.ModelStatus == declarationModelMismatch {
+				break
+			}
+		}
+		out = append(out, evidence)
+	}
+	return out
+}
+
+func aggregateDeclarationEvents(events []DeclarationEvidence) (Verdict, string, bool) {
+	if len(events) == 0 {
+		return "", "", false
+	}
+	verdict := VerdictDeclarationUnconfirmable
+	for _, event := range events {
+		if severity[event.Verdict] > severity[verdict] {
+			verdict = event.Verdict
+		}
+	}
+	return verdict, "host declaration evidence: " + string(verdict), true
+}
+
+func summarizeDeclarationEvents(events []DeclarationEvidence) (expected, declared, status, observed string) {
+	values := func(selectValue func(DeclarationEvidence) string) string {
+		out := make([]string, 0, len(events))
+		for _, event := range events {
+			out = append(out, selectValue(event))
+		}
+		return strings.Join(out, ",")
+	}
+	return values(func(event DeclarationEvidence) string { return event.ExpectedEffort }),
+		values(func(event DeclarationEvidence) string { return event.DeclaredEffort }),
+		values(func(event DeclarationEvidence) string { return event.DeclarationStatus }),
+		values(func(event DeclarationEvidence) string { return event.ObservedEffort })
 }
 
 // tokenValues extracts the raw model strings from a slice of evidence
@@ -287,7 +453,8 @@ func Run(opts Options) (Report, error) {
 }
 
 func runWithHostPath(opts Options, hostPath string, lookup func(string) (string, error)) (Report, error) {
-	if err := preflightHostConfig(hostPath, lookup); err != nil {
+	hostConfig, hostConfigured, err := loadHostConfig(hostPath, lookup)
+	if err != nil {
 		return Report{}, err
 	}
 	repoDir := opts.RepoDir
@@ -537,11 +704,22 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 	}
 
 	coarseNotes := coarseLinkageNotes(rootTickets, dispatches, linked)
+	var observedRoutes observedRouteIndex
+	if hostConfigured {
+		observedRoutes = newObservedRouteIndex(hostConfig)
+	}
 	for _, t := range tickets {
 		tokens := evidence[t.id]
 		row := TicketRow{ID: t.id, Tier: t.tier, Actuals: dedupSorted(tokenValues(tokens))}
 		row.ExpectedEffort, row.DeclaredEffort, row.DeclarationStatus, row.ObservedEffort = summarizeEffortDeclarations(repoDir, t, declarations[t.id], ledger)
 		row.Verdict, row.Detail = judge(t, tokens, mappings, ledger)
+		if hostConfigured {
+			row.DeclarationEvents = judgeHostDeclarations(repoDir, hostPath, t, declarations[t.id], agents, observedRoutes, ledger)
+			if verdict, detail, ok := aggregateDeclarationEvents(row.DeclarationEvents); ok {
+				row.Verdict, row.Detail = verdict, detail
+				row.ExpectedEffort, row.DeclaredEffort, row.DeclarationStatus, row.ObservedEffort = summarizeDeclarationEvents(row.DeclarationEvents)
+			}
+		}
 		// D24 (ticket I044): a ticket that landed on no-transcript — zero
 		// attributed evidence — upgrades to unattributed-transcript when
 		// repo-scoped codex material mentioned it but failed attribution
@@ -579,21 +757,29 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 // intentionally does not infer reachability for unpinned preferences or
 // alter any preference-only audit mapping; those are I074 concerns.
 func preflightHostConfig(path string, lookup func(string) (string, error)) error {
+	_, _, err := loadHostConfig(path, lookup)
+	return err
+}
+
+func loadHostConfig(path string, lookup func(string) (string, error)) (hostconfig.Config, bool, error) {
 	if path == "" {
 		var err error
 		path, err = hostconfig.DefaultPath()
 		if err != nil {
-			return err
+			return hostconfig.Config{}, false, err
 		}
 	}
 	if lookup == nil {
 		lookup = exec.LookPath
 	}
-	_, err := hostconfig.Load(path, model.Flavors(), lookup)
+	config, err := hostconfig.Load(path, model.Flavors(), lookup)
 	if errors.Is(err, hostconfig.ErrNotConfigured) {
-		return nil
+		return hostconfig.Config{}, false, nil
 	}
-	return err
+	if err != nil {
+		return hostconfig.Config{}, false, err
+	}
+	return config, true, nil
 }
 
 // nearMissDetail matches a ticket's token against every accumulated codex
