@@ -138,7 +138,7 @@ func writeDispatchTranscript(t *testing.T, repoDir, transcriptsDir string, dispa
 
 func TestValidatedLaunchIDsRemainMappedInAudit(t *testing.T) {
 	for _, tc := range []struct {
-		name, workflow, id, flavor, tier string
+		name, workflow, id, harness, tier string
 	}{
 		{"embedded current", "template_version: 12\n", "claude-fable-5", "claude", "primary"},
 		{"safe deliberate override", "template_version: 12\nmodel_routing:\n  claude.primary: bespoke-audit-safe\n", "bespoke-audit-safe", "claude", "primary"},
@@ -147,7 +147,7 @@ func TestValidatedLaunchIDsRemainMappedInAudit(t *testing.T) {
 			dir := t.TempDir()
 			writeAuditRepo(t, dir, tc.workflow, map[string]string{"I951": tc.tier})
 			validated, err := model.ValidateLaunch(model.LaunchRequest{
-				RepoDir: dir, Flavor: tc.flavor, Tier: tc.tier, MaxTemplateVersion: 12,
+				RepoDir: dir, Harness: tc.harness, Tier: tc.tier, MaxTemplateVersion: 12,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -163,7 +163,7 @@ func TestValidatedLaunchIDsRemainMappedInAudit(t *testing.T) {
 			}
 			row := rowsByID(t, report)["I951"]
 			if row.Verdict == VerdictUnmappedDispatch {
-				t.Fatalf("validated %s ID %q became unmapped under unchanged policy: %s", tc.flavor, validated.ID, row.Detail)
+				t.Fatalf("validated %s ID %q became unmapped under unchanged policy: %s", tc.harness, validated.ID, row.Detail)
 			}
 		})
 	}
@@ -171,48 +171,48 @@ func TestValidatedLaunchIDsRemainMappedInAudit(t *testing.T) {
 
 func TestValidationAndAuditShareStrictActiveRouteFromSameFile(t *testing.T) {
 	for _, tc := range []struct {
-		name, workflow, flavor, tier, id string
-		configError                      bool
+		name, workflow, harness, tier, id string
+		configError                       bool
 	}{
 		{
 			name:        "malformed header",
 			workflow:    "template_version: 12\nmodel_routing: bogus\n  codex.primary: bespoke-safe\n",
-			flavor:      "codex",
+			harness:     "codex",
 			tier:        "primary",
 			configError: true,
 		},
 		{
 			name:        "raw key whitespace",
 			workflow:    "template_version: 12\nmodel_routing:\n  codex.primary : bespoke-safe\n",
-			flavor:      "codex",
+			harness:     "codex",
 			tier:        "primary",
 			configError: true,
 		},
 		{
 			name:        "duplicate requested key",
 			workflow:    "template_version: 12\nmodel_routing:\n  codex.primary: first-safe\n  codex.primary: second-safe\n",
-			flavor:      "codex",
+			harness:     "codex",
 			tier:        "primary",
 			configError: true,
 		},
 		{
 			name:     "commented safe override",
 			workflow: "template_version: 12\nmodel_routing: # routes\n  codex.primary: comment-safe # selected\n",
-			flavor:   "codex",
+			harness:  "codex",
 			tier:     "primary",
 			id:       "comment-safe",
 		},
 		{
 			name:     "selected legacy bare row",
 			workflow: "template_version: 12\nmodel_routing:\n  primary: claude-bare-safe\n",
-			flavor:   "claude",
+			harness:  "claude",
 			tier:     "primary",
 			id:       "claude-bare-safe",
 		},
 		{
 			name:     "dotted shadows duplicate bare rows",
 			workflow: "template_version: 12\nmodel_routing:\n  claude.primary: claude-dotted-safe\n  primary: first-bare\n  primary: second-bare\n",
-			flavor:   "claude",
+			harness:  "claude",
 			tier:     "primary",
 			id:       "claude-dotted-safe",
 		},
@@ -221,7 +221,7 @@ func TestValidationAndAuditShareStrictActiveRouteFromSameFile(t *testing.T) {
 			dir := t.TempDir()
 			writeAuditRepo(t, dir, tc.workflow, map[string]string{"I954": tc.tier})
 			validated, validationErr := model.ValidateLaunch(model.LaunchRequest{
-				RepoDir: dir, Flavor: tc.flavor, Tier: tc.tier, MaxTemplateVersion: 12,
+				RepoDir: dir, Harness: tc.harness, Tier: tc.tier, MaxTemplateVersion: 12,
 			})
 			transcripts := t.TempDir()
 			if tc.configError {
@@ -266,7 +266,7 @@ func TestAliasAndHistoryRemainAuditEvidenceButNotLaunchIDs(t *testing.T) {
 		{"claude-sonnet-5", model.ReasonRetiredModel},
 	} {
 		_, err := model.ValidateLaunch(model.LaunchRequest{
-			RepoDir: dir, Flavor: "claude", Tier: "routine", Expected: tc.id, MaxTemplateVersion: 12,
+			RepoDir: dir, Harness: "claude", Tier: "routine", Expected: tc.id, MaxTemplateVersion: 12,
 		})
 		var refusal *model.LaunchRefusal
 		if !errors.As(err, &refusal) || refusal.Reason != tc.reason {
@@ -360,7 +360,7 @@ func TestSubstringTokenNoLongerMaps(t *testing.T) {
 		t.Errorf("I811 verdict = %s (%s), want unmapped-dispatch — substring matching must be gone", r.Verdict, r.Detail)
 	}
 	if !strings.Contains(r.Detail, "claude") {
-		t.Errorf("I811 detail should name the flavor the token failed to resolve in, got %q", r.Detail)
+		t.Errorf("I811 detail should name the harness the token failed to resolve in, got %q", r.Detail)
 	}
 	if r := rows["I812"]; r.Verdict != VerdictMatch {
 		t.Errorf("I812 verdict = %s (%s), want match via the declared alias", r.Verdict, r.Detail)
@@ -402,8 +402,8 @@ func TestHistoricalIDMatchesByExactID(t *testing.T) {
 	}
 }
 
-// I111 extends D15: an id declared under exactly one resolved flavor selects
-// that flavor even when the transcript came from the Claude layout.
+// I111 extends D15: an id declared under exactly one resolved harness selects
+// that harness even when the transcript came from the Claude layout.
 func TestUniqueCodexIDOverridesClaudeTranscriptSource(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I831": "primary"})
@@ -414,44 +414,44 @@ func TestUniqueCodexIDOverridesClaudeTranscriptSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r := rowsByID(t, rep)["I831"]; r.Verdict != VerdictMatch {
-		t.Errorf("I831 verdict = %s (%s), want match through the uniquely identified codex flavor", r.Verdict, r.Detail)
+		t.Errorf("I831 verdict = %s (%s), want match through the uniquely identified codex harness", r.Verdict, r.Detail)
 	}
 }
 
-// I040: proves the per-token flavor seam directly. judgeToken must resolve
-// each evidenceToken within the table named by its own flavor field, not a
+// I040: proves the per-token harness seam directly. judgeToken must resolve
+// each evidenceToken within the table named by its own harness field, not a
 // single table shared across every token judged for a ticket. I111 now
 // exercises this end to end; this unit test retains the lower-level guard.
-func TestJudgeTokenResolvesWithinItsOwnFlavor(t *testing.T) {
+func TestJudgeTokenResolvesWithinItsOwnHarness(t *testing.T) {
 	mappings := map[string]map[string]resolvedTier{
 		"claude": {"primary": {id: "claude-model-x"}},
 		"codex":  {"primary": {id: "codex-model-x"}},
 	}
 	tk := ticket{id: "I900", tier: "primary"}
 
-	// Same declared tier, disjoint tables: a codex-flavored token matches
+	// Same declared tier, disjoint tables: a codex-harnessed token matches
 	// the codex entry...
-	if v, d := judgeToken(evidenceToken{value: "codex-model-x", flavor: "codex"}, tk, mappings, ledger{}); v != VerdictMatch {
-		t.Errorf("codex-flavored token: verdict = %s (%s), want match against the codex table", v, d)
+	if v, d := judgeToken(evidenceToken{value: "codex-model-x", harness: "codex"}, tk, mappings, ledger{}); v != VerdictMatch {
+		t.Errorf("codex-harnessed token: verdict = %s (%s), want match against the codex table", v, d)
 	}
-	// ...the identical string tagged claude instead must not: the flavor on
+	// ...the identical string tagged claude instead must not: the harness on
 	// the token, not the value, decides which table resolves it.
-	if v, d := judgeToken(evidenceToken{value: "codex-model-x", flavor: "claude"}, tk, mappings, ledger{}); v != VerdictUnmappedDispatch {
-		t.Errorf("claude-flavored token carrying a codex-only id: verdict = %s (%s), want unmapped-dispatch", v, d)
+	if v, d := judgeToken(evidenceToken{value: "codex-model-x", harness: "claude"}, tk, mappings, ledger{}); v != VerdictUnmappedDispatch {
+		t.Errorf("claude-harnessed token carrying a codex-only id: verdict = %s (%s), want unmapped-dispatch", v, d)
 	}
-	// A claude-flavored token still matches the claude table normally.
-	if v, d := judgeToken(evidenceToken{value: "claude-model-x", flavor: "claude"}, tk, mappings, ledger{}); v != VerdictMatch {
-		t.Errorf("claude-flavored token: verdict = %s (%s), want match against the claude table", v, d)
+	// A claude-harnessed token still matches the claude table normally.
+	if v, d := judgeToken(evidenceToken{value: "claude-model-x", harness: "claude"}, tk, mappings, ledger{}); v != VerdictMatch {
+		t.Errorf("claude-harnessed token: verdict = %s (%s), want match against the claude table", v, d)
 	}
-	// A flavor with no resolved table at all degrades to unmapped, never a
+	// A harness with no resolved table at all degrades to unmapped, never a
 	// panic or a silent match.
-	if v, d := judgeToken(evidenceToken{value: "anything", flavor: "unknown-flavor"}, tk, mappings, ledger{}); v != VerdictUnmappedDispatch {
-		t.Errorf("unresolved-flavor token: verdict = %s (%s), want unmapped-dispatch", v, d)
+	if v, d := judgeToken(evidenceToken{value: "anything", harness: "unknown-harness"}, tk, mappings, ledger{}); v != VerdictUnmappedDispatch {
+		t.Errorf("unresolved-harness token: verdict = %s (%s), want unmapped-dispatch", v, d)
 	}
 }
 
 // Two tiers sharing one id is legal (the shipped codex routine/fallback pair
-// is the live case); within a flavor the ambiguity resolves by the rule the
+// is the live case); within a harness the ambiguity resolves by the rule the
 // audit has always applied: the reading closest to a non-verdict wins —
 // declared tier if among the candidates, else the highest ordered tier.
 // Ambiguity must not manufacture descent, and it must not hide real descent.

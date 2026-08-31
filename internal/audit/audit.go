@@ -8,7 +8,7 @@
 //   - docs/issues/*.md frontmatter: id plus the optional annotation fields
 //     tier / execution-mode / effort / risk-triggers / review-tier.
 //   - The shared model resolver (internal/model, design D13): tier -> id
-//     resolution is flavor-scoped and goes through model.Resolve, honoring
+//     resolution is harness-scoped and goes through model.Resolve, honoring
 //     the repo's WORKFLOW.md mirror overrides (dotted gen-10 keys; bare
 //     gen ≤9 tier keys as claude values) and falling back to the embedded
 //     defaults when the file, block, or key is absent — exactly what
@@ -42,11 +42,11 @@
 //     dispatch's model alias; a dispatch with neither contributes nothing.
 //     Main-session assistant models are never ticket evidence — inline
 //     execution is out of the audit's scope by design.
-//   - Flavor of a dispatch comes from its observed model id when that id maps
-//     to exactly one resolved flavor (I111, extending design D15). An id
-//     shared across flavors, or absent from all of them, retains the
-//     transcript-derived flavor. Source and flavor travel separately with
-//     the evidence token: flavor selects the model table, while source keeps
+//   - Harness of a dispatch comes from its observed model id when that id maps
+//     to exactly one resolved harness (I111, extending design D15). An id
+//     shared across harnesses, or absent from all of them, retains the
+//     transcript-derived harness. Source and harness travel separately with
+//     the evidence token: harness selects the model table, while source keeps
 //     transcript-layout behavior such as D28 repo qualification and codex
 //     source-file disclosure. The worker-session scan
 //     (D21, ticket I042) and the git-commit-probe repo scoping (D22, ticket
@@ -54,7 +54,7 @@
 //     records, linkable spawned-thread actuals, and top-level orchestrator
 //     sessions attributed via D21's opening-line rule, all repo-scoped by
 //     D22's cwd/commit-hash checks.
-//   - Token -> tier, within the dispatch's flavor: a token maps to a tier
+//   - Token -> tier, within the dispatch's harness: a token maps to a tier
 //     when it equals the resolved id, one of the table entry's explicitly
 //     declared aliases, or an id the entry shipped as a default before the
 //     current one (historical ids carry no aliases, so a pre-refresh
@@ -64,7 +64,7 @@
 //     the displaced default in a repo that pinned something else must
 //     surface as unmapped, not read as a match (Default and Inherited
 //     entries keep both). Substring containment is retired (design D13): it collides as
-//     model names multiply across flavors with unrelated naming schemes.
+//     model names multiply across harnesses with unrelated naming schemes.
 //     When a token maps to several tiers — two tiers sharing an id is legal,
 //     e.g. the shipped codex.routine/codex.fallback pair — the reading
 //     closest to a non-verdict wins: declared tier if present; else, when
@@ -219,11 +219,11 @@ func (r Report) Blocking() bool {
 var tierRank = map[string]int{"mechanical": 1, "routine": 2, "primary": 3, "fallback": 0}
 
 // evidenceToken is one observed model string paired with its model-derived
-// flavor and transcript source. judgeToken resolves value within flavor's
+// harness and transcript source. judgeToken resolves value within harness's
 // table alone; source controls transcript-layout behavior outside resolution.
 type evidenceToken struct {
 	value      string
-	flavor     string
+	harness    string
 	source     string
 	sourceFile string // source transcript file (D24, codex only); "" for claude, keeping claude details byte-identical
 	identity   evidenceIdentity
@@ -467,7 +467,7 @@ func summarizeDeclarationEvents(events []DeclarationEvidence) (expected, declare
 }
 
 // tokenValues extracts the raw model strings from a slice of evidence
-// tokens, for the report's flavor-agnostic TicketRow.Actuals display.
+// tokens, for the report's harness-agnostic TicketRow.Actuals display.
 func tokenValues(tokens []evidenceToken) []string {
 	values := make([]string, len(tokens))
 	for i, tok := range tokens {
@@ -489,7 +489,7 @@ type Options struct {
 	// (D28, ticket I047): an operator escape hatch, never an automatic
 	// build-start anchor (rejected at grill — see parseSince). Accepts
 	// RFC3339 or a bare YYYY-MM-DD date; empty means no filter. Applied to
-	// both flavors by comparing each transcript session's mtime against the
+	// both harnesses by comparing each transcript session's mtime against the
 	// cutoff (see parseSince's doc for why mtime, not an in-JSONL
 	// timestamp). An unparseable value is a usage error: Run returns it
 	// directly (never a Report), the same hard-error class as a missing
@@ -572,18 +572,18 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 	if !anyAnnotated(tickets) {
 		rep.Warnings = append(rep.Warnings, "nothing audited — no annotated tickets found (zero docs/issues tickets carry a tier: annotation); an exit-0 run judged nothing")
 	}
-	sourceFlavor := transcriptFlavor(transcriptsDirs[0])
-	// mappings is keyed by flavor so judgeToken can resolve each token
-	// within its own flavor's table (I040). Every shipped flavor resolves
+	sourceHarness := transcriptHarness(transcriptsDirs[0])
+	// mappings is keyed by harness so judgeToken can resolve each token
+	// within its own harness's table (I040). Every shipped harness resolves
 	// unconditionally so an observed model id can select its unique table;
 	// transcript source remains the tiebreaker for ambiguous or unknown ids.
 	mappings := map[string]map[string]resolvedTier{}
-	for _, flavor := range model.Flavors() {
-		mapping, err := resolveFlavorTiers(repoDir, flavor)
+	for _, harness := range model.Harnesses() {
+		mapping, err := resolveHarnessTiers(repoDir, harness)
 		if err != nil {
 			return Report{}, err
 		}
-		mappings[flavor] = mapping
+		mappings[harness] = mapping
 	}
 	ledger := readLedger(filepath.Join(repoDir, ".superpowers", "sdd", "progress.md"))
 	rep.Warnings = append(rep.Warnings, ledger.warnings...)
@@ -598,7 +598,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 		if discloseTranscriptDirs {
 			rep.Warnings = append(rep.Warnings, "scanning transcript dir: "+transcriptsDir)
 		}
-		moreDispatches, moreAgents, matched := readTranscripts(transcriptsDir, sourceFlavor, since, opts.Session, ticketTokens, &rep.Warnings)
+		moreDispatches, moreAgents, matched := readTranscripts(transcriptsDir, sourceHarness, since, opts.Session, ticketTokens, &rep.Warnings)
 		dispatches = append(dispatches, moreDispatches...)
 		agents = append(agents, moreAgents...)
 		sessionMatched = sessionMatched || matched
@@ -622,19 +622,19 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 		sessionMatched = sessionMatched || codexSessionMatched
 	}
 	for i := range dispatches {
-		dispatches[i].flavor = deriveFlavor(dispatches[i].model, dispatches[i].source, mappings)
+		dispatches[i].observedHarness = deriveHarness(dispatches[i].model, dispatches[i].source, mappings)
 	}
 	// M3 (I047 review): a non-empty --session that matched nothing anywhere
 	// (claude or codex) is silently misleading otherwise — an operator
 	// typo'd id produces an unexplained all-no-transcript audit, and codex
 	// root ids are invisible in filenames (rollout-<ts>-<uuid>.jsonl) so
 	// there's no other way to notice. Fires once, combined across both
-	// flavors, not per-reader.
+	// harnesses, not per-reader.
 	if opts.Session != "" && !sessionMatched {
 		rep.Warnings = append(rep.Warnings, fmt.Sprintf("--session %q matched no sessions", opts.Session))
 	}
 
-	evidence := map[string][]evidenceToken{}    // ticket id -> flavor-tagged model tokens
+	evidence := map[string][]evidenceToken{}    // ticket id -> harness-tagged model tokens
 	declarations := map[string][]dispatch{}     // ticket id -> raw controller declarations, one per retry
 	briefSources := map[string][]string{}       // ticket id -> resolved recorded brief paths (I101 D35)
 	claimed := map[int]bool{}                   // dispatch index -> matched a ticket
@@ -652,7 +652,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 			linkedCodex[a.toolUseID] = true
 		}
 	}
-	// codex ticket-token matching is case-insensitive (D20's "Flavor
+	// codex ticket-token matching is case-insensitive (D20's "Harness
 	// threading" closing paragraph); the claude reader's matching is
 	// untouched. codex dispatch descriptions/prompts are folded to upper
 	// case here rather than at parse time, so Unmatched's display text
@@ -695,7 +695,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 	// review referred-Q3, ticket I044): thread_spawn actuals link by ROOT
 	// session id only, so two dispatches for two different tickets sharing
 	// one root also share whatever actual evidence that root's subagent(s)
-	// contribute. Populated for every flavor: a claude toolUseID IS the
+	// contribute. Populated for every harness: a claude toolUseID IS the
 	// tool_use block's own id, unique per dispatch call, but that only means
 	// it can't be shared by two SEPARATE dispatch calls — a single Task
 	// dispatch whose own description names two ticket ids still claims both
@@ -722,7 +722,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 				continue // the subagent transcript below is the actual
 			}
 			if d.model != "" {
-				evidence[t.id] = append(evidence[t.id], evidenceToken{value: d.model, flavor: d.flavor, source: d.source, sourceFile: d.sourceFile, identity: d.identity})
+				evidence[t.id] = append(evidence[t.id], evidenceToken{value: d.model, harness: d.observedHarness, source: d.source, sourceFile: d.sourceFile, identity: d.identity})
 			}
 		}
 		for _, a := range agents {
@@ -756,7 +756,7 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 			if use {
 				for _, m := range a.models {
 					evidence[t.id] = append(evidence[t.id], evidenceToken{
-						value: m, flavor: deriveFlavor(m, a.source, mappings), source: a.source, sourceFile: a.sourceFile, identity: a.identity,
+						value: m, harness: deriveHarness(m, a.source, mappings), source: a.source, sourceFile: a.sourceFile, identity: a.identity,
 					})
 				}
 			}
@@ -841,7 +841,7 @@ func loadHostConfig(path string, lookup func(string) (string, error)) (hostconfi
 	if lookup == nil {
 		lookup = exec.LookPath
 	}
-	config, err := hostconfig.Load(path, model.Flavors(), lookup)
+	config, err := hostconfig.Load(path, model.Harnesses(), lookup)
 	if errors.Is(err, hostconfig.ErrNotConfigured) {
 		return hostconfig.Config{}, false, nil
 	}
@@ -892,7 +892,7 @@ func nearMissDetail(nms []codexNearMiss, id string) (string, bool) {
 // (readCodexSessions' own tagging) are eligible (final-review fix round,
 // Important-2). Without this, a single claude Task dispatch whose own
 // description names two ticket ids — rootTickets is populated for every
-// flavor, not just codex, see its doc — would fire this codex-worded note on
+// harness, not just codex, see its doc — would fire this codex-worded note on
 // pure-claude evidence, breaking the I040 claude-only byte-identity promise
 // with misleading, factually wrong text.
 func coarseLinkageNotes(rootTickets map[string]map[string]bool, dispatches []dispatch, linked map[string]bool) map[string]string {
@@ -932,7 +932,7 @@ func coarseLinkageNotes(rootTickets map[string]map[string]bool, dispatches []dis
 
 // judge decides one ticket's verdict from its declared tier, its observed
 // evidence tokens, and the ledger records. Each token resolves within its
-// own flavor's table (I040): judge itself never picks a flavor.
+// own harness's table (I040): judge itself never picks a harness.
 func judge(t ticket, tokens []evidenceToken, mappings map[string]map[string]resolvedTier, l ledger) (Verdict, string) {
 	if t.tier == "" {
 		return VerdictUnannotated, "no tier annotation — not judged"
@@ -1004,16 +1004,16 @@ func withSource(detail string, tok evidenceToken) string {
 }
 
 // judgeToken classifies a single observed evidence token against the
-// ticket's declared tier, resolving the token within its own flavor's table
+// ticket's declared tier, resolving the token within its own harness's table
 // — the per-token seam design D15 names and I040 makes real. A token whose
-// flavor has no resolved table (unreachable while only the claude reader is
+// harness has no resolved table (unreachable while only the claude reader is
 // wired) is treated the same as one that maps to no entry: unmapped, never a
 // crash or a silent match.
 func judgeToken(tok evidenceToken, t ticket, mappings map[string]map[string]resolvedTier, l ledger) (Verdict, string) {
-	mapping := mappings[tok.flavor]
+	mapping := mappings[tok.harness]
 	tiers := tiersOf(tok.value, mapping)
 	if len(tiers) == 0 {
-		return VerdictUnmappedDispatch, withSource(fmt.Sprintf("%s maps to no %s entry in the model table", tok.value, tok.flavor), tok)
+		return VerdictUnmappedDispatch, withSource(fmt.Sprintf("%s maps to no %s entry in the model table", tok.value, tok.harness), tok)
 	}
 	_, recordedFallback := l.fallback[t.id]
 	actual := pickTier(tiers, t.tier, recordedFallback)
@@ -1042,7 +1042,7 @@ func judgeToken(tok evidenceToken, t ticket, mappings map[string]map[string]reso
 }
 
 // tiersOf resolves a model token to every tier it could mean within one
-// flavor's resolved table: exact match on the resolved id, on an explicitly
+// harness's resolved table: exact match on the resolved id, on an explicitly
 // declared alias, or on an id the entry's default ever shipped (historical
 // ids carry no aliases — a pre-refresh transcript matches by full id only).
 // Substring containment is retired (design D13).
@@ -1060,7 +1060,7 @@ func tiersOf(token string, mapping map[string]resolvedTier) []string {
 // pickTier chooses the reading of an ambiguous token — one that maps to
 // several tiers because they share an id or alias, which the table permits
 // (the shipped codex.routine/codex.fallback "terra" pair is the live case;
-// design D15's flavor scoping decides between flavors, this rule decides
+// design D15's harness scoping decides between harnesses, this rule decides
 // within one): the declared tier if it is among the candidates; else, when
 // the ticket carries a FALLBACK record and fallback is among the
 // candidates, fallback (ADR 0012 / D25 — a recorded refusal-rerun wins the
@@ -1163,36 +1163,36 @@ func frontmatter(content string) map[string]string {
 	return fm
 }
 
-// transcriptFlavor names the flavor associated with one transcript source.
-// I111 narrows its authority: deriveFlavor uses it only when an observed id
-// is ambiguous across resolved flavors or unknown to all of them. It covers
+// transcriptHarness names the harness associated with one transcript source.
+// I111 narrows its authority: deriveHarness uses it only when an observed id
+// is ambiguous across resolved harnesses or unknown to all of them. It covers
 // the claude harness's ~/.claude/projects layout; readCodexSessions tags the
 // codex source directly.
-func transcriptFlavor(transcriptsDir string) string {
+func transcriptHarness(transcriptsDir string) string {
 	return "claude"
 }
 
-// deriveFlavor uses the observed model id when it identifies exactly one
-// resolved flavor. The transcript source retains D15's authority for an id
-// shared across flavors and preserves the existing behavior for unknown ids.
-func deriveFlavor(token, sourceFlavor string, mappings map[string]map[string]resolvedTier) string {
+// deriveHarness uses the observed model id when it identifies exactly one
+// resolved harness. The transcript source retains D15's authority for an id
+// shared across harnesses and preserves the existing behavior for unknown ids.
+func deriveHarness(token, sourceHarness string, mappings map[string]map[string]resolvedTier) string {
 	match := ""
-	for flavor, mapping := range mappings {
+	for harness, mapping := range mappings {
 		if len(tiersOf(token, mapping)) == 0 {
 			continue
 		}
 		if match != "" {
-			return sourceFlavor
+			return sourceHarness
 		}
-		match = flavor
+		match = harness
 	}
 	if match == "" {
-		return sourceFlavor
+		return sourceHarness
 	}
 	return match
 }
 
-// resolvedTier is the audit's view of one (flavor, tier) row, obtained
+// resolvedTier is the audit's view of one (harness, tier) row, obtained
 // through the strict launch validator so the audit's active leg judges exactly
 // what controlled dispatch-time validation returns. The audit owns no
 // WORKFLOW.md routing parser of its own.
@@ -1219,17 +1219,17 @@ func (rt resolvedTier) matches(token string) bool {
 	return false
 }
 
-// resolveFlavorTiers builds one flavor's tier -> resolvedTier table for
+// resolveHarnessTiers builds one harness's tier -> resolvedTier table for
 // repoDir via model.ResolveStrictActive. Strict repository configuration errors
 // refuse the audit rather than letting compatibility resolution select a
 // different active ID. Audit-only aliases and history are layered below after
 // the shared active result.
-func resolveFlavorTiers(repoDir, flavor string) (map[string]resolvedTier, error) {
+func resolveHarnessTiers(repoDir, harness string) (map[string]resolvedTier, error) {
 	mapping := map[string]resolvedTier{}
 	for _, tier := range model.Tiers {
-		e, err := model.ResolveStrictActive(repoDir, flavor, tier)
+		e, err := model.ResolveStrictActive(repoDir, harness, tier)
 		if err != nil {
-			return nil, fmt.Errorf("model launch policy resolution failed for %s.%s: %w", flavor, tier, err)
+			return nil, fmt.Errorf("model launch policy resolution failed for %s.%s: %w", harness, tier, err)
 		}
 		rt := resolvedTier{id: e.ID, aliases: e.Aliases}
 		// Provenance-scoped matching (I037 fix round 1): a deliberate
@@ -1242,7 +1242,7 @@ func resolveFlavorTiers(repoDir, flavor string) (map[string]resolvedTier, error)
 		// Inherited entries keep both — an inherited claude-opus-4-8 must
 		// keep matching its current default's aliases and history.
 		if e.Provenance != model.Override {
-			rt.history = model.HistoricalIDs(flavor, tier)
+			rt.history = model.HistoricalIDs(harness, tier)
 		}
 		mapping[tier] = rt
 	}
@@ -1549,7 +1549,7 @@ func validateDiscarded(l ledger, tickets []ticket, evidence map[string][]evidenc
 				if tok.identity != rec.identity || !discardEligible(tok, t, mappings, l) {
 					continue
 				}
-				actual := pickTier(tiersOf(tok.value, mappings[tok.flavor]), t.tier, l.fallback[t.id] != "")
+				actual := pickTier(tiersOf(tok.value, mappings[tok.harness]), t.tier, l.fallback[t.id] != "")
 				if actual == rec.tier {
 					matches++
 				}
@@ -1567,7 +1567,7 @@ func discardEligible(tok evidenceToken, t ticket, mappings map[string]map[string
 	if !tok.identity.usable() || t.tier == "" || t.tier == "n/a" {
 		return false
 	}
-	tiers := tiersOf(tok.value, mappings[tok.flavor])
+	tiers := tiersOf(tok.value, mappings[tok.harness])
 	if len(tiers) == 0 {
 		return false
 	}
@@ -1586,21 +1586,21 @@ func discardEligible(tok evidenceToken, t ticket, mappings map[string]map[string
 // --- transcript inputs (undocumented harness format; degrade, never fail) ---
 
 type dispatch struct {
-	toolUseID    string
-	description  string
-	prompt       string
-	briefText    string // I101: body recorded in the lead transcript, never read from disk
-	briefPath    string // normalized transcript path; disclosure is added in Task 3
-	briefCutoff  int    // I101 D32: evidence available when this spawn occurred
-	model        string
-	harness      string // raw controller declaration; never inferred from source
-	effort       string // declared worker effort, claude-team spawns only (I090); reported, never judged — see DispatchInfo.Effort
-	effortSource string
-	flavor       string // observed-model flavor, with source as D15 tiebreaker (I111)
-	source       string // transcript layout/source; distinct from model-derived flavor (I111)
-	sourceFile   string // source transcript file (D24, codex only); "" for claude
-	cwd          string // D28 (I047): the event line's own cwd, claude only; "" for codex (D22 scopes it separately)
-	identity     evidenceIdentity
+	toolUseID       string
+	description     string
+	prompt          string
+	briefText       string // I101: body recorded in the lead transcript, never read from disk
+	briefPath       string // normalized transcript path; disclosure is added in Task 3
+	briefCutoff     int    // I101 D32: evidence available when this spawn occurred
+	model           string
+	harness         string // raw controller declaration; never inferred from source
+	effort          string // declared worker effort, claude-team spawns only (I090); reported, never judged — see DispatchInfo.Effort
+	effortSource    string
+	observedHarness string // observed-model harness, with source as D15 tiebreaker (I111)
+	source          string // transcript layout/source; distinct from model-derived harness (I111)
+	sourceFile      string // source transcript file (D24, codex only); "" for claude
+	cwd             string // D28 (I047): the event line's own cwd, claude only; "" for codex (D22 scopes it separately)
+	identity        evidenceIdentity
 
 	// teamSpawn marks this record as a claude-team worker spawn (I090) —
 	// see DispatchInfo.TeamSpawn for what an unmatched one means.
@@ -1616,7 +1616,7 @@ type subagent struct {
 	toolUseID   string
 	description string
 	models      []string
-	source      string // transcript layout/source; each model derives its own flavor (I111)
+	source      string // transcript layout/source; each model derives its own harness (I111)
 	sourceFile  string // source transcript file (D24, codex only); "" for claude
 	cwd         string // D28 (I047): the subagent transcript's own session cwd, claude only
 	identity    evidenceIdentity
@@ -1797,7 +1797,7 @@ func sessionInScope(sf sessionFiles, mtime func(string) (time.Time, bool), since
 // readTranscripts collects Task/Agent dispatch records from every session
 // *.jsonl and actual models from <session>/subagents/agent-*.jsonl, linked
 // by the sidecar meta.json. Every record it emits is tagged with its source;
-// Run derives the model flavor after all resolved mappings are available.
+// Run derives the model harness after all resolved mappings are available.
 // since and sessionID implement D28's
 // --since/--session filters (ticket I047), applied once per session id
 // (I2 fix — see sessionFiles/sessionInScope): a zero since and empty
@@ -1850,7 +1850,7 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 		if sf.filePath != "" {
 			more, _, _ := scanJSONL(sf.filePath, warnings)
 			for i := range more {
-				more[i].flavor = source
+				more[i].observedHarness = source
 				more[i].source = source
 				more[i].identity = evidenceIdentity{source: source, session: id, dispatch: more[i].toolUseID}
 			}
@@ -1874,7 +1874,7 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 				}
 				more, models, cwd := scanJSONL(sub, warnings)
 				for i := range more {
-					more[i].flavor = source
+					more[i].observedHarness = source
 					more[i].source = source
 					more[i].identity = evidenceIdentity{source: source, session: id, dispatch: more[i].toolUseID}
 				}
@@ -1923,7 +1923,7 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 				}
 				workflowSession := id + "/" + filepath.Base(filepath.Dir(sub)) + "/" + strings.TrimSuffix(filepath.Base(sub), ".jsonl")
 				for i := range more {
-					more[i].flavor = source
+					more[i].observedHarness = source
 					more[i].source = source
 					more[i].identity = evidenceIdentity{source: source, session: workflowSession, dispatch: more[i].toolUseID}
 				}
@@ -2772,7 +2772,7 @@ func summarizeEffortDeclarations(repoDir string, t ticket, dispatches []dispatch
 		expectedEffort := "-"
 		if d.harness != "" && t.tier != "" {
 			entry, err := model.ResolveDispatchTarget(model.DispatchTargetRequest{
-				RepoDir: repoDir, Flavor: d.harness, Tier: t.tier, RequestedEffort: t.effort,
+				RepoDir: repoDir, Harness: d.harness, Tier: t.tier, RequestedEffort: t.effort,
 			})
 			if err == nil {
 				expectedEffort = entry.Effort

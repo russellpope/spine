@@ -58,7 +58,7 @@ model_routing:
 	}
 }
 
-// I036 rendered the gen-10 dotted flavor mirror, which the audit's pre-I037
+// I036 rendered the gen-10 dotted harness mirror, which the audit's pre-I037
 // bare-tier reader could not parse; TestGen10ScaffoldMirrorFailsLoudlyUntil-
 // AuditConsolidation pinned that loud failure. Its premise died with I037:
 // the audit now consumes the shared resolver, so a gen-10 scaffold resolves

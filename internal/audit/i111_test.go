@@ -75,7 +75,7 @@ func TestClaudeLayoutMixedModelsAreJudgedPerToken(t *testing.T) {
 		t.Fatalf("I113 actuals = %q, want both tokens", got)
 	}
 	if r.Verdict != VerdictMatch {
-		t.Fatalf("I113 verdict = %s (%s), want both tokens matched within their own flavor", r.Verdict, r.Detail)
+		t.Fatalf("I113 verdict = %s (%s), want both tokens matched within their own harness", r.Verdict, r.Detail)
 	}
 }
 

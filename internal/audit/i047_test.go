@@ -759,7 +759,7 @@ func TestSessionMatchingNothingWarns(t *testing.T) {
 // fire on claude-only evidence ---
 
 // Acceptance (Important-2, final whole-branch review): coarseLinkageNotes
-// gates on rootTickets, which is populated for EVERY flavor (see its own
+// gates on rootTickets, which is populated for EVERY harness (see its own
 // doc) — not just codex, despite the codex-specific wording of the
 // disclosure text it drives. A single claude Task dispatch whose own
 // description names two ticket ids claims both under that one toolUseID,

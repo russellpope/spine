@@ -729,10 +729,10 @@ func TestClaudeOnlyRepoAuditUnaffectedByAbsentCodexSessionsDir(t *testing.T) {
 }
 
 // Acceptance: mixed claude+codex evidence for the same ticket judges each
-// token within its own flavor's table — proving the flavor tag survives the
+// token within its own harness's table — proving the harness tag survives the
 // real codex reader end to end (not just the synthetic-mappings unit proof
 // in resolve_test.go).
-func TestCodexMixedClaudeAndCodexEvidenceJudgedPerFlavor(t *testing.T) {
+func TestCodexMixedClaudeAndCodexEvidenceJudgedPerHarness(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I048": "routine"})
 	tdir := t.TempDir()
@@ -755,10 +755,10 @@ func TestCodexMixedClaudeAndCodexEvidenceJudgedPerFlavor(t *testing.T) {
 	// (no linked subagent transcript to supersede it, unlike
 	// TestSubagentTranscriptIsTheActual) — dedupSorted sorts alphabetically.
 	if got := strings.Join(r.Actuals, ","); got != "gpt-5.6-terra,opus" {
-		t.Fatalf("I048 actuals = %q, want both flavors' evidence", got)
+		t.Fatalf("I048 actuals = %q, want both harnesses' evidence", got)
 	}
 	if r.Verdict != VerdictMatch {
-		t.Errorf("I048 verdict = %s (%s), want match — both tokens resolve within their own flavor's routine tier", r.Verdict, r.Detail)
+		t.Errorf("I048 verdict = %s (%s), want match — both tokens resolve within their own harness's routine tier", r.Verdict, r.Detail)
 	}
 }
 
@@ -1232,7 +1232,7 @@ func TestCodexMultiTokenOpeningLineAttributesToNeither(t *testing.T) {
 // happened to carry the ticket token uppercase already, so deleting the
 // fold left the suite green. A lowercase title line (plausible per D20's
 // own "lowercase by convention" note for task_name) must still attribute —
-// this is the Run-boundary, flavor-scoped seam the I040 Testing Decisions
+// this is the Run-boundary, harness-scoped seam the I040 Testing Decisions
 // clause explicitly permits testing.
 func TestCodexLowercaseOpeningMessageTitleAttributesCaseInsensitively(t *testing.T) {
 	codexDir := t.TempDir()

@@ -2,7 +2,7 @@
 // JSONL — the codex harness's session format, verified dated 2026-07-25 in
 // I009 and undocumented/version-drifting beyond that — into the SAME
 // dispatch/subagent structures the claude reader produces, tagged with the
-// "codex" flavor (I040's per-token seam), so Run's correlation and judgment
+// "codex" harness (I040's per-token seam), so Run's correlation and judgment
 // logic needs no codex-specific branch: only the parsing here differs.
 //
 // Evidence sources (D20), mirrored here:
@@ -780,7 +780,7 @@ func firstLineTicketMatches(text string, tokens []string) []string {
 // <dir>/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl, though any nesting is
 // accepted — collecting dispatch records and spawned-thread actuals (D20)
 // as the same dispatch/subagent structures readTranscripts produces,
-// tagged with the codex flavor, plus near-miss records (D24, ticket I044)
+// tagged with the codex harness, plus near-miss records (D24, ticket I044)
 // for repo-scoped material that mentioned a ticket but failed attribution.
 // Out-of-repo sessions (D22: neither cwdInsideRepo nor a known commit hash,
 // gitCommitProber) are excluded before anything else — including near-miss
@@ -963,7 +963,7 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 		root := res.meta.rootID()
 		for i := range res.dispatches {
 			res.dispatches[i].toolUseID = "codex:" + root
-			res.dispatches[i].flavor = "codex"
+			res.dispatches[i].harness = "codex"
 			res.dispatches[i].source = "codex"
 			res.dispatches[i].sourceFile = path
 			res.dispatches[i].identity.source = "codex"
@@ -1074,7 +1074,7 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 }
 
 // DefaultCodexSessionsDir derives the discovery default for codex's session
-// store (design D-doc, "Flavor threading" closing paragraph): $CODEX_HOME/
+// store (design D-doc, "Harness threading" closing paragraph): $CODEX_HOME/
 // sessions if CODEX_HOME is set, else ~/.codex/sessions. Mirrors
 // DefaultTranscriptsDir for the CLI's --codex-sessions flag.
 func DefaultCodexSessionsDir() (string, error) {

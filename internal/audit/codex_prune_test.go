@@ -24,7 +24,7 @@ import (
 // TestCodexMayContributeMatchesTicketTokenCaseInsensitive pins the token
 // half of the predicate: a token present anywhere in the raw bytes, matched
 // case-insensitively (codex's task_name convention lowercases ticket ids,
-// D20's "Flavor threading" closing paragraph) — and absent otherwise.
+// D20's "Harness threading" closing paragraph) — and absent otherwise.
 func TestCodexMayContributeMatchesTicketTokenCaseInsensitive(t *testing.T) {
 	data := []byte(`{"type":"response_item","payload":{"type":"function_call","name":"spawn_agent","arguments":"{\"task_name\":\"i049 fix\"}"}}`)
 	if !codexMayContribute(data, []string{"I049"}) {
