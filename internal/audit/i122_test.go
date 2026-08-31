@@ -244,6 +244,50 @@ func TestWorkflowEvidenceRejectsAncestorReplacement(t *testing.T) {
 	}
 }
 
+// Replacing the configured transcript root after it is opened must invalidate
+// every workflow evidence carrier. Revalidating only names beneath the retained
+// root would otherwise accept the renamed-away tree as current evidence.
+func TestWorkflowEvidenceRejectsTranscriptRootReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		evidence string
+		warning  string
+	}{
+		{name: "transcript", evidence: "transcript", warning: "workflow transcript unsafe — transcript skipped"},
+		{name: "sidecar", evidence: "sidecar", warning: "workflow metadata unsafe — transcript skipped"},
+		{name: "run", evidence: "run", warning: "workflow run metadata unsafe — model fallback skipped"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for attempt := 0; attempt < 3; attempt++ {
+				repo := t.TempDir()
+				writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I917": "routine"})
+				transcripts := t.TempDir()
+				model := "claude-sonnet-5"
+				if tc.evidence == "run" {
+					model = ""
+				}
+				writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I917", model, "workflow-subagent")
+				if tc.evidence == "run" {
+					writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-sonnet-5")
+				}
+
+				replaceWorkflowPathDuringOpen(t, tc.evidence, transcripts, repo, workflowEvidencePath(transcripts, tc.evidence), transcripts)
+
+				rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if row := rowsByID(t, rep)["I917"]; row.Verdict != VerdictNoTranscript {
+					t.Fatalf("attempt %d: I917 = %+v, want no-transcript after replacing transcript root for %s evidence", attempt, row, tc.name)
+				}
+				if !warningContains(rep.Warnings, tc.warning) {
+					t.Fatalf("attempt %d: warnings = %q, want %q", attempt, rep.Warnings, tc.warning)
+				}
+			}
+		})
+	}
+}
+
 func replaceWorkflowPathDuringOpen(t *testing.T, evidence, transcripts, repo, evidencePath, target string) {
 	t.Helper()
 	replaced := false
@@ -332,6 +376,56 @@ func TestWorkflowEvidenceAcceptsRestoredSameObject(t *testing.T) {
 			}
 			if row := rowsByID(t, rep)["I916"]; row.Verdict != VerdictMatch {
 				t.Fatalf("I916 = %+v, want match when the named path restores the same object", row)
+			}
+		})
+	}
+}
+
+func TestWorkflowEvidenceAcceptsRestoredTranscriptRootObject(t *testing.T) {
+	for _, evidence := range []string{"transcript", "sidecar", "run"} {
+		t.Run(evidence, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I918": "routine"})
+			transcriptsParent := t.TempDir()
+			transcripts := filepath.Join(transcriptsParent, "transcripts")
+			if err := os.Mkdir(transcripts, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			model := "claude-sonnet-5"
+			if evidence == "run" {
+				model = ""
+			}
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I918", model, "workflow-subagent")
+			if evidence == "run" {
+				writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-sonnet-5")
+			}
+
+			target := workflowEvidencePath(transcripts, evidence)
+			hook := func(path string) {
+				if path != target {
+					return
+				}
+				staged := transcripts + ".staged"
+				if err := os.Rename(transcripts, staged); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(staged, transcripts); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch evidence {
+			case "transcript":
+				setWorkflowTranscriptBeforeOpen(t, hook)
+			case "sidecar", "run":
+				setWorkflowMetadataBeforeOpen(t, hook)
+			}
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row := rowsByID(t, rep)["I918"]; row.Verdict != VerdictMatch {
+				t.Fatalf("I918 = %+v, want match when the transcript root path restores the same object", row)
 			}
 		})
 	}

@@ -1990,17 +1990,25 @@ type workflowPathComponent struct {
 }
 
 // openWorkflowFile resolves each named component under transcriptDir with
-// descriptor-relative opens. It retains every directory descriptor and its
-// identity until after the final file is opened, then resolves the whole named
-// chain again from the original root. A descriptor in a renamed-away tree is
-// safe to read but no longer proves evidence at the selected path.
+// descriptor-relative opens. It binds the opened root to the configured root
+// path's non-symlink directory identity, then retains every directory
+// descriptor and its identity until after the final file is opened. A
+// descriptor in a renamed-away tree is safe to read but no longer proves
+// evidence at the selected path.
 func openWorkflowFile(transcriptDir string, components []string, name string, beforeOpen func(string)) (*os.File, error) {
+	configuredRootInfo, err := os.Lstat(transcriptDir)
+	if err != nil {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
+	}
+	if configuredRootInfo.Mode()&os.ModeSymlink != 0 || !configuredRootInfo.IsDir() {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
 	root, err := os.OpenRoot(transcriptDir)
 	if err != nil {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
 	}
 	rootInfo, err := root.Stat(".")
-	if err != nil || !rootInfo.IsDir() {
+	if err != nil || !rootInfo.IsDir() || !os.SameFile(configuredRootInfo, rootInfo) {
 		_ = root.Close()
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe, err: err}
 	}
@@ -2054,19 +2062,23 @@ func openWorkflowFile(transcriptDir string, components []string, name string, be
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe, err: err}
 	}
 	opened, statErr := file.Stat()
-	if statErr != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || !workflowPathStillBound(chain, name, info, file) {
+	if statErr != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || !workflowPathStillBound(transcriptDir, chain, name, info, file) {
 		_ = file.Close()
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 	}
 	return file, nil
 }
 
-// workflowPathStillBound proves the retained directories and file still match
-// the names selected below the original root. All fresh descriptors are closed
-// before return; the retained chain lives through this check to prevent a
-// stale-but-safe directory handle from becoming accepted evidence.
-func workflowPathStillBound(chain []workflowPathComponent, name string, fileInfo os.FileInfo, file *os.File) bool {
+// workflowPathStillBound proves the configured transcript root and retained
+// directories and file still match the names selected during the open. All
+// fresh descriptors are closed before return; the retained chain lives through
+// this check to prevent a stale-but-safe directory handle from becoming
+// accepted evidence.
+func workflowPathStillBound(transcriptDir string, chain []workflowPathComponent, name string, fileInfo os.FileInfo, file *os.File) bool {
 	if len(chain) == 0 {
+		return false
+	}
+	if !workflowTranscriptRootStillBound(transcriptDir, chain[0].root, chain[0].info) {
 		return false
 	}
 	rootInfo, err := chain[0].root.Stat(".")
@@ -2118,6 +2130,29 @@ func workflowPathStillBound(chain []workflowPathComponent, name string, fileInfo
 	defer func() { _ = freshFile.Close() }()
 	freshInfo, err := freshFile.Stat()
 	return err == nil && freshInfo.Mode().IsRegular() && os.SameFile(fileInfo, freshInfo)
+}
+
+// workflowTranscriptRootStillBound proves that transcriptDir still names the
+// directory opened at the start of the workflow evidence read. The Lstat keeps
+// symlink rejection explicit; reopening the configured root closes the gap
+// where a retained descriptor remains internally consistent after its path is
+// renamed away and replaced.
+func workflowTranscriptRootStillBound(transcriptDir string, retainedRoot *os.Root, rootInfo os.FileInfo) bool {
+	currentInfo, err := os.Lstat(transcriptDir)
+	if err != nil || currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.IsDir() || !os.SameFile(rootInfo, currentInfo) {
+		return false
+	}
+	freshRoot, err := os.OpenRoot(transcriptDir)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = freshRoot.Close() }()
+	freshInfo, err := freshRoot.Stat(".")
+	if err != nil || !freshInfo.IsDir() || !os.SameFile(rootInfo, freshInfo) {
+		return false
+	}
+	retainedInfo, err := retainedRoot.Stat(".")
+	return err == nil && retainedInfo.IsDir() && os.SameFile(rootInfo, retainedInfo)
 }
 
 func readWorkflowMetadataFile(transcriptDir string, components []string, name string) ([]byte, error) {
