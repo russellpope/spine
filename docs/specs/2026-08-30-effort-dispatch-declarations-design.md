@@ -79,7 +79,7 @@ when it has its own exact authorization described below.
 | Transport | Required declared fields | Binding pass-through boundary |
 | --- | --- | --- |
 | Stock Claude and verified claude-team cmux/herdr paths | Parsed `--model` and `--effort` | `claude ... --model "$MODEL" --effort "$EFFORT"` from I071. |
-| Codex agent dispatch | Explicit `model` and `reasoning_effort` only when those function-call arguments occur | Pass explicit platform fields. The audit accepts a documented legacy `effort` transcript alias only where fixture evidence proves it. |
+| Codex agent dispatch | A native `spawn_agent` function-call record with explicit `model` and `reasoning_effort` (or the documented legacy `effort` alias) is the raw controller vehicle record and declares `(codex, model, effort)` | Pass explicit platform fields. The audit accepts a documented legacy `effort` transcript alias only where fixture evidence proves it. The function name and explicit arguments, not a model ID or coarse transcript source, supply this raw record. |
 | `claude-auto`, raw OpenAI endpoints, or an Agent transport with no proven effort field | The triple is still required | OWNER VERIFY. I075 emits no wrapper argv, adapter, or invented Agent parameter. |
 
 The audit stores declaration source, for example `--effort`,
@@ -94,9 +94,10 @@ The existing workflow record is retained exactly:
 ESCALATION <ticket> effort <from>-><to> reason: <one line>
 ```
 
-The arrow is unspaced. `<from>` and `<to>` are non-empty raw tokens without
-spaces. `reason:` must occur once with non-empty one-line text. The parser
-must reject a spaced arrow, missing endpoint, missing reason, empty reason,
+The arrow is one unspaced literal ASCII `->`. `<from>` and `<to>` are
+non-empty raw tokens without spaces and may otherwise retain arbitrary bytes.
+`reason:` must occur once with non-empty one-line text. The parser must reject
+a second `->`, a spaced arrow, missing endpoint, missing reason, empty reason,
 or extra grammar that changes the ordered record. A malformed line authorizes
 nothing.
 
@@ -128,6 +129,11 @@ new public verdict, severity, or blocking result. I074 owns the model and
 effort combination matrix, observed-effort correlation, and verdict names.
 I075 must not infer effective effort from model IDs, table defaults, command
 flags, `/status`, settings, environment variables, or gateway defaults.
+Likewise, a missing declaration harness cannot be filled from a model ID or a
+coarse transcript source: only the native Codex `spawn_agent` record above,
+with its explicit complete arguments, supplies `codex` as the raw controller
+vehicle. Non-`spawn_agent` records, linked worker actuals, and incomplete
+records remain incomplete and never provide observed effort.
 
 The CLI keeps the current ticket table's leading `ticket tier actual verdict
 detail` layout and unmatched model rendering. It may append stable

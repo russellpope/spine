@@ -454,9 +454,16 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 					} else if effort = args["effort"]; effort != "" {
 						effortSource = "effort"
 					}
+					harness := args["harness"]
+					// A native spawn_agent function call is itself the Codex raw
+					// controller vehicle. Only its explicit model and effort fields
+					// complete the declaration; transcript source alone never does.
+					if effort != "" {
+						harness = "codex"
+					}
 					st.res.dispatches = append(st.res.dispatches, dispatch{
 						model:        m,
-						harness:      args["harness"],
+						harness:      harness,
 						effort:       effort,
 						effortSource: effortSource,
 						description:  args["task_name"],

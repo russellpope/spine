@@ -175,7 +175,7 @@ func TestCodexDiscardedDirectDispatch(t *testing.T) {
 	}
 }
 
-func TestCodexSpawnAgentRetainsDeclaredReasoningEffortWithoutInferringHarness(t *testing.T) {
+func TestCodexSpawnAgentRetainsCompleteNativeDeclaration(t *testing.T) {
 	data := []byte(strings.Join([]string{
 		codexSessionMetaLine("root", "root", "", "/repo", "user", topLevelSource),
 		codexFunctionCallLineWithID("spawn_agent", "call-effort", map[string]string{
@@ -190,8 +190,66 @@ func TestCodexSpawnAgentRetainsDeclaredReasoningEffortWithoutInferringHarness(t 
 	if d.effort != "medium" || d.effortSource != "reasoning_effort" {
 		t.Fatalf("dispatch effort = %q source=%q, want medium/reasoning_effort", d.effort, d.effortSource)
 	}
+	if d.harness != "codex" || d.model != "gpt-5.6-terra" {
+		t.Fatalf("complete native declaration = (%q, %q, %q), want (codex, gpt-5.6-terra, medium)", d.harness, d.model, d.effort)
+	}
+}
+
+func TestCodexBareOrIncompleteRecordsDoNotFabricateCompleteDeclaration(t *testing.T) {
+	data := []byte(strings.Join([]string{
+		codexSessionMetaLine("root", "root", "", "/repo", "user", topLevelSource),
+		codexFunctionCallLine("exec_command", map[string]string{
+			"model": "gpt-5.6-terra", "reasoning_effort": "medium",
+		}),
+		codexFunctionCallLineWithID("spawn_agent", "call-model-missing", map[string]string{
+			"task_name": "I075 model missing", "reasoning_effort": "medium",
+		}),
+		codexFunctionCallLineWithID("spawn_agent", "call-incomplete", map[string]string{
+			"task_name": "I075 incomplete", "model": "gpt-5.6-terra",
+		}),
+	}, "\n"))
+	got, ok := parseCodexBytes("fixture.jsonl", data, new([]string))
+	if !ok || len(got.dispatches) != 1 {
+		t.Fatalf("parseCodexBytes() = %+v, %v; want only incomplete spawn record", got, ok)
+	}
+	d := got.dispatches[0]
+	if d.effort != "" || d.effortSource != "" {
+		t.Fatalf("incomplete spawn effort = %q source=%q, want absent", d.effort, d.effortSource)
+	}
 	if d.harness != "" {
-		t.Fatalf("dispatch harness = %q, want no inferred harness", d.harness)
+		t.Fatalf("incomplete spawn harness = %q, want no complete declaration", d.harness)
+	}
+	expected, declared, status, observed := summarizeEffortDeclarations(t.TempDir(), ticket{id: "I075", tier: "routine"}, []dispatch{{
+		source: "codex", model: "gpt-5.6-terra", effort: "medium",
+	}}, ledger{})
+	if expected != "-" || declared != "medium" || status != "unconfirmable" || observed != "-" {
+		t.Fatalf("coarse Codex source declaration = expected=%q declared=%q status=%q observed=%q, want -/medium/unconfirmable/-", expected, declared, status, observed)
+	}
+}
+
+func TestCodexCompleteSpawnAgentDeclarationIsJudged(t *testing.T) {
+	for name, args := range map[string]map[string]string{
+		"reasoning effort": {"task_name": "I075 implementation", "model": "gpt-5.6-terra", "reasoning_effort": "medium"},
+		"legacy effort":    {"task_name": "I075 implementation", "model": "gpt-5.6-terra", "effort": "medium"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I075": "routine"})
+			codexDir := t.TempDir()
+			writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+				codexSessionMetaLine("root", "root", "", repo, "user", topLevelSource),
+				codexFunctionCallLine("spawn_agent", args),
+			)
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: t.TempDir(), CodexSessionsDir: codexDir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := rowsByID(t, rep)["I075"]
+			if row.ExpectedEffort != "medium" || row.DeclaredEffort != "medium" || row.DeclarationStatus != "target-match" || row.ObservedEffort != "-" {
+				t.Fatalf("Codex declaration = expected=%q declared=%q status=%q observed=%q, want medium/medium/target-match/-", row.ExpectedEffort, row.DeclaredEffort, row.DeclarationStatus, row.ObservedEffort)
+			}
+		})
 	}
 }
 

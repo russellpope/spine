@@ -1216,8 +1216,11 @@ func parseEffortEscalation(line string, lineNo int) (effortEscalation, bool) {
 	if len(parts) != 4 || parts[0] != "ESCALATION" || parts[2] != "effort" {
 		return effortEscalation{}, false
 	}
-	from, to, ok := strings.Cut(parts[3], "->")
-	if !ok || from == "" || to == "" || strings.ContainsAny(from, " \t") || strings.ContainsAny(to, " \t") {
+	if strings.Count(parts[3], "->") != 1 {
+		return effortEscalation{}, false
+	}
+	from, to, _ := strings.Cut(parts[3], "->")
+	if from == "" || to == "" || strings.ContainsAny(from, " \t") || strings.ContainsAny(to, " \t") {
 		return effortEscalation{}, false
 	}
 	return effortEscalation{ticket: parts[1], from: from, to: to, reason: fields[1], line: lineNo}, true

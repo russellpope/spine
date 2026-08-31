@@ -618,7 +618,10 @@ func TestReadLedgerParsesOnlyExactEffortAuthorizationPairs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "progress.md")
 	content := strings.Join([]string{
 		"ESCALATION I075 effort low->xhigh reason: retry budget",
+		"ESCALATION I075 effort `medium`->low=>xhigh reason: arbitrary raw endpoint bytes",
+		"ESCALATION I075 effort low→medium->[xhigh] reason: arbitrary unicode endpoint bytes",
 		"ESCALATION I075 effort xhigh ->low reason: spaced arrow",
+		"ESCALATION I075 effort medium->low->xhigh reason: repeated arrow endpoint",
 		"ESCALATION I075 effort low->xhigh reason: one reason: duplicate",
 		"ESCALATION I076 effort low->xhigh reason: other ticket",
 		"- ESCALATION I075 effort low->xhigh reason: Markdown list",
@@ -639,8 +642,11 @@ func TestReadLedgerParsesOnlyExactEffortAuthorizationPairs(t *testing.T) {
 	}
 	l := readLedger(path)
 	got := l.effortEscalations["I075"]
-	if len(got) != 2 || got[0].from != "low" || got[0].to != "xhigh" || got[0].reason != "retry budget" || got[1].from != "xhigh" || got[1].to != "max" || got[1].reason != "distinct post-fence retry" {
-		t.Fatalf("effort ledger = %+v, want only the two literal I075 records", got)
+	if len(got) != 4 || got[0].from != "low" || got[0].to != "xhigh" || got[0].reason != "retry budget" || got[1].from != "`medium`" || got[1].to != "low=>xhigh" || got[2].from != "low→medium" || got[2].to != "[xhigh]" || got[3].from != "xhigh" || got[3].to != "max" || got[3].reason != "distinct post-fence retry" {
+		t.Fatalf("effort ledger = %+v, want only the four literal I075 records", got)
+	}
+	if !effortAuthorized(l, "I075", "`medium`", "low=>xhigh") || !effortAuthorized(l, "I075", "low→medium", "[xhigh]") {
+		t.Fatal("arbitrary non-space raw endpoint bytes were not retained exactly")
 	}
 	if !effortAuthorized(l, "I075", "xhigh", "max") {
 		t.Fatal("distinct literal pair after a fenced block was not authorized")

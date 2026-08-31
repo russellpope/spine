@@ -91,10 +91,14 @@ type declaredDispatch struct {
 ```
 
 `Harness` is a raw controller-record field, not a value inferred from an
-observed model or transcript layout. Each controlled transport writes the
-field in its dispatch metadata before launch. A legacy record without it has
-no complete I075 declaration and stays on the legacy model-only path. The
-transport source may diagnose that absence but cannot fill it in.
+observed model or transcript layout. A native Codex `spawn_agent` function
+call carrying explicit `model` and `reasoning_effort` (or the documented
+legacy `effort` alias) is itself the raw controller vehicle record and sets
+`Harness` to `codex`. Each other controlled transport writes the field in its
+dispatch metadata before launch. A legacy or incomplete record without a
+complete triple stays on the legacy model-only path. The transport source,
+model ID, non-`spawn_agent` record, and linked worker actuals may diagnose an
+absence but cannot fill it in.
 
 ## Task 1: resolve and validate a final dispatch target
 
@@ -135,11 +139,11 @@ transport source may diagnose that absence but cannot fill it in.
 
 - [ ] Write failing fixtures for an attributed controller record carrying
   `harness`, `model`, and an effort declaration, plus an attributed Claude
-  `--effort value` and `--effort=value`, Codex `reasoning_effort`, a
-  documented legacy Codex `effort` alias, and omitted values. Prove a source
-  label cannot fill a missing raw harness, and linked worker model actuals do
-  not become observed effort. Include two retries with distinct complete
-  declarations.
+  `--effort value` and `--effort=value`. Prove a native Codex `spawn_agent`
+  record with explicit `model` and `reasoning_effort` (or legacy `effort`)
+  supplies the raw `(codex, model, effort)` declaration; a source label,
+  incomplete or non-`spawn_agent` record, and linked worker model actual
+  cannot. Include two retries with distinct complete declarations.
 - [ ] Add failing ledger tests for an exact matching record, reversed pair,
   wrong ticket, wrong expected effort, wrong declared effort, spaced arrow,
   empty endpoint, duplicate `reason:`, trailing or reordered grammar, and
