@@ -793,6 +793,17 @@ var supersededLines = map[string]bool{
 	"model_default: claude-fable-5      # swappable; re-evaluate on major model/platform releases":                                                                                                                             true,
 	"model_default: claude-opus-4-8     # swappable; re-evaluate on major model/platform releases":                                                                                                                             true,
 
+	// I074 replaces I075's declared-only audit prose with the exact host-local
+	// correlation contract. These prior current-template lines must remain
+	// machine-owned for ordinary refreshes of pristine repositories.
+	"layout and appends declared-only fields. `declared-effort=-` means the": true,
+	"transcript did not record a declaration. `observed-effort=-` is always": true,
+	"unavailable at this stage; it is not runtime evidence.":                 true,
+
+	// I074 likewise replaces I075's two-line issues-README observation note.
+	"Routing output reports `declared-effort=-` when the transcript carried no": true,
+	"declaration and `observed-effort=-` while no runtime observation exists.":  true,
+
 	// docs/issues/README.md frontmatter bullets, backfilled by I065 from
 	// the full history of templates/current/issues-README.md. All three
 	// were reworded in place (no generation bump rode them), so a pristine

@@ -40,9 +40,18 @@ var i075ContentLines = map[string]bool{
 	"or different-ticket pair authorizes nothing and does not alter model-tier":          true,
 	"judgment.": true,
 	"`spine audit routing` preserves its leading `ticket tier actual verdict detail`": true,
-	"layout and appends declared-only fields. `declared-effort=-` means the":          true,
-	"transcript did not record a declaration. `observed-effort=-` is always":          true,
-	"unavailable at this stage; it is not runtime evidence.":                          true,
+	"layout and appends declaration fields only for a complete, host-correlated":      true,
+	"declaration. Confirmation requires an exact `(source, session, dispatch)`":       true,
+	"identity and linked worker event, plus a byte-exact `observed_ids` mapping in":   true,
+	"the local validated host configuration for the final selected `(model, effort)`": true,
+	"pair. Aliases, history, canonical IDs, normalization, family inference,":         true,
+	"cross-host lookup, and root-only linkage do not confirm. A mapped other route":   true,
+	"or documented observed-effort mismatch blocks as `declared-observed-mismatch`;":  true,
+	"an unauthorized exact effort declaration blocks as `declared-effort-mismatch`;":  true,
+	"missing proof is nonblocking `unconfirmable`. Current transcript formats have":   true,
+	"no documented observed-effort extractor, so supported real records retain":       true,
+	"`observed-effort=-` and are unconfirmable rather than confirmed. I073 alone":     true,
+	"owns the public flavor-to-harness rename.":                                       true,
 }
 
 func isI075ContentDiffLine(line string) bool {
