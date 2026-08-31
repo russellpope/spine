@@ -2323,6 +2323,7 @@ func scanWorkflowJSONL(path string, f *os.File, warnings *[]string) (string, []d
 
 	var opening string
 	haveOpening := false
+	parentUnavailable := false
 	var dispatches []dispatch
 	var models []string
 	var cwd string
@@ -2338,10 +2339,13 @@ func scanWorkflowJSONL(path string, f *os.File, warnings *[]string) (string, []d
 			if !ok {
 				malformed++
 			} else {
-				if event.Type == "user" && !haveOpening {
+				if event.Type == "user" && !haveOpening && !parentUnavailable {
 					text, _ := workflowUserMessageText(event.Message.Content)
 					opening = firstLine(text)
 					haveOpening = true
+				}
+				if event.Type == "assistant" && !haveOpening {
+					parentUnavailable = true
 				}
 				d, prompts, model, lineCwd, parsed := parseLine(line, briefs, &position)
 				if !parsed {
@@ -2351,7 +2355,7 @@ func scanWorkflowJSONL(path string, f *os.File, warnings *[]string) (string, []d
 					for _, prompt := range prompts {
 						attributeTeamPromptWithBriefs(dispatches, prompt, briefs)
 					}
-					if model != "" && !seen[model] {
+					if haveOpening && !parentUnavailable && model != "" && !seen[model] {
 						seen[model] = true
 						models = append(models, model)
 					}

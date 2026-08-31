@@ -677,6 +677,101 @@ func TestWorkflowFirstValidUserEventLatchesAfterMalformedCarrier(t *testing.T) {
 	}
 }
 
+// A coherent assistant event before any coherent user cannot belong to a
+// parent brief that appears later. Its nested dispatch remains independent
+// evidence, but its model must never be retroactively attached to I913.
+func TestWorkflowAssistantBeforeOpeningMakesParentUnavailable(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{
+		"I121": "routine",
+		"I913": "primary",
+	})
+	transcripts := t.TempDir()
+	writeWorkflowAgent(t, transcripts, "session-1", "wf_latch", "worker", repo, "unused", "", "workflow-subagent")
+	path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_latch", "agent-worker.jsonl")
+	raw := `{"type":"user","message":{"role":"user","content":1}}` + "\n" +
+		fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"tool-121","name":"Agent","input":{"description":"I121 nested dispatch","prompt":"Implement I121 exactly","model":"claude-haiku-4-5"}}]}}`+"\n", repo) +
+		fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":"Implement I913"}}`+"\n", repo) +
+		fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`+"\n", repo)
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if row := rows["I913"]; row.Verdict != VerdictNoTranscript || len(row.Actuals) != 0 {
+		t.Fatalf("I913 = %+v, want no parent evidence after a coherent pre-opening assistant", row)
+	}
+	if row := rows["I121"]; row.Verdict != VerdictSilentDescent || !reflect.DeepEqual(row.Actuals, []string{"claude-haiku-4-5"}) {
+		t.Fatalf("I121 = %+v, want the pre-opening nested dispatch to retain its own evidence", row)
+	}
+}
+
+// A pre-opening assistant without a transcript model also closes parent
+// attribution. Later workflow-run metadata cannot turn a later user message
+// into parent evidence.
+func TestWorkflowAssistantBeforeOpeningBlocksParentModelFallback(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I914": "primary"})
+	transcripts := t.TempDir()
+	writeWorkflowAgent(t, transcripts, "session-1", "wf_latch", "worker", repo, "unused", "", "workflow-subagent")
+	path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_latch", "agent-worker.jsonl")
+	raw := fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"role":"assistant","content":[{"type":"text","text":"before opening"}]}}`+"\n", repo) +
+		fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":"Implement I914"}}`+"\n", repo)
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeWorkflowRun(t, transcripts, "session-1", "wf_latch", "worker", "claude-fable-5")
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row := rowsByID(t, rep)["I914"]; row.Verdict != VerdictNoTranscript || len(row.Actuals) != 0 {
+		t.Fatalf("I914 = %+v, want no parent fallback after a coherent pre-opening assistant", row)
+	}
+}
+
+// The first coherent user opens the parent latch even when it names no single
+// audited ticket. Later users cannot replace that opening.
+func TestWorkflowFirstCoherentUserCannotBeReplaced(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		opening string
+	}{
+		{name: "empty", opening: ""},
+		{name: "ticketless", opening: "Coordinate the work"},
+		{name: "multi-ticket", opening: "Coordinate I912 and I913"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{
+				"I912": "primary", "I913": "primary", "I914": "primary",
+			})
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_latch", "worker", repo, "unused", "", "workflow-subagent")
+			path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_latch", "agent-worker.jsonl")
+			raw := fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":%q}}`+"\n", repo, tc.opening) +
+				fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":"Implement I914"}}`+"\n", repo) +
+				fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"role":"assistant","model":"claude-fable-5","content":[{"type":"text","text":"done"}]}}`+"\n", repo)
+			if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row := rowsByID(t, rep)["I914"]; row.Verdict != VerdictNoTranscript || len(row.Actuals) != 0 {
+				t.Fatalf("I914 = %+v, want no parent evidence from a later user", row)
+			}
+		})
+	}
+}
+
 func TestWorkflowMalformedMissingUnknownAndDeeperMetadataStayExcluded(t *testing.T) {
 	repo := t.TempDir()
 	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I055": "routine"})
