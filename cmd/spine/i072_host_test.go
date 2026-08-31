@@ -155,7 +155,7 @@ func TestModelAlternateJSONKeepsLegacyBytesWithoutHostTrail(t *testing.T) {
 	if code != 0 || errs != "" {
 		t.Fatalf("missing config: code=%d stdout=%q stderr=%q", code, legacy, errs)
 	}
-	wantLegacy := "{\"flavor\":\"pi\",\"tier\":\"routine\",\"id\":\"qwen3.8-27b-q8_0\",\"effort\":\"medium\",\"aliases\":[\"qwen3.8\",\"qwen\"],\"alternate\":{\"id\":\"qwen3.8-27b-q8_0\",\"effort\":\"xhigh\"},\"provenance\":\"default\"}\n"
+	wantLegacy := "{\"harness\":\"pi\",\"flavor\":\"pi\",\"tier\":\"routine\",\"id\":\"qwen3.8-27b-q8_0\",\"effort\":\"medium\",\"aliases\":[\"qwen3.8\",\"qwen\"],\"alternate\":{\"id\":\"qwen3.8-27b-q8_0\",\"effort\":\"xhigh\"},\"provenance\":\"default\"}\n"
 	if legacy != wantLegacy {
 		t.Fatalf("missing config alternate JSON = %q, want legacy bytes %q", legacy, wantLegacy)
 	}

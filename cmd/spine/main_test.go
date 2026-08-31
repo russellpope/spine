@@ -250,9 +250,9 @@ func TestUpdateDryRunThenWrite(t *testing.T) {
 // named with old value, new value, and inherited provenance, distinct from
 // the content diff — and a preserved override is reported as such.
 // pinRow rewrites the value of a model_routing mirror row, matching the row by
-// its flavor.tier key rather than by a padded literal. The mirror pads its key
+// its harness.tier key rather than by a padded literal. The mirror pads its key
 // column to the longest key in the table, so a literal search breaks silently
-// whenever a flavor with a longer name is added (I110).
+// whenever a harness with a longer name is added (I110).
 func pinRow(t *testing.T, content, key, value string) string {
 	t.Helper()
 	lines := strings.Split(content, "\n")
@@ -283,7 +283,7 @@ func TestUpdateItemizesModelRefreshAndOverride(t *testing.T) {
 	// (override). These are value-only replacements — pinRow matches the row
 	// by key so the mirror's alignment padding (I036) really is irrelevant,
 	// which the old literal search claimed but did not deliver: I110's longer
-	// flavor name repadded the column and the search silently found nothing.
+	// harness name repadded the column and the search silently found nothing.
 	content := pinRow(t, string(raw), "claude.fallback", "claude-opus-4-8")
 	content = pinRow(t, content, "claude.routine", "local-llama-70b")
 	if err := os.WriteFile(wfPath, []byte(content), 0o644); err != nil {
@@ -1581,7 +1581,7 @@ func TestAuditRoutingTranscriptDiscoveryAndExplicitOverride(t *testing.T) {
 	}
 }
 
-// Acceptance (RA1/M1, ratified at I041 review — design D-doc "Flavor
+// Acceptance (RA1/M1, ratified at I041 review — design D-doc "Harness
 // threading"): a missing EXPLICITLY-requested --codex-sessions dir warns
 // (proven above); a missing UN-OVERRIDDEN default must be a silent skip —
 // otherwise every audit on a codex-less machine gets a standing warning,
@@ -2835,6 +2835,7 @@ func TestModelJSONFlagPrintsIDAndEffortTogether(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
 	var got struct {
+		Harness    string   `json:"harness"`
 		Flavor     string   `json:"flavor"`
 		Tier       string   `json:"tier"`
 		ID         string   `json:"id"`
@@ -2845,7 +2846,7 @@ func TestModelJSONFlagPrintsIDAndEffortTogether(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("out=%q not valid JSON: %v", out, err)
 	}
-	if got.ID != "claude-fable-5" || got.Effort != "high" || got.Flavor != "claude" || got.Tier != "primary" {
+	if got.ID != "claude-fable-5" || got.Effort != "high" || got.Harness != "claude" || got.Flavor != got.Harness || got.Tier != "primary" {
 		t.Errorf("got=%+v, out=%q", got, out)
 	}
 	if got.Provenance != "default" {
@@ -2864,9 +2865,9 @@ func TestModelOverrideInRepoWinsOverDefault(t *testing.T) {
 	}
 }
 
-func TestModelUnknownFlavorExitsNonZeroWithMessage(t *testing.T) {
+func TestModelUnknownHarnessExitsNonZeroWithMessage(t *testing.T) {
 	code, _, errs := runCmd(t, "model", "--dir", t.TempDir(), "bogus", "primary")
-	if code == 0 || !strings.Contains(errs, "unknown flavor") {
+	if code == 0 || !strings.Contains(errs, "unknown harness") {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
 }
@@ -2879,7 +2880,7 @@ func TestModelUnknownTierExitsNonZeroWithMessage(t *testing.T) {
 }
 
 // I116: stdlib parsing stops at the first positional, so a trailing flag
-// used to print bare usage — reading as the flavor being broken. The error
+// used to print bare usage — reading as the harness being broken. The error
 // must name the ordering rule and the offending token.
 func TestModelTrailingFlagNamesOrderingRule(t *testing.T) {
 	code, _, errs := runCmd(t, "model", "--dir", t.TempDir(), "claude", "primary", "--effort")
@@ -2908,8 +2909,8 @@ func TestModelFlagAsPositionalWithCorrectArityNamesOrderingRule(t *testing.T) {
 }
 
 // I116 negative control: detection keys on the leading dash, not on
-// resolution failure — a plain unknown flavor keeps model.Resolve's error.
-func TestModelUnknownFlavorDoesNotClaimOrderingProblem(t *testing.T) {
+// resolution failure — a plain unknown harness keeps model.Resolve's error.
+func TestModelUnknownHarnessDoesNotClaimOrderingProblem(t *testing.T) {
 	code, _, errs := runCmd(t, "model", "--dir", t.TempDir(), "bogus", "primary")
 	if code == 0 || strings.Contains(errs, "flags must precede positionals") {
 		t.Fatalf("code=%d stderr=%q, want resolve error without the ordering message", code, errs)
@@ -2979,7 +2980,7 @@ func TestModelAlternateLoadsHostConfigWithoutApplyingHostRoutes(t *testing.T) {
 		name, config string
 	}{
 		{
-			name: "missing selected flavor",
+			name: "missing selected harness",
 			config: `{
   "schema_version": 1, "host_id": "test-host", "harnesses": {
     "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"gpt-5.6-sol": {"efforts": ["xhigh"]}}}
@@ -3106,7 +3107,7 @@ func TestModelPiAcceptsVocabularyEffortOverride(t *testing.T) {
 	}
 }
 
-func TestModelDispatchEffortIsJSONOnlyAndUsesSelectedFlavorVocabulary(t *testing.T) {
+func TestModelDispatchEffortIsJSONOnlyAndUsesSelectedHarnessVocabulary(t *testing.T) {
 	code, out, errs := runCmd(t, "model", "--dir", t.TempDir(), "--json", "--dispatch-effort", "low", "pi", "routine")
 	if code != 0 || errs != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
@@ -3198,9 +3199,9 @@ func TestModelPiBareIDRowInheritsPiTierDefault(t *testing.T) {
 	}
 }
 
-// I079 fix round 1 negative control: claude has no per-flavor tier default,
+// I079 fix round 1 negative control: claude has no per-harness tier default,
 // so a bare-id claude row still inherits the global "high" — the override is
-// scoped to the flavor that declares one.
+// scoped to the harness that declares one.
 func TestModelClaudeBareIDRowStillInheritsGlobalTierDefault(t *testing.T) {
 	dir := writeModelWorkflow(t, "model_routing:\n  claude.primary: claude-custom-model\n")
 	code, out, errs := runCmd(t, "model", "--dir", dir, "--effort", "claude", "primary")
@@ -3238,7 +3239,7 @@ func TestModelValidateSuccessAndGrammar(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"missing flavor and tier", []string{"model", "validate"}},
+		{"missing harness and tier", []string{"model", "validate"}},
 		{"missing tier", []string{"model", "validate", "codex"}},
 		{"explicit empty expect", []string{"model", "validate", "--expect=", "codex", "primary"}},
 		{"dir after validate positional", []string{"model", "validate", "--dir", dir, "codex", "primary"}},
@@ -3271,18 +3272,18 @@ func TestModelValidateRefusalReasonsAndOutputSeparation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			flavor, tier := "codex", "primary"
+			harness, tier := "codex", "primary"
 			if tc.workflow != "" {
 				dir = writeModelWorkflow(t, tc.workflow)
 			}
 			if tc.name == "retired" {
-				flavor, tier = "claude", "routine"
+				harness, tier = "claude", "routine"
 			}
 			args := []string{"model", "--dir", dir, "validate"}
 			if tc.expect != "" {
 				args = append(args, "--expect", tc.expect)
 			}
-			args = append(args, flavor, tier)
+			args = append(args, harness, tier)
 			code, out, errs := runCmd(t, args...)
 			if code != 1 || out != "" {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
@@ -3317,7 +3318,7 @@ func TestModelValidateConfigurationErrorsExitTwo(t *testing.T) {
 		args []string
 	}{
 		{"malformed row", []string{"model", "--dir", malformed, "validate", "codex", "primary"}},
-		{"unknown flavor", []string{"model", "validate", "bogus", "primary"}},
+		{"unknown harness", []string{"model", "validate", "bogus", "primary"}},
 		{"unknown tier", []string{"model", "validate", "codex", "bogus"}},
 		{"newer generation", []string{"model", "--dir", newer, "validate", "codex", "primary"}},
 		{"unreadable present input", []string{"model", "--dir", repoFile, "validate", "codex", "primary"}},
@@ -3348,7 +3349,7 @@ func TestModelBareJSONEffortAlternateLegacyOutputsRemainByteCompatible(t *testin
 		want string
 	}{
 		{"bare", []string{"model", "--dir", dir, "claude", "primary"}, "claude-fable-5\n"},
-		{"json", []string{"model", "--dir", dir, "--json", "claude", "primary"}, "{\"flavor\":\"claude\",\"tier\":\"primary\",\"id\":\"claude-fable-5\",\"effort\":\"high\",\"aliases\":[\"claude-fable-5\",\"fable\"],\"provenance\":\"default\"}\n"},
+		{"json", []string{"model", "--dir", dir, "--json", "claude", "primary"}, "{\"harness\":\"claude\",\"flavor\":\"claude\",\"tier\":\"primary\",\"id\":\"claude-fable-5\",\"effort\":\"high\",\"aliases\":[\"claude-fable-5\",\"fable\"],\"provenance\":\"default\"}\n"},
 		{"effort", []string{"model", "--dir", dir, "--effort", "claude", "primary"}, "high\n"},
 		{"alternate", []string{"model", "--dir", dir, "--alternate", "pi", "routine"}, "qwen3.8-27b-q8_0\n"},
 	} {

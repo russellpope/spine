@@ -91,7 +91,7 @@ func defaultPath(userConfigDir func() (string, error)) (string, error) {
 // Load parses and validates path. lookup may only inspect executable
 // availability; callers normally pass exec.LookPath. It is injected so tests
 // have no mutable package-global path or executable seams.
-func Load(path string, flavors []string, lookup func(string) (string, error)) (Config, error) {
+func Load(path string, harnesses []string, lookup func(string) (string, error)) (Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -99,7 +99,7 @@ func Load(path string, flavors []string, lookup func(string) (string, error)) (C
 		}
 		return Config{}, configError(path, "read configuration")
 	}
-	config, err := decode(raw, flavors)
+	config, err := decode(raw, harnesses)
 	if err != nil {
 		return Config{}, configError(path, err.Error())
 	}
@@ -113,7 +113,7 @@ func configError(path, detail string) error {
 	return fmt.Errorf("host routing configuration %q: %s", path, detail)
 }
 
-func decode(raw []byte, flavors []string) (Config, error) {
+func decode(raw []byte, harnesses []string) (Config, error) {
 	if !utf8.Valid(raw) {
 		return Config{}, fmt.Errorf("configuration is not valid UTF-8")
 	}
@@ -133,10 +133,10 @@ func decode(raw []byte, flavors []string) (Config, error) {
 	if err := dec.Decode(&trailing); err != io.EOF {
 		return Config{}, fmt.Errorf("multiple JSON values")
 	}
-	return validate(value, flavors)
+	return validate(value, harnesses)
 }
 
-func validate(raw rawConfig, flavors []string) (Config, error) {
+func validate(raw rawConfig, harnesses []string) (Config, error) {
 	if raw.SchemaVersion == nil || *raw.SchemaVersion != 1 {
 		return Config{}, fmt.Errorf("schema_version must be integer 1")
 	}
@@ -146,15 +146,15 @@ func validate(raw rawConfig, flavors []string) (Config, error) {
 	if len(raw.Harnesses) == 0 {
 		return Config{}, fmt.Errorf("harnesses must be a non-empty object")
 	}
-	known := make(map[string]struct{}, len(flavors))
-	for _, flavor := range flavors {
-		known[flavor] = struct{}{}
+	known := make(map[string]struct{}, len(harnesses))
+	for _, harness := range harnesses {
+		known[harness] = struct{}{}
 	}
 	config := Config{SchemaVersion: *raw.SchemaVersion, HostID: *raw.HostID, Harnesses: make(map[string]Harness, len(raw.Harnesses)), Pins: make(map[string]Pin, len(raw.Pins))}
 	observed := map[string]struct{}{}
 	for name, rawHarness := range raw.Harnesses {
 		if _, ok := known[name]; !ok || !safeString(name) {
-			return Config{}, fmt.Errorf("harness is not a current flavor")
+			return Config{}, fmt.Errorf("harness is not a current harness")
 		}
 		if rawHarness.Available == nil || rawHarness.Executable == nil || rawHarness.LaunchContractRef == nil {
 			return Config{}, fmt.Errorf("harness is missing a required member")
@@ -200,12 +200,12 @@ func validate(raw rawConfig, flavors []string) (Config, error) {
 		config.Harnesses[name] = h
 	}
 	for key, rawPin := range raw.Pins {
-		flavor, tier, ok := strings.Cut(key, ".")
-		if !ok || flavor == "" || tier == "" || strings.Contains(tier, ".") {
-			return Config{}, fmt.Errorf("pin key must be flavor.tier")
+		harness, tier, ok := strings.Cut(key, ".")
+		if !ok || harness == "" || tier == "" || strings.Contains(tier, ".") {
+			return Config{}, fmt.Errorf("pin key must be harness.tier")
 		}
-		if _, ok := known[flavor]; !ok || !knownTier(tier) {
-			return Config{}, fmt.Errorf("pin key names an unknown flavor or tier")
+		if _, ok := known[harness]; !ok || !knownTier(tier) {
+			return Config{}, fmt.Errorf("pin key names an unknown harness or tier")
 		}
 		if rawPin.Model == nil || rawPin.Effort == nil || !safeString(*rawPin.Model) || !safeString(*rawPin.Effort) {
 			return Config{}, fmt.Errorf("pin has an empty or unsafe model@effort")
@@ -213,11 +213,11 @@ func validate(raw rawConfig, flavors []string) (Config, error) {
 		if err := validateUniqueStrings(rawPin.EvidenceRefs, "evidence_refs"); err != nil {
 			return Config{}, fmt.Errorf("pin: %w", err)
 		}
-		harness, exists := config.Harnesses[flavor]
-		if !exists || !harness.Available {
+		configuredHarness, exists := config.Harnesses[harness]
+		if !exists || !configuredHarness.Available {
 			return Config{}, fmt.Errorf("pin names an unavailable harness")
 		}
-		route, exists := harness.Models[*rawPin.Model]
+		route, exists := configuredHarness.Models[*rawPin.Model]
 		if !exists || !contains(route.Efforts, *rawPin.Effort) {
 			return Config{}, fmt.Errorf("pin model@effort is not declared by its harness")
 		}

@@ -71,7 +71,7 @@ func TestI051ModelValidateUsageDiagnosticsArePrefixed(t *testing.T) {
 		{name: "trailing unknown", args: []string{"model", "validate", "codex", "primary", "--bogus"}},
 		{name: "missing expect value", args: []string{"model", "validate", "--expect"}},
 		{name: "empty expect value", args: []string{"model", "validate", "--expect=", "codex", "primary"}},
-		{name: "missing flavor and tier", args: []string{"model", "validate"}},
+		{name: "missing harness and tier", args: []string{"model", "validate"}},
 		{name: "missing tier", args: []string{"model", "validate", "codex"}},
 		{name: "extra positional", args: []string{"model", "validate", "codex", "primary", "extra"}},
 	}
@@ -166,20 +166,20 @@ func TestI051ModelValidateKnownKeyConfigurationDiagnostics(t *testing.T) {
 func TestI051ModelValidateUnknownRouteDiagnosticsNameAttemptedPairOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
-		flavor     string
+		harness    string
 		tier       string
 		wantQuoted string
 	}{
-		{name: "unknown flavor", flavor: "bad\nflavor", tier: "primary", wantQuoted: `unknown flavor "bad\nflavor"`},
-		{name: "unknown tier", flavor: "codex", tier: "bad\ttier", wantQuoted: `unknown tier "bad\ttier"`},
-		{name: "invalid UTF-8 flavor", flavor: "bad\xffflavor", tier: "primary", wantQuoted: `unknown flavor "bad\xffflavor"`},
+		{name: "unknown harness", harness: "bad\nharness", tier: "primary", wantQuoted: `unknown harness "bad\nharness"`},
+		{name: "unknown tier", harness: "codex", tier: "bad\ttier", wantQuoted: `unknown tier "bad\ttier"`},
+		{name: "invalid UTF-8 harness", harness: "bad\xffharness", tier: "primary", wantQuoted: `unknown harness "bad\xffharness"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			code, out, errs := runCmd(t, "model", "validate", tc.flavor, tc.tier)
+			code, out, errs := runCmd(t, "model", "validate", tc.harness, tc.tier)
 			if code != 2 || out != "" || strings.Count(errs, "\n") != 1 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errs)
 			}
-			attemptedPair := strconv.Quote(tc.flavor + "." + tc.tier)
+			attemptedPair := strconv.Quote(tc.harness + "." + tc.tier)
 			if !strings.HasPrefix(errs, "model validate: "+attemptedPair+": "+tc.wantQuoted) {
 				t.Fatalf("stderr=%q, want safely quoted attempted pair %q and diagnostic %q", errs, attemptedPair, tc.wantQuoted)
 			}

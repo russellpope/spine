@@ -47,7 +47,7 @@ commands:
   gate       run a gate-pack check class (gate [--dir D] <pack>[@<v>] <check>)
   checkpoint write or replay a session checkpoint (new, latest, list)
   cursor     print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
-	model      resolve or validate the model table for a (flavor, tier) pair (read-only)
+	model      resolve or validate the model table for a (harness, tier) pair (read-only)
   version    print the compiled template generation
 `
 
@@ -924,7 +924,7 @@ func cmdAuditRoutingWithHostPathAndDefaults(args []string, stdout, stderr io.Wri
 	} else {
 		auditOpts.ClaudeTranscriptsDir = *transcripts
 	}
-	// Warning rule (ratified at I041 review, design D-doc "Flavor
+	// Warning rule (ratified at I041 review, design D-doc "Harness
 	// threading"): a missing EXPLICITLY-requested sessions dir warns; a
 	// missing un-overridden default is a silent skip — a codex-less machine
 	// is normal, and a standing warning on every audit there is exactly the
@@ -1663,7 +1663,7 @@ func flagAmongPositionals(args []string) (tok, prev string) {
 }
 
 // cmdModel is a thin printer over model.Resolve (design D12): the CLI does
-// no resolution of its own, just flag parsing and formatting. Flavor and
+// no resolution of its own, just flag parsing and formatting. Harness and
 // tier are both required positional arguments — never inferred or
 // defaulted, per the ticket's invisible-resolution concern — so a missing
 // or unknown one is reported via model.Resolve's own error rather than a
@@ -1672,7 +1672,7 @@ func cmdModel(args []string, stdout, stderr io.Writer) int {
 	return cmdModelWithHostPath(args, stdout, stderr, "", nil)
 }
 
-const modelValidateUsage = `usage: spine model [--dir D] validate [--expect MODEL_ID] <flavor> <tier>`
+const modelValidateUsage = `usage: spine model [--dir D] validate [--expect MODEL_ID] <harness> <tier>`
 
 // cmdModelWithHostPath keeps host-config location and executable discovery as
 // argument seams. Production supplies neither, so there is no CLI path or
@@ -1690,7 +1690,7 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 	// I116's ordering guard now lives in parseArgs (I119 generalized it to
 	// every subcommand); this command's error text is the shape the helper
 	// standardizes on.
-	const modelUsage = `usage: spine model [--dir D] [--alternate] [--effort|--json] <flavor> <tier>`
+	const modelUsage = `usage: spine model [--dir D] [--alternate] [--effort|--json] <harness> <tier>`
 	pos, ok := parseArgs(fs, args, "model", modelUsage, 2, stderr)
 	if !ok {
 		return 2
@@ -1713,7 +1713,7 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 	if *alternate {
 		// I072 validates a present local file structurally, but host constraints
 		// deliberately do not apply to the legacy cell alternate. In particular,
-		// a valid config must not require this flavor, its executable, or its
+		// a valid config must not require this harness, its executable, or its
 		// primary route to be reachable before returning the critic pair.
 		if err := preflightHostConfig(hostPath, lookup); err != nil {
 			fmt.Fprintln(stderr, "model:", err)
@@ -1740,7 +1740,7 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 	// an evaluator that asked for the critic and got the author would run a
 	// model against itself and report agreement.
 	if *alternate && entry.Alternate == nil && !*asJSON {
-		fmt.Fprintf(stderr, "model: %s.%s has no alternate\n", entry.Flavor, entry.Tier)
+		fmt.Fprintf(stderr, "model: %s.%s has no alternate\n", entry.Harness, entry.Tier)
 		return 2
 	}
 	switch {
@@ -1755,6 +1755,9 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 			Provenance string `json:"provenance"`
 		}
 		type entryJSON struct {
+			Harness string `json:"harness"`
+			// Flavor is retained as a byte-equal deprecated compatibility field
+			// throughout the generation-14 fleet window.
 			Flavor     string                `json:"flavor"`
 			Tier       string                `json:"tier"`
 			ID         string                `json:"id"`
@@ -1767,7 +1770,7 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 			Pin        *model.PinResolution  `json:"pin,omitempty"`
 		}
 		out := entryJSON{
-			Flavor: entry.Flavor, Tier: entry.Tier, ID: entry.ID, Effort: entry.Effort,
+			Harness: entry.Harness, Flavor: entry.Harness, Tier: entry.Tier, ID: entry.ID, Effort: entry.Effort,
 			Aliases: entry.Aliases, Provenance: string(entry.Provenance),
 		}
 		if entry.Alternate != nil {
@@ -1799,7 +1802,7 @@ func cmdModelWithHostPath(args []string, stdout, stderr io.Writer, hostPath stri
 }
 
 // isModelValidateInvocation recognizes validate only while scanning the
-// leading flag region. A later "validate" used as a regular model flavor or
+// leading flag region. A later "validate" used as a regular model harness or
 // tier remains owned by the legacy model command and keeps its diagnostics.
 func isModelValidateInvocation(args []string) bool {
 	for i := 0; i < len(args); {
@@ -1875,7 +1878,7 @@ func preflightHostConfig(path string, lookup func(string) (string, error)) error
 	if lookup == nil {
 		lookup = exec.LookPath
 	}
-	_, err := hostconfig.Load(path, model.Flavors(), lookup)
+	_, err := hostconfig.Load(path, model.Harnesses(), lookup)
 	if errors.Is(err, hostconfig.ErrNotConfigured) {
 		return nil
 	}
@@ -1904,7 +1907,7 @@ func cmdModelValidateWithHostPath(args []string, repoDir string, stdout, stderr 
 	}
 	resolution, err := model.ValidateLaunchForHost(model.LaunchRequest{
 		RepoDir:            repoDir,
-		Flavor:             pos[0],
+		Harness:            pos[0],
 		Tier:               pos[1],
 		Expected:           expected,
 		MaxTemplateVersion: tmpl.Version(),
@@ -1922,11 +1925,11 @@ func cmdModelValidateWithHostPath(args []string, repoDir string, stdout, stderr 
 	return 0
 }
 
-func writeModelValidateConfigurationDiagnostic(stderr io.Writer, flavor, tier string, err error) {
+func writeModelValidateConfigurationDiagnostic(stderr io.Writer, harness, tier string, err error) {
 	detail := escapeModelValidateControlBytes(err.Error())
-	key, known := knownModelRouteKey(flavor, tier)
+	key, known := knownModelRouteKey(harness, tier)
 	if !known {
-		fmt.Fprintf(stderr, "model validate: %q: %s\n", flavor+"."+tier, detail)
+		fmt.Fprintf(stderr, "model validate: %q: %s\n", harness+"."+tier, detail)
 		return
 	}
 
@@ -1934,24 +1937,24 @@ func writeModelValidateConfigurationDiagnostic(stderr io.Writer, flavor, tier st
 	// canonical route label and escape any other detail occurrence so an
 	// untrusted path cannot duplicate or impersonate it.
 	detail = strings.TrimPrefix(detail, key+": ")
-	detail = strings.ReplaceAll(detail, key, flavor+`\x2e`+tier)
+	detail = strings.ReplaceAll(detail, key, harness+`\x2e`+tier)
 	fmt.Fprintf(stderr, "model validate: %s: %s\n", key, detail)
 }
 
-func knownModelRouteKey(flavor, tier string) (string, bool) {
-	knownFlavor := false
-	for _, candidate := range model.Flavors() {
-		if flavor == candidate {
-			knownFlavor = true
+func knownModelRouteKey(harness, tier string) (string, bool) {
+	knownHarness := false
+	for _, candidate := range model.Harnesses() {
+		if harness == candidate {
+			knownHarness = true
 			break
 		}
 	}
-	if !knownFlavor {
+	if !knownHarness {
 		return "", false
 	}
 	for _, candidate := range model.Tiers {
 		if tier == candidate {
-			return flavor + "." + tier, true
+			return harness + "." + tier, true
 		}
 	}
 	return "", false
