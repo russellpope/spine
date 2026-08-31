@@ -185,7 +185,7 @@ func TestModelAlternateJSONKeepsLegacyBytesWithoutHostTrail(t *testing.T) {
 }
 
 func TestModelValidateHostDivergenceRefusesBeforeExpect(t *testing.T) {
-	repo := writeModelHostWorkflow(t, "template_version: 13\nmodel_routing:\n  codex.primary: repository-safe\n")
+	repo := writeModelHostWorkflow(t, "template_version: 14\nmodel_routing:\n  codex.primary: repository-safe\n")
 	path := writeModelHostConfig(t, `{
   "schema_version": 1, "host_id": "cli-host", "harnesses": {
     "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"repository-safe": {"efforts": ["high"]}, "host-safe": {"efforts": ["high"]}}}
@@ -234,7 +234,7 @@ func TestAuditRoutingPreflightsHostConfigBeforeDefaultDiscovery(t *testing.T) {
 }
 
 func TestModelValidateHostCommandMatrix(t *testing.T) {
-	repo := writeModelHostWorkflow(t, "template_version: 13\nmodel_routing:\n  codex.primary: repository-safe\n")
+	repo := writeModelHostWorkflow(t, "template_version: 14\nmodel_routing:\n  codex.primary: repository-safe\n")
 	noHost := filepath.Join(t.TempDir(), "routing-host.json")
 	code, out, errs := runModelWithHostPath(t, noHost, "--dir", repo, "validate", "codex", "primary")
 	if code != 0 || out != "repository-safe\n" || errs != "" {

@@ -22,18 +22,9 @@ declares exactly one.
 
 ## Model routing
 
-- **flavor** — *legacy name for* **harness**; see that entry, which supersedes
-  this one (ratified 2026-08-10, I067; migration I073). Retained because the
-  code and CLI still say "flavor" (`spine model <flavor> <tier>`,
-  `unknown flavor %q`, `models/defaults.json`'s `flavors` key), so a reader of
-  the source needs the mapping. The second axis of the model table, orthogonal
-  to tier. Artifacts never name one; the dispatcher supplies it, because the
-  same ticket may be executed by any of them. Distinct from **functional
-  harness** (cli/rest/framebuffer), which is about how a project is tested,
-  not what runs the agent. Term adopted from the deepthought glossary
-  2026-07-24. *(Amended 2026-08-25: this entry still read "claude or codex"
-  long after `pi` shipped, which is how a stale glossary entry survives —
-  nothing reads it.)*
+- **flavor** — deprecated compatibility name for **harness**. Generation 14
+  keeps only the equal JSON `flavor` field and legacy defaults `flavors`
+  reader; current CLI, source, and generated files use `harness`.
 - **model tier** — a semantic role name, deliberately provider-agnostic:
   - **primary** — the default thinker: design, judgment, orchestration,
     final review.
@@ -45,15 +36,15 @@ declares exactly one.
   - **fallback** — where primary-refused or pre-flagged dual-use/security
     work runs.
   Artifacts (plans, tickets) reference tiers, never model ids (decided
-  2026-07-09, unchanged). The mapping itself is keyed by **(flavor, tier)**
+  2026-07-09, unchanged). The mapping itself is keyed by **(harness, tier)**
   and resolves in spine; each repo's WORKFLOW.md carries a **mirror** of it
   so the estate can still remap per repo (revised 2026-07-24, ADR 0011).
-- **model table** — the estate's `(flavor, tier)` → model id + optional
+- **model table** — the estate's `(harness, tier)` → model id + optional
   effort mapping. Spine ships its defaults and remembers every default it has
   ever shipped, which is what makes an inherited value distinguishable from a
   deliberate override.
 - **active launch ID** (decided 2026-08-29, I051) — the one model ID a new
-  launch may use for a requested `(flavor, tier)` under the current repository
+  launch may use for a requested `(harness, tier)` under the current repository
   snapshot: the embedded current ID, an exact current mirror value, or a safe
   deliberate mirror override. Matching is byte-for-byte. No trimming, case
   folding, family inference, alias expansion, or historical lookup can make a
@@ -61,8 +52,8 @@ declares exactly one.
   keep old transcripts interpretable but never authorize a new launch.
 - **model launch validation** (decided 2026-08-29, I051) — the fail-closed,
   model-ID-only check exposed as `spine model [--dir D] validate [--expect
-  MODEL_ID] <flavor> <tier>`. Outer `--dir` precedes the `validate` positional;
-  nested `--expect` precedes flavor/tier. It reads and classifies one
+  MODEL_ID] <harness> <tier>`. Outer `--dir` precedes the `validate` positional;
+  nested `--expect` precedes harness/tier. It reads and classifies one
   `WORKFLOW.md` snapshot, rejects unsafe, forbidden, retired, mismatched, and
   unmapped IDs, and has no bypass. It does not validate or transport the
   resolved **effort** (I075 owns that dispatch parameter) and does not validate
@@ -140,14 +131,14 @@ declares exactly one.
   does not block. Current transcript readers expose no documented observed
   effort, so real records keep `observed-effort=-`; no alias, history,
   canonical-ID shortcut, normalization, family inference, or cross-host
-  lookup fills that gap. I073 retains the public flavor rename.
+  lookup fills that gap. I073 owns this public harness migration.
 - **harness** (ratified 2026-08-10, I067) — the execution vehicle that runs a
   dispatch: claude, codex, and from 2026-08-18 **pi** (the weak-local /
-  open-weight driver). Replaces **flavor** as the model table's first axis;
+  open-weight driver). It is the model table's first axis;
   the model cell carries the actual model id whatever its family. Reachability
   of a model from a given host is a separate, per-host constraint (I068/I072),
-  never a harness. _Avoid_: flavor (legacy name, migration I073), "local
-  flavor" — local is a property of where a model is served, not a harness.
+  never a harness. _Avoid_: "local harness" when referring to a model's
+  location; local is a property of where a model is served, not a harness.
 - **openweights** (added 2026-08-25, I110) — a fourth first-axis value, mapping
   every tier to an open-weights model served through the Cascade gateway at
   effort `high`, `fallback` deliberately equal to `primary`.

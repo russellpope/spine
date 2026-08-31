@@ -1058,7 +1058,7 @@ func TestParseLaunchRoutingRejectsGlobalAmbiguity(t *testing.T) {
 		{"duplicate template version", "template_version: 11\ntemplate_version: 12\n"},
 		{"malformed template version", "template_version: twelve\n"},
 		{"non decimal template version", "template_version: +12\n"},
-		{"newer template version", "template_version: 13\n"},
+		{"newer template version", "template_version: 14\n"},
 		{"duplicate routing blocks", "model_routing:\n  codex.primary: first\nmodel_routing:\n  codex.primary: second\n"},
 	}
 	for _, tc := range cases {

@@ -111,7 +111,7 @@ func TestUnknownCommand(t *testing.T) {
 
 func TestVersionCommand(t *testing.T) {
 	code, out, _ := runCmd(t, "version")
-	if code != 0 || !strings.Contains(out, "spine template generation 13") {
+	if code != 0 || !strings.Contains(out, "spine template generation 14") {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
@@ -224,7 +224,7 @@ func TestUpdateDryRunThenWrite(t *testing.T) {
 		}
 	}
 	code, out, _ = runCmd(t, "update", "--dir", dir)
-	if code != 1 || !strings.Contains(out, "+ template_version: 13") {
+	if code != 1 || !strings.Contains(out, "+ template_version: 14") {
 		t.Fatalf("dry-run code=%d out=%q", code, out)
 	}
 	// also remove a simple machine-owned file entirely, so --write must
@@ -1208,14 +1208,14 @@ func TestAdoptDryRunShowsDiffs(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("want pending exit 1, got %d out=%q", code, out)
 	}
-	if !strings.Contains(out, "+ template_version: 13") {
+	if !strings.Contains(out, "+ template_version: 14") {
 		t.Errorf("dry-run text output missing diff content: out=%q", out)
 	}
 	// --json must never carry the diff text as loose prose in the payload
 	// stream; the JSON test above already checks the stream is pure JSON,
 	// this just confirms diffs are a text-mode-only addition.
 	_, jsonOut, _ := runCmd(t, "adopt", "--dir", dir, "--json")
-	if strings.Contains(jsonOut, "+ template_version: 13\n") {
+	if strings.Contains(jsonOut, "+ template_version: 14\n") {
 		t.Errorf("json output should not contain raw diff text: out=%q", jsonOut)
 	}
 }
@@ -3307,7 +3307,7 @@ func TestModelValidateEscapesUntrustedCandidateOnOneLine(t *testing.T) {
 }
 
 func TestModelValidateConfigurationErrorsExitTwo(t *testing.T) {
-	newer := writeModelWorkflow(t, "template_version: 14\n")
+	newer := writeModelWorkflow(t, "template_version: 15\n")
 	malformed := writeModelWorkflow(t, "model_routing:\n  codex.primary: one @ high @ low\n")
 	repoFile := filepath.Join(t.TempDir(), "not-a-directory")
 	if err := os.WriteFile(repoFile, []byte("x"), 0o644); err != nil {

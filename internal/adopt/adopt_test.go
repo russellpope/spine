@@ -78,7 +78,7 @@ func TestAdoptPraxisShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"template_version: 13",
+		"template_version: 14",
 		"**Sole-writer rule:** `spine` is the only legal cursor writer.",
 		"`spine handoff new` automatically embeds the current cursor block",
 	} {

@@ -1,7 +1,7 @@
 # Workflow — spine
 
 profile: library-cli
-template_version: 13
+template_version: 14
 reviewers: [go-reviewer, python-reviewer]
 functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
@@ -123,7 +123,8 @@ an unauthorized exact effort declaration blocks as `declared-effort-mismatch`;
 missing proof is nonblocking `unconfirmable`. Current transcript formats have
 no documented observed-effort extractor, so supported real records retain
 `observed-effort=-` and are unconfirmable rather than confirmed. I073 alone
-owns the public flavor-to-harness rename.
+owns the public harness migration; generation 14 retains deprecated JSON and
+defaults-input compatibility only.
 
 ## Execution modes
 

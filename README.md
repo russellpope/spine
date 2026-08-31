@@ -85,11 +85,11 @@ Two rules make this workable:
 Before a launcher uses a resolved ID, it can validate the active route atomically:
 
 ```sh
-spine model [--dir D] validate [--expect MODEL_ID] <flavor> <tier>
+spine model [--dir D] validate [--expect MODEL_ID] <harness> <tier>
 ```
 
 `--dir` is an outer `model` flag and therefore precedes `validate`; `--expect`
-belongs to `validate` and precedes flavor/tier. Thus `spine model --dir D
+belongs to `validate` and precedes harness/tier. Thus `spine model --dir D
 validate --expect ID codex primary` is valid, while `spine model validate
 --dir D ...` is a usage error. Success prints only the active ID. Policy
 refusals exit 1; invocation or repository-configuration errors exit 2; every
