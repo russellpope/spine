@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -84,6 +85,24 @@ func TestPinEvidenceClassifiesSelectedRunFailures(t *testing.T) {
 	}
 }
 
+func TestPinEvidenceSanitizesCloseErrors(t *testing.T) {
+	setPinEvidenceCloseFile(t, func(file *os.File) error {
+		if filepath.Base(file.Name()) != pinEvidenceRun+".md" {
+			return file.Close()
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		return errors.New("injected close failure")
+	})
+
+	dir := pinEvidenceRepo(t, "2026-06-01", pinEvidenceModel, fullPassingBattery())
+	got := CheckPinEvidence(dir, []PinEvidencePin{{Key: "codex.primary", Model: pinEvidenceModel, EvidenceRefs: []string{pinEvidenceRef}}}, pinEvidenceToday)
+	if len(got) != 1 || got[0].Kind != PinEvidenceMalformed || got[0].Path != "docs/evals/2026-08-30-routing-check/runs/gpt-5-6-sol.md" {
+		t.Fatalf("findings = %#v, want sanitized malformed evidence at the selected run", got)
+	}
+}
+
 func TestPinEvidenceDateQuoteAggregationAndContainment(t *testing.T) {
 	t.Run("day 90 and quoted exact model pass", func(t *testing.T) {
 		dir := pinEvidenceRepo(t, "2026-06-01", `"gpt-5.6-sol"`, fullPassingBattery())
@@ -130,7 +149,21 @@ func TestPinEvidenceDateQuoteAggregationAndContainment(t *testing.T) {
 // on an unbounded probabilistic race.
 func TestPinEvidenceRejectsRunSwapToOutsideEvidence(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("creating symlinks requires privileges not assumed by this test")
+		dir := pinEvidenceRepo(t, "2026-06-01", "wrong-model", fullPassingBattery())
+		run := pinEvidenceRunPath(dir)
+		setPinEvidenceBeforeOpen(t, func(opened string) {
+			if opened == "docs/evals/"+pinEvidenceEval+"/runs/"+pinEvidenceRun+".md" {
+				if err := os.Rename(run, run+".checked"); err != nil {
+					t.Fatal(err)
+				}
+				replacePinEvidenceComponent(t, run+".checked", run)
+			}
+		})
+		got := CheckPinEvidence(dir, []PinEvidencePin{{Key: "codex.primary", Model: pinEvidenceModel, EvidenceRefs: []string{pinEvidenceRef}}}, pinEvidenceToday)
+		if len(got) != 1 || got[0].Kind != PinEvidenceMalformed {
+			t.Fatalf("findings = %#v, want malformed evidence after a checked-object replacement", got)
+		}
+		return
 	}
 	dir := pinEvidenceRepo(t, "2026-06-01", "wrong-model", fullPassingBattery())
 	outside := pinEvidenceRepo(t, "2026-06-01", pinEvidenceModel, fullPassingBattery())
@@ -173,9 +206,6 @@ func TestPinEvidenceRejectsRunSwapToOutsideEvidence(t *testing.T) {
 }
 
 func TestPinEvidenceRejectsSelectedComponentSwappedToOutsideSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("creating symlinks requires privileges not assumed by this test")
-	}
 	for _, rel := range []string{
 		"docs",
 		"docs/evals",
@@ -197,6 +227,10 @@ func TestPinEvidenceRejectsSelectedComponentSwappedToOutsideSymlink(t *testing.T
 				if err := os.Rename(target, parked); err != nil {
 					t.Fatal(err)
 				}
+				if runtime.GOOS == "windows" {
+					replacePinEvidenceComponent(t, parked, target)
+					return
+				}
 				if err := os.Symlink(outsideTarget, target); err != nil {
 					t.Fatal(err)
 				}
@@ -215,9 +249,6 @@ func TestPinEvidenceRejectsSelectedComponentSwappedToOutsideSymlink(t *testing.T
 }
 
 func TestPinEvidenceRejectsSelectedComponentSwappedToSameObjectSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("creating symlinks requires privileges not assumed by this test")
-	}
 	for _, rel := range []string{
 		"docs",
 		"docs/evals",
@@ -236,6 +267,10 @@ func TestPinEvidenceRejectsSelectedComponentSwappedToSameObjectSymlink(t *testin
 				}
 				if err := os.Rename(target, parked); err != nil {
 					t.Fatal(err)
+				}
+				if runtime.GOOS == "windows" {
+					replacePinEvidenceComponent(t, parked, target)
+					return
 				}
 				if err := os.Symlink(filepath.Base(parked), target); err != nil {
 					t.Fatal(err)
@@ -259,6 +294,30 @@ func setPinEvidenceBeforeOpen(t *testing.T, hook func(string)) {
 	previous := pinEvidenceBeforeOpen
 	pinEvidenceBeforeOpen = hook
 	t.Cleanup(func() { pinEvidenceBeforeOpen = previous })
+}
+
+func setPinEvidenceCloseFile(t *testing.T, closeFile func(*os.File) error) {
+	t.Helper()
+	previous := pinEvidenceCloseFile
+	pinEvidenceCloseFile = closeFile
+	t.Cleanup(func() { pinEvidenceCloseFile = previous })
+}
+
+func replacePinEvidenceComponent(t *testing.T, source, target string) {
+	t.Helper()
+	info, err := os.Lstat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.IsDir() {
+		if err := os.Mkdir(target, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := os.WriteFile(target, []byte("replacement"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func pinEvidenceRepo(t *testing.T, created, model, battery string) string {

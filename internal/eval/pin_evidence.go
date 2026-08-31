@@ -58,6 +58,10 @@ var pinEvidenceBatteryKeys = []string{
 // the rooted descriptor is opened, which is the formerly vulnerable boundary.
 var pinEvidenceBeforeOpen func(string)
 
+// pinEvidenceCloseFile is a test seam for the only cleanup error that can
+// affect a selected evidence read. Production closes the descriptor directly.
+var pinEvidenceCloseFile = func(file *os.File) error { return file.Close() }
+
 // CheckPinEvidence reads only the selected repo-local runs. It neither walks
 // docs/evals nor invokes generic eval listing, so unrelated evals have no
 // bearing on a pin's evidence result.
@@ -202,7 +206,7 @@ func (r *pinEvidenceRoot) openDirectory(name string) (*pinEvidenceRoot, PinEvide
 	return &pinEvidenceRoot{root: child, path: path, parents: parents}, ""
 }
 
-func (r *pinEvidenceRoot) readRegularFile(name string) ([]byte, PinEvidenceKind) {
+func (r *pinEvidenceRoot) readRegularFile(name string) (content []byte, kind PinEvidenceKind) {
 	info, err := r.root.Lstat(name)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -221,13 +225,18 @@ func (r *pinEvidenceRoot) readRegularFile(name string) ([]byte, PinEvidenceKind)
 	if err != nil {
 		return nil, PinEvidenceMalformed
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := pinEvidenceCloseFile(file); closeErr != nil && kind == "" {
+			content = nil
+			kind = PinEvidenceMalformed
+		}
+	}()
 	opened, err := file.Stat()
 	current, currentErr := r.root.Lstat(name)
 	if err != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || !os.SameFile(info, current) {
 		return nil, PinEvidenceMalformed
 	}
-	content, err := io.ReadAll(file)
+	content, err = io.ReadAll(file)
 	if err != nil {
 		return nil, PinEvidenceMalformed
 	}
