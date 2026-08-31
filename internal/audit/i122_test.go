@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -258,6 +259,105 @@ func TestWorkflowOpeningTextBlockAndTranscriptModelTakePrecedence(t *testing.T) 
 	row := rowsByID(t, rep)["I054"]
 	if row.Verdict != VerdictMatch {
 		t.Fatalf("I054 verdict = %s (%s), transcript model must outrank metadata fallback", row.Verdict, row.Detail)
+	}
+}
+
+// A workflow transcript may not mix one event's user-shaped message with an
+// assistant-shaped envelope.  The event itself is the evidence carrier: an
+// invalid carrier cannot claim either a ticket or its model fallback.
+func TestWorkflowInvalidEventShapesNeverSupplyRoutingEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "assistant envelope user message", raw: `{"type":"assistant","message":{"role":"user","model":"claude-sonnet-5","content":"Implement I060"}}`},
+		{name: "user envelope assistant message", raw: `{"type":"user","message":{"role":"assistant","content":"Implement I060"}}`},
+		{name: "missing type", raw: `{"message":{"role":"user","content":"Implement I060"}}`},
+		{name: "empty type", raw: `{"type":"","message":{"role":"user","content":"Implement I060"}}`},
+		{name: "missing role", raw: `{"type":"user","message":{"content":"Implement I060"}}`},
+		{name: "empty role", raw: `{"type":"user","message":{"role":"","content":"Implement I060"}}`},
+		{name: "case variant type value", raw: `{"type":"User","message":{"role":"user","content":"Implement I060"}}`},
+		{name: "case variant role value", raw: `{"type":"user","message":{"role":"USER","content":"Implement I060"}}`},
+		{name: "case variant envelope key", raw: `{"TYPE":"user","message":{"role":"user","content":"Implement I060"}}`},
+		{name: "case variant nested key", raw: `{"type":"user","message":{"ROLE":"user","content":"Implement I060"}}`},
+		{name: "duplicate envelope key", raw: `{"type":"assistant","type":"user","message":{"role":"user","content":"Implement I060"}}`},
+		{name: "case equivalent envelope keys", raw: `{"type":"assistant","TYPE":"user","message":{"role":"user","content":"Implement I060"}}`},
+		{name: "duplicate nested key", raw: `{"type":"user","message":{"role":"assistant","role":"user","content":"Implement I060"}}`},
+		{name: "case equivalent nested keys", raw: `{"type":"user","message":{"role":"assistant","ROLE":"user","content":"Implement I060"}}`},
+		{name: "missing content", raw: `{"type":"user","message":{"role":"user"}}`},
+		{name: "null content", raw: `{"type":"user","message":{"role":"user","content":null}}`},
+		{name: "non message object", raw: `{"type":"user","message":[]}`},
+		{name: "non text content", raw: `{"type":"user","message":{"role":"user","content":1}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I060": "routine"})
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "unused", "", "workflow-subagent")
+			base := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker")
+			raw := strings.Replace(tc.raw, "{", fmt.Sprintf(`{"cwd":%q,`, repo), 1)
+			if err := os.WriteFile(base+".jsonl", []byte(raw+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-sonnet-5")
+
+			var firstWarnings []string
+			for attempt := 0; attempt < 3; attempt++ {
+				rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+				if err != nil {
+					t.Fatal(err)
+				}
+				row := rowsByID(t, rep)["I060"]
+				if row.Verdict != VerdictNoTranscript || len(row.Actuals) != 0 {
+					t.Fatalf("attempt %d: I060 = %+v, want no transcript evidence from an invalid workflow event", attempt, row)
+				}
+				if !warningContains(rep.Warnings, "1 malformed line(s) skipped") {
+					t.Fatalf("attempt %d: warnings = %q, want one malformed workflow line warning", attempt, rep.Warnings)
+				}
+				if attempt == 0 {
+					firstWarnings = rep.Warnings
+				} else if !reflect.DeepEqual(rep.Warnings, firstWarnings) {
+					t.Fatalf("attempt %d: warnings = %q, want stable %q", attempt, rep.Warnings, firstWarnings)
+				}
+			}
+		})
+	}
+}
+
+func TestWorkflowFirstValidUserEventLatchesAfterMalformedCarrier(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "missing content", raw: `{"type":"user","message":{"role":"user"}}`},
+		{name: "null content", raw: `{"type":"user","message":{"role":"user","content":null}}`},
+		{name: "non text content", raw: `{"type":"user","message":{"role":"user","content":1}}`},
+		{name: "malformed text block", raw: `{"type":"user","message":{"role":"user","content":[{"type":"text","text":1}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I061": "routine"})
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "unused", "", "workflow-subagent")
+			base := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker")
+			raw := tc.raw + "\n" +
+				fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":"Implement I061"}}`+"\n", repo) +
+				fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"done"}]}}`+"\n", repo)
+			if err := os.WriteFile(base+".jsonl", []byte(raw), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row := rowsByID(t, rep)["I061"]; row.Verdict != VerdictMatch {
+				t.Fatalf("I061 = %+v, want the first later structurally valid user event to supply evidence", row)
+			}
+			if !warningContains(rep.Warnings, "1 malformed line(s) skipped") {
+				t.Fatalf("warnings = %q, want malformed opening warning", rep.Warnings)
+			}
+		})
 	}
 }
 
