@@ -1401,6 +1401,58 @@ func TestAuditRoutingAppendsDeclaredOnlyEffortFields(t *testing.T) {
 	}
 }
 
+func TestAuditRoutingAppendsExplainableHostDeclarationFields(t *testing.T) {
+	var out bytes.Buffer
+	report := audit.Report{Tickets: []audit.TicketRow{{
+		ID: "I074", Tier: "routine", Actuals: []string{"gateway/pinned"}, Verdict: audit.VerdictDeclarationUnconfirmable,
+		ExpectedEffort: "high", DeclaredEffort: "high", DeclarationStatus: "target-match", ObservedEffort: "-",
+		DeclarationEvents: []audit.DeclarationEvidence{{
+			Harness: "claude", Model: "gateway-pinned", ExpectedModel: "gateway-pinned", ExpectedEffort: "high", DeclaredEffort: "high",
+			ObservedModel: "gateway/pinned", ObservedEffort: "-", ModelStatus: audit.DeclarationModelConfirmed, DeclarationStatus: "target-match", ObservedEffortStatus: "unconfirmable",
+			Correlation: "source:claude session:s1 dispatch:toolu_1",
+		}},
+	}}}
+	if code := printAuditRoutingReport(&out, report); code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+	row := auditRoutingRow(t, out.String(), "I074")
+	prefix := auditRoutingPrefix(t, row)
+	if fields := strings.Fields(prefix); len(fields) < 4 || fields[0] != "I074" || fields[1] != "routine" || fields[3] != "unconfirmable" {
+		t.Fatalf("leading ticket/tier/actual/verdict/detail layout changed: %q", row)
+	}
+	for _, want := range []string{
+		"expected-pair=gateway-pinned@high",
+		"declared=claude,gateway-pinned,high",
+		"model-confirmation=confirmed",
+		"observed-effort-status=unconfirmable",
+		"correlation=source:claude session:s1 dispatch:toolu_1",
+	} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("row = %q, want %q", row, want)
+		}
+	}
+}
+
+func TestAuditRoutingDeclarationExitBehaviorPreservesLegacyBlocking(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		verdict audit.Verdict
+		want    int
+	}{
+		{"unconfirmable does not block", audit.VerdictDeclarationUnconfirmable, 0},
+		{"declared mismatch blocks", audit.VerdictDeclarationObservedMismatch, 1},
+		{"legacy silent descent blocks", audit.VerdictSilentDescent, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			code := printAuditRoutingReport(&out, audit.Report{Tickets: []audit.TicketRow{{ID: "I074", Tier: "routine", Verdict: tc.verdict}}})
+			if code != tc.want {
+				t.Fatalf("code = %d, want %d (output %q)", code, tc.want, out.String())
+			}
+		})
+	}
+}
+
 func auditRoutingPrefix(t *testing.T, row string) string {
 	t.Helper()
 	const marker = " expected-effort="

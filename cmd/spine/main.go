@@ -952,6 +952,10 @@ func cmdAuditRoutingWithHostPathAndDefaults(args []string, stdout, stderr io.Wri
 	for _, w := range rep.Warnings {
 		fmt.Fprintln(stderr, "warning:", w)
 	}
+	return printAuditRoutingReport(stdout, rep)
+}
+
+func printAuditRoutingReport(stdout io.Writer, rep audit.Report) int {
 	dash := func(s string) string {
 		if s == "" {
 			return "-"
@@ -965,11 +969,20 @@ func cmdAuditRoutingWithHostPathAndDefaults(args []string, stdout, stderr io.Wri
 		wActual = max(wActual, len(dash(strings.Join(t.Actuals, ","))))
 		wVerdict = max(wVerdict, len(t.Verdict))
 	}
-	fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %-*s  %s  %s\n", wID, "ticket", wTier, "tier", wActual, "actual", wVerdict, "verdict", "detail", "expected-effort  declared-effort  declaration-status  observed-effort")
+	hasDeclarationEvents := false
 	for _, t := range rep.Tickets {
-		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %-*s  %s  expected-effort=%s declared-effort=%s declaration-status=%s observed-effort=%s\n",
+		hasDeclarationEvents = hasDeclarationEvents || len(t.DeclarationEvents) > 0
+	}
+	heading := "expected-effort  declared-effort  declaration-status  observed-effort"
+	if hasDeclarationEvents {
+		heading += "  expected-pair  declared  model-confirmation  observed-effort-status  correlation"
+	}
+	fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %-*s  %s  %s\n", wID, "ticket", wTier, "tier", wActual, "actual", wVerdict, "verdict", "detail", heading)
+	for _, t := range rep.Tickets {
+		suffix := declarationEventOutput(t.DeclarationEvents)
+		fmt.Fprintf(stdout, "%-*s  %-*s  %-*s  %-*s  %s  expected-effort=%s declared-effort=%s declaration-status=%s observed-effort=%s%s\n",
 			wID, t.ID, wTier, dash(t.Tier), wActual, dash(strings.Join(t.Actuals, ",")), wVerdict, string(t.Verdict), t.Detail,
-			dash(t.ExpectedEffort), dash(t.DeclaredEffort), dash(t.DeclarationStatus), dash(t.ObservedEffort))
+			dash(t.ExpectedEffort), dash(t.DeclaredEffort), dash(t.DeclarationStatus), dash(t.ObservedEffort), suffix)
 	}
 	if len(rep.Unmatched) > 0 {
 		fmt.Fprintln(stdout, "unmatched dispatches (no ticket id or not repo-qualified; not judged):")
@@ -1009,6 +1022,20 @@ func cmdAuditRoutingWithHostPathAndDefaults(args []string, stdout, stderr io.Wri
 		return 1
 	}
 	return 0
+}
+
+func declarationEventOutput(events []audit.DeclarationEvidence) string {
+	if len(events) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(events))
+	for _, event := range events {
+		parts = append(parts, fmt.Sprintf(
+			"expected-pair=%s@%s declared=%s,%s,%s model-confirmation=%s observed-effort-status=%s correlation=%s",
+			event.ExpectedModel, event.ExpectedEffort, event.Harness, event.Model, event.DeclaredEffort,
+			event.ModelStatus, event.ObservedEffortStatus, event.Correlation))
+	}
+	return " " + strings.Join(parts, ";")
 }
 
 // cmdAuditStages is a thin printer over stages.Derive: a table of every

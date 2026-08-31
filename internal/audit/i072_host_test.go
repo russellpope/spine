@@ -34,14 +34,14 @@ func TestDeclarationEvidenceRequiresExactHostRouteAndIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		observed declarationObservation
-		want     declarationModelState
+		want     DeclarationModelState
 	}{
-		{"exact mapped worker", declarationObservation{identity: declared.Identity, model: "gateway/pinned", linkedWorker: true}, declarationModelConfirmed},
-		{"different mapped route", declarationObservation{identity: declared.Identity, model: "gateway/other", linkedWorker: true}, declarationModelMismatch},
-		{"unmapped raw id", declarationObservation{identity: declared.Identity, model: "gateway/unknown", linkedWorker: true}, declarationModelUnconfirmable},
-		{"different dispatch", declarationObservation{identity: evidenceIdentity{source: "claude", session: "s1", dispatch: "d2"}, model: "gateway/pinned", linkedWorker: true}, declarationModelUnconfirmable},
-		{"root only linkage", declarationObservation{identity: evidenceIdentity{source: "codex", session: "s1"}, model: "gateway/pinned", linkedWorker: true}, declarationModelUnconfirmable},
-		{"unlinked worker", declarationObservation{identity: declared.Identity, model: "gateway/pinned"}, declarationModelUnconfirmable},
+		{"exact mapped worker", declarationObservation{identity: declared.Identity, model: "gateway/pinned", linkedWorker: true}, DeclarationModelConfirmed},
+		{"different mapped route", declarationObservation{identity: declared.Identity, model: "gateway/other", linkedWorker: true}, DeclarationModelMismatch},
+		{"unmapped raw id", declarationObservation{identity: declared.Identity, model: "gateway/unknown", linkedWorker: true}, DeclarationModelUnconfirmable},
+		{"different dispatch", declarationObservation{identity: evidenceIdentity{source: "claude", session: "s1", dispatch: "d2"}, model: "gateway/pinned", linkedWorker: true}, DeclarationModelUnconfirmable},
+		{"root only linkage", declarationObservation{identity: evidenceIdentity{source: "codex", session: "s1"}, model: "gateway/pinned", linkedWorker: true}, DeclarationModelUnconfirmable},
+		{"unlinked worker", declarationObservation{identity: declared.Identity, model: "gateway/pinned"}, DeclarationModelUnconfirmable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := judgeDeclarationModel(declared, tc.observed, routes)

@@ -254,18 +254,20 @@ type DeclarationEvidence struct {
 	DeclaredEffort       string
 	ObservedModel        string
 	ObservedEffort       string
-	ModelStatus          declarationModelState
+	ModelStatus          DeclarationModelState
 	DeclarationStatus    string
 	ObservedEffortStatus string
+	Correlation          string
 	Verdict              Verdict
 }
 
-type declarationModelState string
+// DeclarationModelState keeps model evidence separate from the final verdict.
+type DeclarationModelState string
 
 const (
-	declarationModelConfirmed     declarationModelState = "confirmed"
-	declarationModelMismatch      declarationModelState = "mismatch"
-	declarationModelUnconfirmable declarationModelState = "unconfirmable"
+	DeclarationModelConfirmed     DeclarationModelState = "confirmed"
+	DeclarationModelMismatch      DeclarationModelState = "mismatch"
+	DeclarationModelUnconfirmable DeclarationModelState = "unconfirmable"
 )
 
 type observedRoute struct {
@@ -300,18 +302,18 @@ type declarationObservation struct {
 // judgeDeclarationModel permits confirmation only from one linked worker
 // event with the complete controller dispatch identity. A root/session match
 // is intentionally insufficient, even when its raw model happens to match.
-func judgeDeclarationModel(declared DeclarationEvidence, observed declarationObservation, routes observedRouteIndex) declarationModelState {
+func judgeDeclarationModel(declared DeclarationEvidence, observed declarationObservation, routes observedRouteIndex) DeclarationModelState {
 	if !declared.Identity.usable() || !observed.identity.usable() || !observed.linkedWorker || declared.Identity != observed.identity || declared.Harness == "" || observed.model == "" {
-		return declarationModelUnconfirmable
+		return DeclarationModelUnconfirmable
 	}
 	route, ok := routes[observed.model]
 	if !ok || route.harness != declared.Harness {
-		return declarationModelUnconfirmable
+		return DeclarationModelUnconfirmable
 	}
 	if declared.Model != declared.ExpectedModel || route.model != declared.ExpectedModel {
-		return declarationModelMismatch
+		return DeclarationModelMismatch
 	}
-	return declarationModelConfirmed
+	return DeclarationModelConfirmed
 }
 
 // judgeDeclarationEvidence is deliberately fact-only: callers provide any
@@ -334,7 +336,7 @@ func judgeDeclarationEvidence(evidence DeclarationEvidence, authorized bool) Dec
 	} else {
 		evidence.DeclarationStatus = "unauthorized-declaration"
 	}
-	if evidence.ModelStatus == declarationModelMismatch {
+	if evidence.ModelStatus == DeclarationModelMismatch {
 		evidence.Verdict = VerdictDeclarationObservedMismatch
 		return evidence
 	}
@@ -342,7 +344,7 @@ func judgeDeclarationEvidence(evidence DeclarationEvidence, authorized bool) Dec
 		evidence.Verdict = VerdictDeclarationEffortMismatch
 		return evidence
 	}
-	if evidence.ModelStatus != declarationModelConfirmed || evidence.ObservedEffort == "-" {
+	if evidence.ModelStatus != DeclarationModelConfirmed || evidence.ObservedEffort == "-" {
 		return evidence
 	}
 	if evidence.ObservedEffort != evidence.DeclaredEffort {
@@ -376,7 +378,8 @@ func judgeHostDeclarations(repoDir, hostPath string, t ticket, dispatches []disp
 			ExpectedEffort: resolution.Entry.Effort,
 			DeclaredEffort: d.effort,
 			ObservedEffort: "-",
-			ModelStatus:    declarationModelUnconfirmable,
+			ModelStatus:    DeclarationModelUnconfirmable,
+			Correlation:    formatEvidenceIdentity(d.identity),
 		}
 		for _, a := range agents {
 			if !a.identity.usable() || a.identity != d.identity {
@@ -384,18 +387,18 @@ func judgeHostDeclarations(repoDir, hostPath string, t ticket, dispatches []disp
 			}
 			for _, observedModel := range a.models {
 				state := judgeDeclarationModel(evidence, declarationObservation{identity: a.identity, model: observedModel, linkedWorker: true}, routes)
-				if state == declarationModelMismatch {
+				if state == DeclarationModelMismatch {
 					evidence.ModelStatus = state
 					evidence.ObservedModel = observedModel
 					evidence.Verdict = VerdictDeclarationObservedMismatch
 					break
 				}
-				if state == declarationModelConfirmed {
+				if state == DeclarationModelConfirmed {
 					evidence.ModelStatus = state
 					evidence.ObservedModel = observedModel
 				}
 			}
-			if evidence.ModelStatus == declarationModelMismatch {
+			if evidence.ModelStatus == DeclarationModelMismatch {
 				break
 			}
 		}
@@ -403,6 +406,13 @@ func judgeHostDeclarations(repoDir, hostPath string, t ticket, dispatches []disp
 		out = append(out, evidence)
 	}
 	return out
+}
+
+func formatEvidenceIdentity(identity evidenceIdentity) string {
+	if !identity.usable() {
+		return "-"
+	}
+	return "source:" + identity.source + " session:" + identity.session + " dispatch:" + identity.dispatch
 }
 
 func aggregateDeclarationEvents(events []DeclarationEvidence) (Verdict, string, bool) {

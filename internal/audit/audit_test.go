@@ -32,7 +32,7 @@ func rowsByID(t *testing.T, rep Report) map[string]TicketRow {
 }
 
 func TestDeclarationVerdictMatrixAndAggregation(t *testing.T) {
-	base := DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "high", ModelStatus: declarationModelConfirmed}
+	base := DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "high", ModelStatus: DeclarationModelConfirmed}
 	for _, tc := range []struct {
 		name       string
 		evidence   DeclarationEvidence
@@ -42,12 +42,12 @@ func TestDeclarationVerdictMatrixAndAggregation(t *testing.T) {
 		{"confirmed exact observed effort", withObservedEffort(base, "high"), false, VerdictDeclarationConfirmed},
 		{"confirmed model absent observed effort", base, false, VerdictDeclarationUnconfirmable},
 		{"confirmed model different observed effort", withObservedEffort(base, "low"), false, VerdictDeclarationObservedMismatch},
-		{"confirmed model absent declaration", DeclarationEvidence{ExpectedEffort: "high", ModelStatus: declarationModelConfirmed}, false, VerdictDeclarationUnconfirmable},
-		{"confirmed model unauthorized declaration", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: declarationModelConfirmed}, false, VerdictDeclarationEffortMismatch},
-		{"confirmed model authorized retry", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ObservedEffort: "low", ModelStatus: declarationModelConfirmed}, true, VerdictDeclarationConfirmed},
-		{"model mismatch outranks effort", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: declarationModelMismatch}, false, VerdictDeclarationObservedMismatch},
-		{"unconfirmable model unauthorized declaration", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: declarationModelUnconfirmable}, false, VerdictDeclarationEffortMismatch},
-		{"unconfirmable model otherwise", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "high", ModelStatus: declarationModelUnconfirmable}, false, VerdictDeclarationUnconfirmable},
+		{"confirmed model absent declaration", DeclarationEvidence{ExpectedEffort: "high", ModelStatus: DeclarationModelConfirmed}, false, VerdictDeclarationUnconfirmable},
+		{"confirmed model unauthorized declaration", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: DeclarationModelConfirmed}, false, VerdictDeclarationEffortMismatch},
+		{"confirmed model authorized retry", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ObservedEffort: "low", ModelStatus: DeclarationModelConfirmed}, true, VerdictDeclarationConfirmed},
+		{"model mismatch outranks effort", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: DeclarationModelMismatch}, false, VerdictDeclarationObservedMismatch},
+		{"unconfirmable model unauthorized declaration", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: DeclarationModelUnconfirmable}, false, VerdictDeclarationEffortMismatch},
+		{"unconfirmable model otherwise", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "high", ModelStatus: DeclarationModelUnconfirmable}, false, VerdictDeclarationUnconfirmable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := judgeDeclarationEvidence(tc.evidence, tc.authorized)
@@ -58,7 +58,7 @@ func TestDeclarationVerdictMatrixAndAggregation(t *testing.T) {
 	}
 
 	unconfirmable := judgeDeclarationEvidence(base, false)
-	blocking := judgeDeclarationEvidence(DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: declarationModelUnconfirmable}, false)
+	blocking := judgeDeclarationEvidence(DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: DeclarationModelUnconfirmable}, false)
 	verdict, _, ok := aggregateDeclarationEvents([]DeclarationEvidence{unconfirmable, blocking})
 	if !ok || verdict != VerdictDeclarationEffortMismatch {
 		t.Fatalf("aggregate = %q present=%v, want declared-effort-mismatch", verdict, ok)
