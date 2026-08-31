@@ -133,7 +133,7 @@ func TestI051ModelValidateKnownKeyConfigurationDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	malformed := writeModelWorkflow(t, "model_routing:\n  codex.primary: one @ high @ low\n")
-	newer := writeModelWorkflow(t, "template_version: 14\n")
+	newer := writeModelWorkflow(t, "template_version: 15\n")
 
 	for _, tc := range []struct {
 		name string
