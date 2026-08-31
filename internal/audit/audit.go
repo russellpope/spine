@@ -1894,7 +1894,16 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 				if !ok || meta.AgentType != "workflow-subagent" || meta.SpawnDepth != 1 {
 					continue
 				}
-				openingLine, more, models, cwd := scanWorkflowJSONL(sub, warnings)
+				file, err := openWorkflowFile(dir, []string{id, "subagents", "workflows", workflowID}, filepath.Base(sub), workflowTranscriptBeforeOpen)
+				if err != nil {
+					if readErr, ok := err.(*workflowMetadataReadError); ok && readErr.kind == workflowMetadataUnsafe {
+						*warnings = append(*warnings, sub+": workflow transcript unsafe — transcript skipped")
+					} else {
+						*warnings = append(*warnings, sub+": workflow transcript unreadable — transcript skipped: "+err.Error())
+					}
+					continue
+				}
+				openingLine, more, models, cwd := scanWorkflowJSONL(sub, file, warnings)
 				referenceCount := ticketref.ReferenceCount(openingLine, ticketTokens)
 				if referenceCount == 0 {
 					continue
@@ -1947,6 +1956,10 @@ const workflowMetadataMaxBytes = 1 << 20
 // session or workflow's metadata.
 var workflowMetadataBeforeOpen func(string)
 
+// workflowTranscriptBeforeOpen is the equivalent deterministic replacement
+// seam for workflow JSONL tests. Production leaves it nil.
+var workflowTranscriptBeforeOpen func(string)
+
 type workflowMetadataReadKind uint8
 
 const (
@@ -1967,44 +1980,39 @@ func (e *workflowMetadataReadError) Error() string {
 	return e.err.Error()
 }
 
-// readWorkflowMetadataFile resolves each named component under transcriptDir
-// with descriptor-relative opens. Lstat plus SameFile checks reject symlinks,
+// openWorkflowFile resolves each named component under transcriptDir with
+// descriptor-relative opens. Lstat plus SameFile checks reject symlinks,
 // non-regular targets, and path replacement between inspection and open.
-func readWorkflowMetadataFile(transcriptDir string, components []string, name string) ([]byte, error) {
+func openWorkflowFile(transcriptDir string, components []string, name string, beforeOpen func(string)) (*os.File, error) {
 	root, err := os.OpenRoot(transcriptDir)
 	if err != nil {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
 	}
+	defer func() { _ = root.Close() }()
 	for _, component := range components {
 		if !workflowMetadataComponent(component) {
-			_ = root.Close()
 			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 		}
 		info, err := root.Lstat(component)
 		if err != nil {
-			_ = root.Close()
 			return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
 		}
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			_ = root.Close()
 			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 		}
 		child, err := root.OpenRoot(component)
 		if err != nil {
-			_ = root.Close()
 			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe, err: err}
 		}
 		opened, statErr := child.Stat(".")
 		current, currentErr := root.Lstat(component)
 		if statErr != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !opened.IsDir() || !os.SameFile(info, opened) || !os.SameFile(info, current) {
 			_ = child.Close()
-			_ = root.Close()
 			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 		}
 		_ = root.Close()
 		root = child
 	}
-	defer func() { _ = root.Close() }()
 
 	if !workflowMetadataComponent(name) {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
@@ -2016,21 +2024,33 @@ func readWorkflowMetadataFile(transcriptDir string, components []string, name st
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 	}
-	if workflowMetadataBeforeOpen != nil {
-		workflowMetadataBeforeOpen(filepath.Join(transcriptDir, filepath.Join(append(append([]string(nil), components...), name)...)))
+	if beforeOpen != nil {
+		beforeOpen(filepath.Join(transcriptDir, filepath.Join(append(append([]string(nil), components...), name)...)))
 	}
 	file, err := root.Open(name)
 	if err != nil {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe, err: err}
 	}
-	defer func() { _ = file.Close() }()
 	opened, statErr := file.Stat()
 	current, currentErr := root.Lstat(name)
 	if statErr != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || !os.SameFile(info, current) {
+		_ = file.Close()
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
+	return file, nil
+}
+
+func readWorkflowMetadataFile(transcriptDir string, components []string, name string) ([]byte, error) {
+	file, err := openWorkflowFile(transcriptDir, components, name, workflowMetadataBeforeOpen)
+	if err != nil {
+		return nil, err
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, workflowMetadataMaxBytes+1))
 	if err != nil {
+		_ = file.Close()
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
+	}
+	if err := file.Close(); err != nil {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
 	}
 	if len(raw) > workflowMetadataMaxBytes {
@@ -2077,6 +2097,7 @@ func loadWorkflowMeta(transcriptDir, session, workflow, agentID string, warnings
 type workflowRunProgress struct {
 	AgentID string `json:"agentId"`
 	Model   string `json:"model"`
+	Type    string `json:"type"`
 }
 
 func workflowRunModel(transcriptDir, session, workflow, agentID string, warnings *[]string) (string, bool) {
@@ -2115,7 +2136,7 @@ func workflowRunModel(transcriptDir, session, workflow, agentID string, warnings
 		return "", false
 	}
 
-	var progress []workflowRunProgress
+	var progress []json.RawMessage
 	duplicate, err = unmarshalWorkflowRunMetadata(envelope.WorkflowProgress, &progress)
 	if duplicate {
 		*warnings = append(*warnings, path+": ambiguous workflow run metadata — model fallback skipped")
@@ -2126,10 +2147,14 @@ func workflowRunModel(transcriptDir, session, workflow, agentID string, warnings
 		return "", false
 	}
 	var matches []workflowRunProgress
-	for _, entry := range progress {
-		if entry.AgentID == "" {
+	for _, raw := range progress {
+		entry, phase, valid := parseWorkflowRunProgress(raw)
+		if !valid {
 			*warnings = append(*warnings, path+": malformed workflow run metadata — model fallback skipped")
 			return "", false
+		}
+		if phase {
+			continue
 		}
 		if entry.AgentID == agentID {
 			matches = append(matches, entry)
@@ -2148,6 +2173,36 @@ func workflowRunModel(transcriptDir, session, workflow, agentID string, warnings
 	default:
 		*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata has multiple entries for agent %q — model fallback skipped", path, agentID))
 		return "", false
+	}
+}
+
+// parseWorkflowRunProgress admits exactly two workflowProgress shapes:
+// workflow_phase entries without routing evidence, and agent entries with an
+// exact identity/model pair. Historical synthetic metadata omitted type, so
+// that canonical agent shape remains compatible. Everything agent-like but
+// incomplete is malformed rather than an excuse to use defaultModel.
+func parseWorkflowRunProgress(raw json.RawMessage) (workflowRunProgress, bool, bool) {
+	var fields map[string]json.RawMessage
+	duplicate, err := unmarshalWorkflowRunMetadata(raw, &fields)
+	if duplicate || err != nil || fields == nil {
+		return workflowRunProgress{}, false, false
+	}
+	var entry workflowRunProgress
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return workflowRunProgress{}, false, false
+	}
+	_, hasAgentID := fields["agentId"]
+	_, hasModel := fields["model"]
+	_, hasType := fields["type"]
+	switch entry.Type {
+	case "workflow_phase":
+		return workflowRunProgress{}, true, !hasAgentID && !hasModel
+	case "workflow_agent":
+		return entry, false, hasAgentID && hasModel && entry.AgentID != "" && entry.Model != ""
+	case "":
+		return entry, false, !hasType && hasAgentID && hasModel && entry.AgentID != "" && entry.Model != ""
+	default:
+		return workflowRunProgress{}, false, false
 	}
 }
 
@@ -2176,8 +2231,8 @@ func unmarshalWorkflowRunMetadata(data []byte, dst any) (bool, error) {
 		if len(path) == 0 {
 			return caseVariantJSONMember(name, "workflowProgress")
 		}
-		return len(path) == 2 && path[0] == "workflowProgress" && strings.HasPrefix(path[1], "[") &&
-			caseVariantJSONMember(name, "agentId", "model")
+		return ((len(path) == 2 && path[0] == "workflowProgress" && strings.HasPrefix(path[1], "[")) || len(path) == 0) &&
+			caseVariantJSONMember(name, "agentId", "model", "type")
 	})
 }
 
@@ -2256,12 +2311,7 @@ func jsonHasDuplicateMembers(decoder *json.Decoder, path []string, invalidMember
 // common scanner read models or dispatches. A top-level event type and its
 // nested message role are one carrier, not alternate aliases: a mixed event
 // must not open worker attribution or leak an assistant model into it.
-func scanWorkflowJSONL(path string, warnings *[]string) (string, []dispatch, []string, string) {
-	f, err := os.Open(path)
-	if err != nil {
-		*warnings = append(*warnings, path+": unreadable: "+err.Error())
-		return "", nil, nil, ""
-	}
+func scanWorkflowJSONL(path string, f *os.File, warnings *[]string) (string, []dispatch, []string, string) {
 	defer func() {
 		if err := f.Close(); err != nil {
 			*warnings = append(*warnings, path+": close: "+err.Error())

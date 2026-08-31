@@ -85,6 +85,109 @@ func TestWorkflowSubagentUsesAgentCorrelatedRunMetadataModelWhenTranscriptHasNon
 	}
 }
 
+func TestWorkflowRunMetadataIgnoresPhaseRowsBeforeExactAgentEntry(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I060": "routine"})
+	transcripts := t.TempDir()
+	writeWorkflowAgent(t, transcripts, "session-1", "wf_real", "worker", repo, "Implement I060", "", "workflow-subagent")
+	writeWorkflowRunRaw(t, transcripts, "session-1", "wf_real", `{"defaultModel":"claude-haiku-4-5","workflowProgress":[{"index":0,"title":"Implement","type":"workflow_phase"},{"agentId":"worker","model":"claude-sonnet-5","type":"workflow_agent"}]}`)
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row := rowsByID(t, rep)["I060"]; row.Verdict != VerdictMatch {
+		t.Fatalf("I060 verdict = %s (%s), want match from the exact workflow agent entry after a phase row", row.Verdict, row.Detail)
+	}
+}
+
+func TestWorkflowTranscriptRejectsUnsafeFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		linkTo func(t *testing.T, transcripts, base string) string
+	}{
+		{
+			name: "outside root symlink",
+			linkTo: func(t *testing.T, transcripts, base string) string {
+				t.Helper()
+				outside := filepath.Join(t.TempDir(), "outside-agent.jsonl")
+				if err := os.WriteFile(outside, []byte(`{"type":"user","cwd":"outside","message":{"role":"user","content":"Implement I061"}}`+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return outside
+			},
+		},
+		{
+			name: "same object symlink",
+			linkTo: func(t *testing.T, transcripts, base string) string {
+				t.Helper()
+				target := filepath.Join(filepath.Dir(base), "worker-source.jsonl")
+				if err := os.WriteFile(target, []byte(`{"type":"user","cwd":"same-object","message":{"role":"user","content":"Implement I061"}}`+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return target
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I061": "routine"})
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_link", "worker", repo, "Implement I061", "claude-sonnet-5", "workflow-subagent")
+			base := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_link", "agent-worker")
+			if err := os.Remove(base + ".jsonl"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(tc.linkTo(t, transcripts, base), base+".jsonl"); err != nil {
+				t.Fatal(err)
+			}
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row := rowsByID(t, rep)["I061"]; row.Verdict != VerdictNoTranscript {
+				t.Fatalf("I061 verdict = %s (%s), want no-transcript after unsafe workflow JSONL", row.Verdict, row.Detail)
+			}
+			if !warningContains(rep.Warnings, "workflow transcript unsafe — transcript skipped") {
+				t.Fatalf("warnings = %q, want unsafe workflow transcript warning", rep.Warnings)
+			}
+		})
+	}
+}
+
+func TestWorkflowTranscriptRejectsAtomicReplacement(t *testing.T) {
+	for attempt := 0; attempt < 16; attempt++ {
+		repo := t.TempDir()
+		writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I062": "routine"})
+		transcripts := t.TempDir()
+		writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I062", "claude-sonnet-5", "workflow-subagent")
+		base := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker")
+		replacement := base + ".replacement"
+		if err := os.WriteFile(replacement, []byte(`{"type":"user","cwd":`+mustJSON(t, repo)+`,"message":{"role":"user","content":"Implement I062"}}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		setWorkflowTranscriptBeforeOpen(t, func(path string) {
+			if path == base+".jsonl" {
+				if err := os.Rename(replacement, base+".jsonl"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+
+		rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row := rowsByID(t, rep)["I062"]; row.Verdict != VerdictNoTranscript {
+			t.Fatalf("attempt %d: I062 verdict = %s (%s), want no-transcript after atomic workflow JSONL replacement", attempt, row.Verdict, row.Detail)
+		}
+		if !warningContains(rep.Warnings, "workflow transcript unsafe — transcript skipped") {
+			t.Fatalf("attempt %d: warnings = %q, want unsafe workflow transcript warning", attempt, rep.Warnings)
+		}
+	}
+}
+
 func TestWorkflowRunMetadataFallbackFailsClosed(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -120,7 +223,17 @@ func TestWorkflowRunMetadataFallbackFailsClosed(t *testing.T) {
 		{
 			name:     "matching agent with no model",
 			raw:      `{"workflowProgress":[{"agentId":"worker","label":"implement"}]}`,
-			wantWarn: `workflow run metadata entry for agent "worker" has no model — model fallback skipped`,
+			wantWarn: "malformed workflow run metadata — model fallback skipped",
+		},
+		{
+			name:     "phase row carrying agent evidence",
+			raw:      `{"workflowProgress":[{"type":"workflow_phase","agentId":"worker"}]}`,
+			wantWarn: "malformed workflow run metadata — model fallback skipped",
+		},
+		{
+			name:     "unknown typed workflow entry",
+			raw:      `{"workflowProgress":[{"type":"workflow_worker","agentId":"worker","model":"claude-sonnet-5"}]}`,
+			wantWarn: "malformed workflow run metadata — model fallback skipped",
 		},
 		{
 			name:        "wrong session metadata is ignored",
@@ -462,6 +575,11 @@ func TestWorkflowDuplicateMetadataMembersFailClosed(t *testing.T) {
 			run:         `{"workflowProgress":[{"agentId":"worker","model":"claude-haiku-4-5","MODEL":"claude-sonnet-5"}]}`,
 			wantWarning: "ambiguous workflow run metadata — model fallback skipped",
 		},
+		{
+			name:        "run case-equivalent agent type",
+			run:         `{"workflowProgress":[{"agentId":"worker","model":"claude-sonnet-5","type":"workflow_agent","TYPE":"workflow_agent"}]}`,
+			wantWarning: "ambiguous workflow run metadata — model fallback skipped",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := t.TempDir()
@@ -639,4 +757,11 @@ func setWorkflowMetadataBeforeOpen(t *testing.T, hook func(string)) {
 	previous := workflowMetadataBeforeOpen
 	workflowMetadataBeforeOpen = hook
 	t.Cleanup(func() { workflowMetadataBeforeOpen = previous })
+}
+
+func setWorkflowTranscriptBeforeOpen(t *testing.T, hook func(string)) {
+	t.Helper()
+	previous := workflowTranscriptBeforeOpen
+	workflowTranscriptBeforeOpen = hook
+	t.Cleanup(func() { workflowTranscriptBeforeOpen = previous })
 }
