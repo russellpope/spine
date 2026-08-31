@@ -303,10 +303,11 @@ func TestWorkflowMalformedMissingUnknownAndDeeperMetadataStayExcluded(t *testing
 
 func TestWorkflowDuplicateMetadataMembersFailClosed(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		sidecar     string
-		run         string
-		wantWarning string
+		name            string
+		sidecar         string
+		run             string
+		transcriptModel string
+		wantWarning     string
 	}{
 		{
 			name:        "sidecar admission fields",
@@ -328,12 +329,45 @@ func TestWorkflowDuplicateMetadataMembersFailClosed(t *testing.T) {
 			run:         `{"workflowProgress":[{"agentId":"other-worker","agentId":"worker","model":"claude-sonnet-5"}]}`,
 			wantWarning: "ambiguous workflow run metadata — model fallback skipped",
 		},
+		{
+			name:            "sidecar case-equivalent admission fields",
+			sidecar:         `{"agentType":"code-reviewer","AGENTTYPE":"workflow-subagent","spawnDepth":2,"SPAWNDEPTH":1}`,
+			transcriptModel: "claude-sonnet-5",
+			wantWarning:     "ambiguous workflow metadata — transcript skipped",
+		},
+		{
+			name:            "sidecar case-variant agent type",
+			sidecar:         `{"AGENTTYPE":"workflow-subagent","spawnDepth":1}`,
+			transcriptModel: "claude-sonnet-5",
+			wantWarning:     "ambiguous workflow metadata — transcript skipped",
+		},
+		{
+			name:            "sidecar case-variant spawn depth",
+			sidecar:         `{"agentType":"workflow-subagent","SPAWNDEPTH":1}`,
+			transcriptModel: "claude-sonnet-5",
+			wantWarning:     "ambiguous workflow metadata — transcript skipped",
+		},
+		{
+			name:        "run case-equivalent workflow progress",
+			run:         `{"workflowProgress":[],"WORKFLOWPROGRESS":[{"agentId":"worker","model":"claude-sonnet-5"}]}`,
+			wantWarning: "ambiguous workflow run metadata — model fallback skipped",
+		},
+		{
+			name:        "run case-equivalent agent identity",
+			run:         `{"workflowProgress":[{"agentId":"other-worker","AGENTID":"worker","model":"claude-sonnet-5"}]}`,
+			wantWarning: "ambiguous workflow run metadata — model fallback skipped",
+		},
+		{
+			name:        "run case-equivalent agent model",
+			run:         `{"workflowProgress":[{"agentId":"worker","model":"claude-haiku-4-5","MODEL":"claude-sonnet-5"}]}`,
+			wantWarning: "ambiguous workflow run metadata — model fallback skipped",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := t.TempDir()
 			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I056": "routine"})
 			transcripts := t.TempDir()
-			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I056", "", "workflow-subagent")
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I056", tc.transcriptModel, "workflow-subagent")
 			base := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker")
 			if tc.sidecar != "" {
 				if err := os.WriteFile(base+".meta.json", []byte(tc.sidecar), 0o644); err != nil {

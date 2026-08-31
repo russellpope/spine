@@ -1804,7 +1804,7 @@ func loadWorkflowMeta(transcriptDir, session, workflow, agentID string, warnings
 		return workflowMeta{}, false
 	}
 	var meta workflowMeta
-	duplicate, err := unmarshalUniqueJSON(raw, &meta)
+	duplicate, err := unmarshalWorkflowMetadata(raw, &meta)
 	if duplicate {
 		*warnings = append(*warnings, path+": ambiguous workflow metadata — transcript skipped")
 		return workflowMeta{}, false
@@ -1843,7 +1843,7 @@ func workflowRunModel(transcriptDir, session, workflow, agentID string, warnings
 	var envelope struct {
 		WorkflowProgress json.RawMessage `json:"workflowProgress"`
 	}
-	duplicate, err := unmarshalUniqueJSON(data, &envelope)
+	duplicate, err := unmarshalWorkflowRunMetadata(data, &envelope)
 	if duplicate {
 		*warnings = append(*warnings, path+": ambiguous workflow run metadata — model fallback skipped")
 		return "", false
@@ -1858,7 +1858,7 @@ func workflowRunModel(transcriptDir, session, workflow, agentID string, warnings
 	}
 
 	var progress []workflowRunProgress
-	duplicate, err = unmarshalUniqueJSON(envelope.WorkflowProgress, &progress)
+	duplicate, err = unmarshalWorkflowRunMetadata(envelope.WorkflowProgress, &progress)
 	if duplicate {
 		*warnings = append(*warnings, path+": ambiguous workflow run metadata — model fallback skipped")
 		return "", false
@@ -1897,8 +1897,44 @@ func workflowRunModel(transcriptDir, session, workflow, agentID string, warnings
 // decoding, so untrusted metadata never inherits encoding/json's last-value-
 // wins behavior.
 func unmarshalUniqueJSON(data []byte, dst any) (bool, error) {
+	return unmarshalUniqueJSONWithMemberValidator(data, dst, nil)
+}
+
+// unmarshalWorkflowMetadata additionally rejects case-variant spellings of
+// the sidecar fields that admit a workflow transcript. encoding/json matches
+// struct fields case-insensitively, so accepting aliases here would reintroduce
+// last-value-wins admission despite the duplicate-member guard.
+func unmarshalWorkflowMetadata(data []byte, dst any) (bool, error) {
+	return unmarshalUniqueJSONWithMemberValidator(data, dst, func(path []string, name string) bool {
+		return len(path) == 0 && caseVariantJSONMember(name, "agentType", "spawnDepth")
+	})
+}
+
+// unmarshalWorkflowRunMetadata preserves unrelated run metadata while
+// requiring exact spellings for the fields used as routing evidence: the
+// top-level workflowProgress member and agentId/model in each of its entries.
+func unmarshalWorkflowRunMetadata(data []byte, dst any) (bool, error) {
+	return unmarshalUniqueJSONWithMemberValidator(data, dst, func(path []string, name string) bool {
+		if len(path) == 0 {
+			return caseVariantJSONMember(name, "workflowProgress")
+		}
+		return len(path) == 2 && path[0] == "workflowProgress" && strings.HasPrefix(path[1], "[") &&
+			caseVariantJSONMember(name, "agentId", "model")
+	})
+}
+
+func caseVariantJSONMember(name string, admitted ...string) bool {
+	for _, exact := range admitted {
+		if name != exact && strings.EqualFold(name, exact) {
+			return true
+		}
+	}
+	return false
+}
+
+func unmarshalUniqueJSONWithMemberValidator(data []byte, dst any, invalidMember func([]string, string) bool) (bool, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	duplicate, err := jsonHasDuplicateMembers(decoder)
+	duplicate, err := jsonHasDuplicateMembers(decoder, nil, invalidMember)
 	if err != nil || duplicate {
 		return duplicate, err
 	}
@@ -1911,7 +1947,7 @@ func unmarshalUniqueJSON(data []byte, dst any) (bool, error) {
 	return false, json.Unmarshal(data, dst)
 }
 
-func jsonHasDuplicateMembers(decoder *json.Decoder) (bool, error) {
+func jsonHasDuplicateMembers(decoder *json.Decoder, path []string, invalidMember func([]string, string) bool) (bool, error) {
 	token, err := decoder.Token()
 	if err != nil {
 		return false, err
@@ -1933,8 +1969,11 @@ func jsonHasDuplicateMembers(decoder *json.Decoder) (bool, error) {
 				if seen[name] {
 					return true, nil
 				}
+				if invalidMember != nil && invalidMember(path, name) {
+					return true, nil
+				}
 				seen[name] = true
-				duplicate, err := jsonHasDuplicateMembers(decoder)
+				duplicate, err := jsonHasDuplicateMembers(decoder, append(path, name), invalidMember)
 				if duplicate || err != nil {
 					return duplicate, err
 				}
@@ -1942,8 +1981,8 @@ func jsonHasDuplicateMembers(decoder *json.Decoder) (bool, error) {
 			_, err := decoder.Token()
 			return false, err
 		case '[':
-			for decoder.More() {
-				duplicate, err := jsonHasDuplicateMembers(decoder)
+			for index := 0; decoder.More(); index++ {
+				duplicate, err := jsonHasDuplicateMembers(decoder, append(path, fmt.Sprintf("[%d]", index)), invalidMember)
 				if duplicate || err != nil {
 					return duplicate, err
 				}
