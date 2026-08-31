@@ -1053,6 +1053,7 @@ type escRecord struct {
 // no cross-harness ordering; it authorizes only its exact ticket/from/to
 // tuple and never participates in model-tier judgement.
 type effortEscalation struct {
+	ticket string
 	from   string
 	to     string
 	reason string
@@ -1098,7 +1099,15 @@ func readLedger(path string) ledger {
 	if err != nil {
 		return l
 	}
+	var effortFence markdownFence
 	for lineNo, line := range strings.Split(string(raw), "\n") {
+		effortFence.advance(line)
+		if !effortFence.active() {
+			if rec, ok := parseEffortEscalation(line, lineNo+1); ok {
+				l.effortEscalations[rec.ticket] = append(l.effortEscalations[rec.ticket], rec)
+				continue // effort records never become model evidence
+			}
+		}
 		if strings.HasPrefix(strings.TrimSpace(line), "DISCARDED") {
 			rec, ok := parseDiscarded(strings.TrimSpace(line), lineNo+1)
 			if !ok {
@@ -1126,9 +1135,6 @@ func readLedger(path string) ledger {
 		case "ESCALATION":
 			rest = strings.TrimSpace(rest)
 			if strings.HasPrefix(rest, "effort ") {
-				if rec, ok := parseEffortEscalation(line, lineNo+1); ok {
-					l.effortEscalations[id] = append(l.effortEscalations[id], rec)
-				}
 				continue // effort records never become model evidence
 			}
 			fromTo, _, _ := strings.Cut(rest, " ")
@@ -1160,10 +1166,45 @@ func readLedger(path string) ledger {
 	return l
 }
 
+// markdownFence tracks Markdown code fences only for the I075 effort-record
+// boundary. Other ledger grammars intentionally retain their existing reader.
+type markdownFence struct {
+	marker byte
+	width  int
+}
+
+func (f *markdownFence) active() bool {
+	return f.marker != 0
+}
+
+func (f *markdownFence) advance(line string) {
+	trimmed := strings.TrimLeft(line, " \t")
+	if len(trimmed) < 3 || (trimmed[0] != '`' && trimmed[0] != '~') {
+		return
+	}
+	width := 0
+	for width < len(trimmed) && trimmed[width] == trimmed[0] {
+		width++
+	}
+	if width < 3 {
+		return
+	}
+	if !f.active() {
+		f.marker, f.width = trimmed[0], width
+		return
+	}
+	if trimmed[0] == f.marker && width >= f.width && strings.TrimSpace(trimmed[width:]) == "" {
+		f.marker, f.width = 0, 0
+	}
+}
+
 // parseEffortEscalation accepts exactly the ordered I075 authorization
 // grammar. Raw endpoints are retained byte-for-byte; malformed records are
 // ignored and authorize nothing.
 func parseEffortEscalation(line string, lineNo int) (effortEscalation, bool) {
+	if line == "" || strings.TrimSpace(line) != line {
+		return effortEscalation{}, false
+	}
 	if strings.Count(line, "reason:") != 1 {
 		return effortEscalation{}, false
 	}
@@ -1179,7 +1220,7 @@ func parseEffortEscalation(line string, lineNo int) (effortEscalation, bool) {
 	if !ok || from == "" || to == "" || strings.ContainsAny(from, " \t") || strings.ContainsAny(to, " \t") {
 		return effortEscalation{}, false
 	}
-	return effortEscalation{from: from, to: to, reason: fields[1], line: lineNo}, true
+	return effortEscalation{ticket: parts[1], from: from, to: to, reason: fields[1], line: lineNo}, true
 }
 
 func effortAuthorized(l ledger, ticketID, expected, declared string) bool {

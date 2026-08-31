@@ -621,14 +621,29 @@ func TestReadLedgerParsesOnlyExactEffortAuthorizationPairs(t *testing.T) {
 		"ESCALATION I075 effort xhigh ->low reason: spaced arrow",
 		"ESCALATION I075 effort low->xhigh reason: one reason: duplicate",
 		"ESCALATION I076 effort low->xhigh reason: other ticket",
+		"- ESCALATION I075 effort low->xhigh reason: Markdown list",
+		"* ESCALATION I075 effort low->xhigh reason: Markdown list",
+		"+ ESCALATION I075 effort low->xhigh reason: Markdown list",
+		"  ESCALATION I075 effort low->xhigh reason: indentation",
+		" ESCALATION I075 effort low->xhigh reason: leading whitespace",
+		"ESCALATION I075 effort low->xhigh reason: trailing whitespace ",
+		"> ESCALATION I075 effort low->xhigh reason: quote decoration",
+		"`ESCALATION I075 effort low->xhigh reason: inline code`",
+		"```text",
+		"ESCALATION I075 effort low->xhigh reason: fenced code",
+		"```",
+		"ESCALATION I075 effort xhigh->max reason: distinct post-fence retry",
 	}, "\n")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	l := readLedger(path)
 	got := l.effortEscalations["I075"]
-	if len(got) != 1 || got[0].from != "low" || got[0].to != "xhigh" || got[0].reason != "retry budget" {
-		t.Fatalf("effort ledger = %+v, want one exact I075 low->xhigh record", got)
+	if len(got) != 2 || got[0].from != "low" || got[0].to != "xhigh" || got[0].reason != "retry budget" || got[1].from != "xhigh" || got[1].to != "max" || got[1].reason != "distinct post-fence retry" {
+		t.Fatalf("effort ledger = %+v, want only the two literal I075 records", got)
+	}
+	if !effortAuthorized(l, "I075", "xhigh", "max") {
+		t.Fatal("distinct literal pair after a fenced block was not authorized")
 	}
 	if effortAuthorized(l, "I075", "xhigh", "low") {
 		t.Fatal("reversed pair was authorized")
