@@ -31,6 +31,48 @@ func rowsByID(t *testing.T, rep Report) map[string]TicketRow {
 	return m
 }
 
+func TestDeclarationVerdictMatrixAndAggregation(t *testing.T) {
+	base := DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "high", ModelStatus: declarationModelConfirmed}
+	for _, tc := range []struct {
+		name       string
+		evidence   DeclarationEvidence
+		authorized bool
+		want       Verdict
+	}{
+		{"confirmed exact observed effort", withObservedEffort(base, "high"), false, VerdictDeclarationConfirmed},
+		{"confirmed model absent observed effort", base, false, VerdictDeclarationUnconfirmable},
+		{"confirmed model different observed effort", withObservedEffort(base, "low"), false, VerdictDeclarationObservedMismatch},
+		{"confirmed model absent declaration", DeclarationEvidence{ExpectedEffort: "high", ModelStatus: declarationModelConfirmed}, false, VerdictDeclarationUnconfirmable},
+		{"confirmed model unauthorized declaration", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: declarationModelConfirmed}, false, VerdictDeclarationEffortMismatch},
+		{"confirmed model authorized retry", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ObservedEffort: "low", ModelStatus: declarationModelConfirmed}, true, VerdictDeclarationConfirmed},
+		{"model mismatch outranks effort", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: declarationModelMismatch}, false, VerdictDeclarationObservedMismatch},
+		{"unconfirmable model unauthorized declaration", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: declarationModelUnconfirmable}, false, VerdictDeclarationEffortMismatch},
+		{"unconfirmable model otherwise", DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "high", ModelStatus: declarationModelUnconfirmable}, false, VerdictDeclarationUnconfirmable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := judgeDeclarationEvidence(tc.evidence, tc.authorized)
+			if got.Verdict != tc.want {
+				t.Fatalf("verdict = %q, want %q", got.Verdict, tc.want)
+			}
+		})
+	}
+
+	unconfirmable := judgeDeclarationEvidence(base, false)
+	blocking := judgeDeclarationEvidence(DeclarationEvidence{ExpectedEffort: "high", DeclaredEffort: "low", ModelStatus: declarationModelUnconfirmable}, false)
+	verdict, _, ok := aggregateDeclarationEvents([]DeclarationEvidence{unconfirmable, blocking})
+	if !ok || verdict != VerdictDeclarationEffortMismatch {
+		t.Fatalf("aggregate = %q present=%v, want declared-effort-mismatch", verdict, ok)
+	}
+	if !(Report{Tickets: []TicketRow{{Verdict: verdict}}}).Blocking() {
+		t.Fatal("declared effort mismatch must block")
+	}
+}
+
+func withObservedEffort(evidence DeclarationEvidence, effort string) DeclarationEvidence {
+	evidence.ObservedEffort = effort
+	return evidence
+}
+
 // Acceptance: clean fixture (annotations match transcript) -> all-match
 // report, nothing blocking, no warnings.
 func TestCleanFixtureAllMatch(t *testing.T) {

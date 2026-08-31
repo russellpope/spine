@@ -131,6 +131,7 @@ const (
 	VerdictDeclarationObservedMismatch Verdict = "declared-observed-mismatch" // blocking
 	VerdictDeclarationEffortMismatch   Verdict = "declared-effort-mismatch"   // blocking
 	VerdictDeclarationUnconfirmable    Verdict = "unconfirmable"              // advisory
+	VerdictDeclarationConfirmed        Verdict = "confirmed"                  // informational
 	VerdictUnmappedDispatch            Verdict = "unmapped-dispatch"          // warn
 	VerdictUnexplainedFallback         Verdict = "unexplained-fallback"       // warn
 	VerdictEscalatedNoReason           Verdict = "escalated-no-reason"        // warn
@@ -146,6 +147,7 @@ const (
 // severity orders verdicts for worst-token aggregation; higher is worse.
 var severity = map[Verdict]int{
 	VerdictMatch:                       0,
+	VerdictDeclarationConfirmed:        0,
 	VerdictEscalatedWithReason:         1,
 	VerdictDiscardedWithReason:         1,
 	VerdictEscalatedNoReason:           2,
@@ -312,6 +314,47 @@ func judgeDeclarationModel(declared DeclarationEvidence, observed declarationObs
 	return declarationModelConfirmed
 }
 
+// judgeDeclarationEvidence is deliberately fact-only: callers provide any
+// documented observation through the narrow seam, while production keeps
+// ObservedEffort absent until a harness documents an exact extractor.
+func judgeDeclarationEvidence(evidence DeclarationEvidence, authorized bool) DeclarationEvidence {
+	if evidence.ObservedEffort == "" {
+		evidence.ObservedEffort = "-"
+	}
+	evidence.ObservedEffortStatus = "unconfirmable"
+	evidence.DeclarationStatus = "unconfirmable"
+	evidence.Verdict = VerdictDeclarationUnconfirmable
+	if evidence.DeclaredEffort == "" || evidence.ExpectedEffort == "" {
+		return evidence
+	}
+	if evidence.DeclaredEffort == evidence.ExpectedEffort {
+		evidence.DeclarationStatus = "target-match"
+	} else if authorized {
+		evidence.DeclarationStatus = "exact-authorized-deviation"
+	} else {
+		evidence.DeclarationStatus = "unauthorized-declaration"
+	}
+	if evidence.ModelStatus == declarationModelMismatch {
+		evidence.Verdict = VerdictDeclarationObservedMismatch
+		return evidence
+	}
+	if evidence.DeclarationStatus == "unauthorized-declaration" {
+		evidence.Verdict = VerdictDeclarationEffortMismatch
+		return evidence
+	}
+	if evidence.ModelStatus != declarationModelConfirmed || evidence.ObservedEffort == "-" {
+		return evidence
+	}
+	if evidence.ObservedEffort != evidence.DeclaredEffort {
+		evidence.ObservedEffortStatus = "mismatch"
+		evidence.Verdict = VerdictDeclarationObservedMismatch
+		return evidence
+	}
+	evidence.ObservedEffortStatus = "confirmed"
+	evidence.Verdict = VerdictDeclarationConfirmed
+	return evidence
+}
+
 func judgeHostDeclarations(repoDir, hostPath string, t ticket, dispatches []dispatch, agents []subagent, routes observedRouteIndex, l ledger) []DeclarationEvidence {
 	if t.tier == "" || t.tier == "n/a" {
 		return nil
@@ -326,25 +369,14 @@ func judgeHostDeclarations(repoDir, hostPath string, t ticket, dispatches []disp
 			continue
 		}
 		evidence := DeclarationEvidence{
-			Identity:             d.identity,
-			Harness:              d.harness,
-			Model:                d.model,
-			ExpectedModel:        resolution.Entry.ID,
-			ExpectedEffort:       resolution.Entry.Effort,
-			DeclaredEffort:       d.effort,
-			ObservedEffort:       "-",
-			ModelStatus:          declarationModelUnconfirmable,
-			DeclarationStatus:    "unconfirmable",
-			ObservedEffortStatus: "unconfirmable",
-			Verdict:              VerdictDeclarationUnconfirmable,
-		}
-		if d.effort == evidence.ExpectedEffort {
-			evidence.DeclarationStatus = "target-match"
-		} else if effortAuthorized(l, t.id, evidence.ExpectedEffort, d.effort) {
-			evidence.DeclarationStatus = "exact-authorized-deviation"
-		} else {
-			evidence.DeclarationStatus = "unauthorized-declaration"
-			evidence.Verdict = VerdictDeclarationEffortMismatch
+			Identity:       d.identity,
+			Harness:        d.harness,
+			Model:          d.model,
+			ExpectedModel:  resolution.Entry.ID,
+			ExpectedEffort: resolution.Entry.Effort,
+			DeclaredEffort: d.effort,
+			ObservedEffort: "-",
+			ModelStatus:    declarationModelUnconfirmable,
 		}
 		for _, a := range agents {
 			if !a.identity.usable() || a.identity != d.identity {
@@ -367,6 +399,7 @@ func judgeHostDeclarations(repoDir, hostPath string, t ticket, dispatches []disp
 				break
 			}
 		}
+		evidence = judgeDeclarationEvidence(evidence, effortAuthorized(l, t.id, evidence.ExpectedEffort, evidence.DeclaredEffort))
 		out = append(out, evidence)
 	}
 	return out
