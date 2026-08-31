@@ -131,6 +131,16 @@ declares exactly one.
   unspaced; missing endpoints, duplicate or empty `reason:`, spaced arrows,
   reversed pairs, and other grammar changes authorize nothing. This record is
   declared-effort-only and never changes the model-tier routing verdict.
+- **heterogeneous routing verdict** (decided 2026-08-30, I074) — a complete
+  declared triple on a configured host is compared with the final host-selected
+  pair, never the repository preference. Confirmation needs the exact
+  `(source, session, dispatch)` identity, a linked worker event, and a
+  byte-exact host-local `observed_ids` mapping. `declared-observed-mismatch`
+  and `declared-effort-mismatch` block; absent proof is `unconfirmable` and
+  does not block. Current transcript readers expose no documented observed
+  effort, so real records keep `observed-effort=-`; no alias, history,
+  canonical-ID shortcut, normalization, family inference, or cross-host
+  lookup fills that gap. I073 retains the public flavor rename.
 - **harness** (ratified 2026-08-10, I067) — the execution vehicle that runs a
   dispatch: claude, codex, and from 2026-08-18 **pi** (the weak-local /
   open-weight driver). Replaces **flavor** as the model table's first axis;

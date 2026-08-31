@@ -112,9 +112,18 @@ or different-ticket pair authorizes nothing and does not alter model-tier
 judgment.
 
 `spine audit routing` preserves its leading `ticket tier actual verdict detail`
-layout and appends declared-only fields. `declared-effort=-` means the
-transcript did not record a declaration. `observed-effort=-` is always
-unavailable at this stage; it is not runtime evidence.
+layout and appends declaration fields only for a complete, host-correlated
+declaration. Confirmation requires an exact `(source, session, dispatch)`
+identity and linked worker event, plus a byte-exact `observed_ids` mapping in
+the local validated host configuration for the final selected `(model, effort)`
+pair. Aliases, history, canonical IDs, normalization, family inference,
+cross-host lookup, and root-only linkage do not confirm. A mapped other route
+or documented observed-effort mismatch blocks as `declared-observed-mismatch`;
+an unauthorized exact effort declaration blocks as `declared-effort-mismatch`;
+missing proof is nonblocking `unconfirmable`. Current transcript formats have
+no documented observed-effort extractor, so supported real records retain
+`observed-effort=-` and are unconfirmable rather than confirmed. I073 alone
+owns the public flavor-to-harness rename.
 
 ## Execution modes
 

@@ -37,8 +37,14 @@ arrow and byte-exact ticket/from/to pair authorize only that matching
 declaration. Malformed or mismatched records authorize nothing and do not
 change routing's model-tier verdict.
 
-Routing output reports `declared-effort=-` when the transcript carried no
-declaration and `observed-effort=-` while no runtime observation exists.
+For a complete declaration on a configured host, routing can confirm only an
+exact `(source, session, dispatch)` worker correlation and a byte-exact local
+`observed_ids` route for the final host-selected `(model, effort)` pair. A
+root-only link, aliases, history, normalized IDs, canonical-ID shortcuts, and
+cross-host mappings do not confirm. `declared-observed-mismatch` and
+`declared-effort-mismatch` block; missing proof is nonblocking
+`unconfirmable`. No current transcript has a documented observed-effort
+extractor, so supported real records retain `observed-effort=-`.
 
 Optional batch-coordination fields, written by the maikanban board and the claude-team skill
 (spine owns the schema; a ticket without them is valid, and `spine doctor` warns — which, like
