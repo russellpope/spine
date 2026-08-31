@@ -1889,52 +1889,73 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 			for _, sub := range workflowSubs {
 				workflowID := filepath.Base(filepath.Dir(sub))
 				agentID := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(sub), "agent-"), ".jsonl")
-				meta, ok := loadWorkflowMeta(dir, id, workflowID, agentID, warnings)
-				if !ok || meta.AgentType != "workflow-subagent" || meta.SpawnDepth != 1 {
-					continue
-				}
-				file, err := openWorkflowFile(dir, []string{id, "subagents", "workflows", workflowID}, filepath.Base(sub), workflowTranscriptBeforeOpen)
-				if err != nil {
-					if readErr, ok := err.(*workflowMetadataReadError); ok && readErr.kind == workflowMetadataUnsafe {
+				func() {
+					snapshot, err := openWorkflowSnapshot(dir, id, workflowID)
+					if err != nil {
+						appendWorkflowMetadataWarning(warnings, strings.TrimSuffix(sub, ".jsonl")+".meta.json", err)
+						return
+					}
+					defer snapshot.Close()
+
+					meta, ok := loadWorkflowMeta(snapshot, agentID, warnings)
+					if workflowSidecarAfterRead != nil {
+						workflowSidecarAfterRead()
+					}
+					if !snapshot.stillBound() {
+						*warnings = append(*warnings, sub+": workflow metadata unsafe — transcript skipped")
+						return
+					}
+					if !ok || meta.AgentType != "workflow-subagent" || meta.SpawnDepth != 1 {
+						return
+					}
+					file, err := snapshot.openFile(snapshot.workflowRoot(), filepath.Base(sub), sub, workflowTranscriptBeforeOpen)
+					if err != nil {
+						appendWorkflowTranscriptWarning(warnings, sub, err)
+						return
+					}
+					openingLine, more, models, cwd := scanWorkflowJSONL(sub, file, warnings)
+					if workflowTranscriptAfterRead != nil {
+						workflowTranscriptAfterRead()
+					}
+					if !snapshot.stillBound() {
 						*warnings = append(*warnings, sub+": workflow transcript unsafe — transcript skipped")
-					} else {
-						*warnings = append(*warnings, sub+": workflow transcript unreadable — transcript skipped: "+err.Error())
+						return
 					}
-					continue
-				}
-				openingLine, more, models, cwd := scanWorkflowJSONL(sub, file, warnings)
-				// A valid nested tool-use dispatch is independent evidence. Its
-				// prompt/description and complete workflow-scoped identity decide
-				// attribution, so retain it after admission and safe parsing even
-				// when the parent opening cannot be attributed to one ticket.
-				workflowSession := id + "/" + filepath.Base(filepath.Dir(sub)) + "/" + strings.TrimSuffix(filepath.Base(sub), ".jsonl")
-				for i := range more {
-					more[i].observedHarness = source
-					more[i].source = source
-					more[i].identity = evidenceIdentity{source: source, session: workflowSession, dispatch: more[i].toolUseID}
-				}
-				dispatches = append(dispatches, more...)
-				referenceCount := ticketref.ReferenceCount(openingLine, ticketTokens)
-				if referenceCount == 0 {
-					continue
-				}
-				if referenceCount > 1 {
-					*warnings = append(*warnings, sub+": workflow opening line names multiple tickets — skipped")
-					continue
-				}
-				a := subagent{source: source, description: openingLine}
-				if len(models) == 0 {
-					if agentID == "" {
-						*warnings = append(*warnings, sub+": workflow agent filename has no agent id — model fallback skipped")
-					} else if model, found := workflowRunModel(
-						dir, id, workflowID, agentID, warnings,
-					); found {
-						models = []string{model}
+					// A valid nested tool-use dispatch is independent evidence. Its
+					// prompt/description and complete workflow-scoped identity decide
+					// attribution, so retain it after admission and safe parsing even
+					// when the parent opening cannot be attributed to one ticket.
+					workflowSession := id + "/" + filepath.Base(filepath.Dir(sub)) + "/" + strings.TrimSuffix(filepath.Base(sub), ".jsonl")
+					for i := range more {
+						more[i].observedHarness = source
+						more[i].source = source
+						more[i].identity = evidenceIdentity{source: source, session: workflowSession, dispatch: more[i].toolUseID}
 					}
-				}
-				a.models = models
-				a.cwd = cwd
-				agents = append(agents, a)
+					dispatches = append(dispatches, more...)
+					referenceCount := ticketref.ReferenceCount(openingLine, ticketTokens)
+					if referenceCount == 0 {
+						return
+					}
+					if referenceCount > 1 {
+						*warnings = append(*warnings, sub+": workflow opening line names multiple tickets — skipped")
+						return
+					}
+					a := subagent{source: source, description: openingLine}
+					if len(models) == 0 {
+						if agentID == "" {
+							*warnings = append(*warnings, sub+": workflow agent filename has no agent id — model fallback skipped")
+						} else if model, found := workflowRunModel(snapshot, agentID, warnings); found {
+							models = []string{model}
+						}
+					}
+					if !snapshot.stillBound() {
+						*warnings = append(*warnings, sub+": workflow transcript unsafe — transcript skipped")
+						return
+					}
+					a.models = models
+					a.cwd = cwd
+					agents = append(agents, a)
+				}()
 			}
 		}
 	}
@@ -1963,6 +1984,11 @@ var workflowMetadataBeforeOpen func(string)
 // seam for workflow JSONL tests. Production leaves it nil.
 var workflowTranscriptBeforeOpen func(string)
 
+// workflowSidecarAfterRead and workflowTranscriptAfterRead make cross-read
+// replacement attacks deterministic in tests. Production leaves them nil.
+var workflowSidecarAfterRead func()
+var workflowTranscriptAfterRead func()
+
 type workflowMetadataReadKind uint8
 
 const (
@@ -1989,13 +2015,19 @@ type workflowPathComponent struct {
 	info os.FileInfo
 }
 
-// openWorkflowFile resolves each named component under transcriptDir with
-// descriptor-relative opens. It binds the opened root to the configured root
-// path's non-symlink directory identity, then retains every directory
-// descriptor and its identity until after the final file is opened. A
-// descriptor in a renamed-away tree is safe to read but no longer proves
-// evidence at the selected path.
-func openWorkflowFile(transcriptDir string, components []string, name string, beforeOpen func(string)) (*os.File, error) {
+// workflowSnapshot retains the configured root, session, and workflow branch
+// for one worker. It makes a sidecar admission, JSONL evidence, and optional
+// sibling run metadata one atomic identity bundle rather than independent
+// path opens that could be mixed after a rename.
+type workflowSnapshot struct {
+	transcriptDir string
+	session       string
+	workflow      string
+	chain         []workflowPathComponent // root, session, subagents, workflows, workflow
+	runWorkflows  *workflowPathComponent
+}
+
+func openWorkflowSnapshot(transcriptDir, session, workflow string) (*workflowSnapshot, error) {
 	configuredRootInfo, err := os.Lstat(transcriptDir)
 	if err != nil {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
@@ -2012,41 +2044,181 @@ func openWorkflowFile(transcriptDir string, components []string, name string, be
 		_ = root.Close()
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe, err: err}
 	}
-	chain := []workflowPathComponent{{root: root, info: rootInfo}}
+	snapshot := &workflowSnapshot{
+		transcriptDir: transcriptDir,
+		session:       session,
+		workflow:      workflow,
+		chain:         []workflowPathComponent{{root: root, info: rootInfo}},
+	}
+	for _, component := range []string{session, "subagents", "workflows", workflow} {
+		if err := snapshot.retainChild(component); err != nil {
+			snapshot.Close()
+			return nil, err
+		}
+	}
+	if !snapshot.stillBound() {
+		snapshot.Close()
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
+	return snapshot, nil
+}
+
+func (s *workflowSnapshot) Close() {
+	if s.runWorkflows != nil {
+		_ = s.runWorkflows.root.Close()
+		s.runWorkflows = nil
+	}
+	for i := len(s.chain) - 1; i >= 0; i-- {
+		_ = s.chain[i].root.Close()
+	}
+	s.chain = nil
+}
+
+func (s *workflowSnapshot) retainChild(name string) error {
+	if !workflowMetadataComponent(name) || len(s.chain) == 0 {
+		return &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
+	parent := s.chain[len(s.chain)-1].root
+	info, err := parent.Lstat(name)
+	if err != nil {
+		return &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
+	child, err := parent.OpenRoot(name)
+	if err != nil {
+		return &workflowMetadataReadError{kind: workflowMetadataUnsafe, err: err}
+	}
+	opened, statErr := child.Stat(".")
+	current, currentErr := parent.Lstat(name)
+	if statErr != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !opened.IsDir() || !os.SameFile(info, opened) || !os.SameFile(info, current) {
+		_ = child.Close()
+		return &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
+	s.chain = append(s.chain, workflowPathComponent{name: name, root: child, info: info})
+	return nil
+}
+
+func (s *workflowSnapshot) workflowRoot() *os.Root {
+	return s.chain[len(s.chain)-1].root
+}
+
+// stillBound reopens the configured root and every retained named component.
+// Retained descriptors make the reads safe; these fresh identity comparisons
+// prove that their names still select the same bundle at every acceptance
+// boundary. A temporary rename that restores every same object still passes.
+func (s *workflowSnapshot) stillBound() bool {
+	if len(s.chain) < 2 {
+		return false
+	}
+	configured, err := os.Lstat(s.transcriptDir)
+	if err != nil || configured.Mode()&os.ModeSymlink != 0 || !configured.IsDir() || !os.SameFile(s.chain[0].info, configured) {
+		return false
+	}
+	freshRoot, err := os.OpenRoot(s.transcriptDir)
+	if err != nil {
+		return false
+	}
+	freshRoots := []*os.Root{freshRoot}
 	defer func() {
-		for i := len(chain) - 1; i >= 0; i-- {
-			_ = chain[i].root.Close()
+		for i := len(freshRoots) - 1; i >= 0; i-- {
+			_ = freshRoots[i].Close()
 		}
 	}()
-	for _, component := range components {
-		if !workflowMetadataComponent(component) {
-			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	rootInfo, err := freshRoot.Stat(".")
+	if err != nil || !rootInfo.IsDir() || !os.SameFile(s.chain[0].info, rootInfo) {
+		return false
+	}
+	retainedRootInfo, err := s.chain[0].root.Stat(".")
+	if err != nil || !retainedRootInfo.IsDir() || !os.SameFile(s.chain[0].info, retainedRootInfo) {
+		return false
+	}
+
+	fresh := freshRoot
+	var freshSession *os.Root
+	for i, retained := range s.chain[1:] {
+		retainedInfo, err := retained.root.Stat(".")
+		if err != nil || !retainedInfo.IsDir() || !os.SameFile(retained.info, retainedInfo) {
+			return false
 		}
-		parent := chain[len(chain)-1].root
-		info, err := parent.Lstat(component)
+		current, err := fresh.Lstat(retained.name)
+		if err != nil || current.Mode()&os.ModeSymlink != 0 || !current.IsDir() || !os.SameFile(retained.info, current) {
+			return false
+		}
+		child, err := fresh.OpenRoot(retained.name)
+		if err != nil {
+			return false
+		}
+		childInfo, err := child.Stat(".")
+		if err != nil || !childInfo.IsDir() || !os.SameFile(retained.info, childInfo) {
+			_ = child.Close()
+			return false
+		}
+		freshRoots = append(freshRoots, child)
+		fresh = child
+		if i == 0 {
+			freshSession = child
+		}
+	}
+	if s.runWorkflows == nil {
+		return true
+	}
+	if freshSession == nil {
+		return false
+	}
+	retainedInfo, err := s.runWorkflows.root.Stat(".")
+	if err != nil || !retainedInfo.IsDir() || !os.SameFile(s.runWorkflows.info, retainedInfo) {
+		return false
+	}
+	current, err := freshSession.Lstat(s.runWorkflows.name)
+	if err != nil || current.Mode()&os.ModeSymlink != 0 || !current.IsDir() || !os.SameFile(s.runWorkflows.info, current) {
+		return false
+	}
+	child, err := freshSession.OpenRoot(s.runWorkflows.name)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = child.Close() }()
+	childInfo, err := child.Stat(".")
+	return err == nil && childInfo.IsDir() && os.SameFile(s.runWorkflows.info, childInfo)
+}
+
+func (s *workflowSnapshot) openRunWorkflows() (*os.Root, error) {
+	if !s.stillBound() {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
+	if s.runWorkflows == nil {
+		session := s.chain[1].root
+		info, err := session.Lstat("workflows")
 		if err != nil {
 			return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
 		}
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 		}
-		child, err := parent.OpenRoot(component)
+		root, err := session.OpenRoot("workflows")
 		if err != nil {
 			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe, err: err}
 		}
-		opened, statErr := child.Stat(".")
-		current, currentErr := parent.Lstat(component)
+		opened, statErr := root.Stat(".")
+		current, currentErr := session.Lstat("workflows")
 		if statErr != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !opened.IsDir() || !os.SameFile(info, opened) || !os.SameFile(info, current) {
-			_ = child.Close()
+			_ = root.Close()
 			return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 		}
-		chain = append(chain, workflowPathComponent{name: component, root: child, info: info})
+		s.runWorkflows = &workflowPathComponent{name: "workflows", root: root, info: info}
 	}
-
-	if !workflowMetadataComponent(name) {
+	if !s.stillBound() {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 	}
-	parent := chain[len(chain)-1].root
+	return s.runWorkflows.root, nil
+}
+
+func (s *workflowSnapshot) openFile(parent *os.Root, name, path string, beforeOpen func(string)) (*os.File, error) {
+	if !workflowMetadataComponent(name) || !s.stillBound() {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
 	info, err := parent.Lstat(name)
 	if err != nil {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
@@ -2055,108 +2227,23 @@ func openWorkflowFile(transcriptDir string, components []string, name string, be
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 	}
 	if beforeOpen != nil {
-		beforeOpen(filepath.Join(transcriptDir, filepath.Join(append(append([]string(nil), components...), name)...)))
+		beforeOpen(path)
 	}
 	file, err := parent.Open(name)
 	if err != nil {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe, err: err}
 	}
 	opened, statErr := file.Stat()
-	if statErr != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || !workflowPathStillBound(transcriptDir, chain, name, info, file) {
+	current, currentErr := parent.Lstat(name)
+	if statErr != nil || currentErr != nil || !opened.Mode().IsRegular() || current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || !os.SameFile(info, opened) || !os.SameFile(info, current) || !s.stillBound() {
 		_ = file.Close()
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
 	}
 	return file, nil
 }
 
-// workflowPathStillBound proves the configured transcript root and retained
-// directories and file still match the names selected during the open. All
-// fresh descriptors are closed before return; the retained chain lives through
-// this check to prevent a stale-but-safe directory handle from becoming
-// accepted evidence.
-func workflowPathStillBound(transcriptDir string, chain []workflowPathComponent, name string, fileInfo os.FileInfo, file *os.File) bool {
-	if len(chain) == 0 {
-		return false
-	}
-	if !workflowTranscriptRootStillBound(transcriptDir, chain[0].root, chain[0].info) {
-		return false
-	}
-	rootInfo, err := chain[0].root.Stat(".")
-	if err != nil || !rootInfo.IsDir() || !os.SameFile(chain[0].info, rootInfo) {
-		return false
-	}
-
-	current := chain[0].root
-	freshRoots := make([]*os.Root, 0, len(chain)-1)
-	defer func() {
-		for i := len(freshRoots) - 1; i >= 0; i-- {
-			_ = freshRoots[i].Close()
-		}
-	}()
-	for _, retained := range chain[1:] {
-		retainedInfo, err := retained.root.Stat(".")
-		if err != nil || !retainedInfo.IsDir() || !os.SameFile(retained.info, retainedInfo) {
-			return false
-		}
-		currentInfo, err := current.Lstat(retained.name)
-		if err != nil || currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.IsDir() || !os.SameFile(retained.info, currentInfo) {
-			return false
-		}
-		fresh, err := current.OpenRoot(retained.name)
-		if err != nil {
-			return false
-		}
-		freshInfo, err := fresh.Stat(".")
-		if err != nil || !freshInfo.IsDir() || !os.SameFile(retained.info, freshInfo) {
-			_ = fresh.Close()
-			return false
-		}
-		freshRoots = append(freshRoots, fresh)
-		current = fresh
-	}
-
-	openedInfo, err := file.Stat()
-	if err != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(fileInfo, openedInfo) {
-		return false
-	}
-	currentInfo, err := current.Lstat(name)
-	if err != nil || currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.Mode().IsRegular() || !os.SameFile(fileInfo, currentInfo) {
-		return false
-	}
-	freshFile, err := current.Open(name)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = freshFile.Close() }()
-	freshInfo, err := freshFile.Stat()
-	return err == nil && freshInfo.Mode().IsRegular() && os.SameFile(fileInfo, freshInfo)
-}
-
-// workflowTranscriptRootStillBound proves that transcriptDir still names the
-// directory opened at the start of the workflow evidence read. The Lstat keeps
-// symlink rejection explicit; reopening the configured root closes the gap
-// where a retained descriptor remains internally consistent after its path is
-// renamed away and replaced.
-func workflowTranscriptRootStillBound(transcriptDir string, retainedRoot *os.Root, rootInfo os.FileInfo) bool {
-	currentInfo, err := os.Lstat(transcriptDir)
-	if err != nil || currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.IsDir() || !os.SameFile(rootInfo, currentInfo) {
-		return false
-	}
-	freshRoot, err := os.OpenRoot(transcriptDir)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = freshRoot.Close() }()
-	freshInfo, err := freshRoot.Stat(".")
-	if err != nil || !freshInfo.IsDir() || !os.SameFile(rootInfo, freshInfo) {
-		return false
-	}
-	retainedInfo, err := retainedRoot.Stat(".")
-	return err == nil && retainedInfo.IsDir() && os.SameFile(rootInfo, retainedInfo)
-}
-
-func readWorkflowMetadataFile(transcriptDir string, components []string, name string) ([]byte, error) {
-	file, err := openWorkflowFile(transcriptDir, components, name, workflowMetadataBeforeOpen)
+func (s *workflowSnapshot) readMetadataFile(parent *os.Root, name, path string) ([]byte, error) {
+	file, err := s.openFile(parent, name, path, workflowMetadataBeforeOpen)
 	if err != nil {
 		return nil, err
 	}
@@ -2168,6 +2255,9 @@ func readWorkflowMetadataFile(transcriptDir string, components []string, name st
 	if err := file.Close(); err != nil {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataUnavailable, err: err}
 	}
+	if !s.stillBound() {
+		return nil, &workflowMetadataReadError{kind: workflowMetadataUnsafe}
+	}
 	if len(raw) > workflowMetadataMaxBytes {
 		return nil, &workflowMetadataReadError{kind: workflowMetadataOversized}
 	}
@@ -2178,22 +2268,11 @@ func workflowMetadataComponent(name string) bool {
 	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\\`) && filepath.Base(name) == name
 }
 
-func loadWorkflowMeta(transcriptDir, session, workflow, agentID string, warnings *[]string) (workflowMeta, bool) {
-	path := filepath.Join(transcriptDir, session, "subagents", "workflows", workflow, "agent-"+agentID+".meta.json")
-	raw, err := readWorkflowMetadataFile(transcriptDir, []string{session, "subagents", "workflows", workflow}, "agent-"+agentID+".meta.json")
+func loadWorkflowMeta(snapshot *workflowSnapshot, agentID string, warnings *[]string) (workflowMeta, bool) {
+	path := filepath.Join(snapshot.transcriptDir, snapshot.session, "subagents", "workflows", snapshot.workflow, "agent-"+agentID+".meta.json")
+	raw, err := snapshot.readMetadataFile(snapshot.workflowRoot(), "agent-"+agentID+".meta.json", path)
 	if err != nil {
-		if readErr, ok := err.(*workflowMetadataReadError); ok {
-			switch readErr.kind {
-			case workflowMetadataUnsafe:
-				*warnings = append(*warnings, path+": workflow metadata unsafe — transcript skipped")
-			case workflowMetadataOversized:
-				*warnings = append(*warnings, path+": workflow metadata exceeds 1048576 bytes — transcript skipped")
-			default:
-				*warnings = append(*warnings, path+": workflow metadata unreadable — transcript skipped: "+err.Error())
-			}
-		} else {
-			*warnings = append(*warnings, path+": workflow metadata unreadable — transcript skipped: "+err.Error())
-		}
+		appendWorkflowMetadataWarning(warnings, path, err)
 		return workflowMeta{}, false
 	}
 	var meta workflowMeta
@@ -2215,24 +2294,62 @@ type workflowRunProgress struct {
 	Type    string `json:"type"`
 }
 
-func workflowRunModel(transcriptDir, session, workflow, agentID string, warnings *[]string) (string, bool) {
-	path := filepath.Join(transcriptDir, session, "workflows", workflow+".json")
-	data, err := readWorkflowMetadataFile(transcriptDir, []string{session, "workflows"}, workflow+".json")
-	if err != nil {
-		if readErr, ok := err.(*workflowMetadataReadError); ok {
-			switch readErr.kind {
-			case workflowMetadataUnsafe:
-				*warnings = append(*warnings, path+": workflow run metadata unsafe — model fallback skipped")
-			case workflowMetadataOversized:
-				*warnings = append(*warnings, path+": workflow run metadata exceeds 1048576 bytes — model fallback skipped")
-			default:
-				*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata unavailable for session %q workflow %q — model fallback skipped", path, session, workflow))
-			}
-		} else {
-			*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata unavailable for session %q workflow %q — model fallback skipped", path, session, workflow))
+func workflowRunModel(snapshot *workflowSnapshot, agentID string, warnings *[]string) (string, bool) {
+	path := filepath.Join(snapshot.transcriptDir, snapshot.session, "workflows", snapshot.workflow+".json")
+	runWorkflows, err := snapshot.openRunWorkflows()
+	if err == nil {
+		data, readErr := snapshot.readMetadataFile(runWorkflows, snapshot.workflow+".json", path)
+		err = readErr
+		if err == nil {
+			return parseWorkflowRunModel(path, data, agentID, warnings)
 		}
+	}
+	if err != nil {
+		appendWorkflowRunWarning(warnings, path, snapshot.session, snapshot.workflow, err)
 		return "", false
 	}
+	return "", false
+}
+
+func appendWorkflowMetadataWarning(warnings *[]string, path string, err error) {
+	if readErr, ok := err.(*workflowMetadataReadError); ok {
+		switch readErr.kind {
+		case workflowMetadataUnsafe:
+			*warnings = append(*warnings, path+": workflow metadata unsafe — transcript skipped")
+		case workflowMetadataOversized:
+			*warnings = append(*warnings, path+": workflow metadata exceeds 1048576 bytes — transcript skipped")
+		default:
+			*warnings = append(*warnings, path+": workflow metadata unreadable — transcript skipped: "+err.Error())
+		}
+		return
+	}
+	*warnings = append(*warnings, path+": workflow metadata unreadable — transcript skipped: "+err.Error())
+}
+
+func appendWorkflowTranscriptWarning(warnings *[]string, path string, err error) {
+	if readErr, ok := err.(*workflowMetadataReadError); ok && readErr.kind == workflowMetadataUnsafe {
+		*warnings = append(*warnings, path+": workflow transcript unsafe — transcript skipped")
+		return
+	}
+	*warnings = append(*warnings, path+": workflow transcript unreadable — transcript skipped: "+err.Error())
+}
+
+func appendWorkflowRunWarning(warnings *[]string, path, session, workflow string, err error) {
+	if readErr, ok := err.(*workflowMetadataReadError); ok {
+		switch readErr.kind {
+		case workflowMetadataUnsafe:
+			*warnings = append(*warnings, path+": workflow run metadata unsafe — model fallback skipped")
+		case workflowMetadataOversized:
+			*warnings = append(*warnings, path+": workflow run metadata exceeds 1048576 bytes — model fallback skipped")
+		default:
+			*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata unavailable for session %q workflow %q — model fallback skipped", path, session, workflow))
+		}
+		return
+	}
+	*warnings = append(*warnings, fmt.Sprintf("%s: workflow run metadata unavailable for session %q workflow %q — model fallback skipped", path, session, workflow))
+}
+
+func parseWorkflowRunModel(path string, data []byte, agentID string, warnings *[]string) (string, bool) {
 
 	var envelope struct {
 		WorkflowProgress json.RawMessage `json:"workflowProgress"`

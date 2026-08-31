@@ -288,6 +288,174 @@ func TestWorkflowEvidenceRejectsTranscriptRootReplacement(t *testing.T) {
 	}
 }
 
+// A workflow worker's sidecar, transcript, and optional run-metadata model
+// are one evidence bundle. Reopening any portion from a replacement tree can
+// otherwise combine admission from one tree with routing evidence from another.
+func TestWorkflowEvidenceRejectsCrossReadReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		transition string
+		replace    string
+	}{
+		{name: "sidecar to JSONL root", transition: "sidecar-to-jsonl", replace: "root"},
+		{name: "sidecar to JSONL session", transition: "sidecar-to-jsonl", replace: "session"},
+		{name: "sidecar to JSONL subagents", transition: "sidecar-to-jsonl", replace: "subagents"},
+		{name: "sidecar to JSONL workflows", transition: "sidecar-to-jsonl", replace: "workflows"},
+		{name: "sidecar to JSONL workflow", transition: "sidecar-to-jsonl", replace: "workflow"},
+		{name: "JSONL to run root", transition: "jsonl-to-run", replace: "root"},
+		{name: "JSONL to run session", transition: "jsonl-to-run", replace: "session"},
+		{name: "JSONL to run workflow", transition: "jsonl-to-run", replace: "workflow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for attempt := 0; attempt < 8; attempt++ {
+				repo := t.TempDir()
+				writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I919": "routine"})
+				parent := t.TempDir()
+				transcripts := filepath.Join(parent, "transcripts")
+				if err := os.Mkdir(transcripts, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				replacement := filepath.Join(parent, "replacement")
+				if err := os.Mkdir(replacement, 0o755); err != nil {
+					t.Fatal(err)
+				}
+
+				if tc.transition == "sidecar-to-jsonl" {
+					writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I919", "", "workflow-subagent")
+					// The replacement tree would be structurally excluded if it were
+					// admitted on its own, but its JSONL has matching model evidence.
+					writeWorkflowAgent(t, replacement, "session-1", "wf_1", "worker", repo, "Implement I919", "claude-sonnet-5", "code-reviewer")
+				} else {
+					writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I919", "", "workflow-subagent")
+					writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-haiku-4-5")
+					writeWorkflowAgent(t, replacement, "session-1", "wf_1", "worker", repo, "Implement I919", "", "code-reviewer")
+					writeWorkflowRun(t, replacement, "session-1", "wf_1", "worker", "claude-sonnet-5")
+				}
+
+				if tc.transition == "sidecar-to-jsonl" {
+					setWorkflowSidecarAfterRead(t, func() {
+						replaceWorkflowCrossReadPath(t, tc.replace, transcripts, replacement)
+					})
+				} else {
+					setWorkflowTranscriptAfterRead(t, func() {
+						replaceWorkflowCrossReadPath(t, tc.replace, transcripts, replacement)
+					})
+				}
+
+				rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if row := rowsByID(t, rep)["I919"]; row.Verdict != VerdictNoTranscript {
+					t.Fatalf("attempt %d: I919 = %+v, want no-transcript after %s replacement between %s", attempt, row, tc.replace, tc.transition)
+				}
+			}
+		})
+	}
+}
+
+func replaceWorkflowCrossReadPath(t *testing.T, component, transcripts, replacement string) {
+	t.Helper()
+	var target, source string
+	switch component {
+	case "root":
+		target, source = transcripts, replacement
+	case "session":
+		target = filepath.Join(transcripts, "session-1")
+		source = filepath.Join(replacement, "session-1")
+	case "subagents":
+		target = filepath.Join(transcripts, "session-1", "subagents")
+		source = filepath.Join(replacement, "session-1", "subagents")
+	case "workflows":
+		target = filepath.Join(transcripts, "session-1", "subagents", "workflows")
+		source = filepath.Join(replacement, "session-1", "subagents", "workflows")
+	case "workflow":
+		target = filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1")
+		source = filepath.Join(replacement, "session-1", "subagents", "workflows", "wf_1")
+	default:
+		t.Fatalf("unknown workflow component %q", component)
+	}
+	if err := os.Rename(target, target+".stale"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(source, target); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkflowEvidenceAcceptsCrossReadSameObjectRestoration(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		transition string
+		component  string
+	}{
+		{name: "sidecar to JSONL root", transition: "sidecar-to-jsonl", component: "root"},
+		{name: "sidecar to JSONL session", transition: "sidecar-to-jsonl", component: "session"},
+		{name: "sidecar to JSONL workflow", transition: "sidecar-to-jsonl", component: "workflow"},
+		{name: "JSONL to run root", transition: "jsonl-to-run", component: "root"},
+		{name: "JSONL to run session", transition: "jsonl-to-run", component: "session"},
+		{name: "JSONL to run workflow", transition: "jsonl-to-run", component: "workflow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for attempt := 0; attempt < 4; attempt++ {
+				repo := t.TempDir()
+				writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I920": "routine"})
+				parent := t.TempDir()
+				transcripts := filepath.Join(parent, "transcripts")
+				if err := os.Mkdir(transcripts, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				model := "claude-sonnet-5"
+				if tc.transition == "jsonl-to-run" {
+					model = ""
+				}
+				writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I920", model, "workflow-subagent")
+				if tc.transition == "jsonl-to-run" {
+					writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-sonnet-5")
+				}
+				if tc.transition == "sidecar-to-jsonl" {
+					setWorkflowSidecarAfterRead(t, func() {
+						restoreWorkflowCrossReadPath(t, tc.component, transcripts)
+					})
+				} else {
+					setWorkflowTranscriptAfterRead(t, func() {
+						restoreWorkflowCrossReadPath(t, tc.component, transcripts)
+					})
+				}
+				rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if row := rowsByID(t, rep)["I920"]; row.Verdict != VerdictMatch {
+					t.Fatalf("attempt %d: I920 = %+v, want match after restoring the same %s between %s", attempt, row, tc.component, tc.transition)
+				}
+			}
+		})
+	}
+}
+
+func restoreWorkflowCrossReadPath(t *testing.T, component, transcripts string) {
+	t.Helper()
+	var target string
+	switch component {
+	case "root":
+		target = transcripts
+	case "session":
+		target = filepath.Join(transcripts, "session-1")
+	case "workflow":
+		target = filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1")
+	default:
+		t.Fatalf("unknown workflow component %q", component)
+	}
+	staged := target + ".staged"
+	if err := os.Rename(target, staged); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(staged, target); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func replaceWorkflowPathDuringOpen(t *testing.T, evidence, transcripts, repo, evidencePath, target string) {
 	t.Helper()
 	replaced := false
@@ -1305,4 +1473,18 @@ func setWorkflowTranscriptBeforeOpen(t *testing.T, hook func(string)) {
 	previous := workflowTranscriptBeforeOpen
 	workflowTranscriptBeforeOpen = hook
 	t.Cleanup(func() { workflowTranscriptBeforeOpen = previous })
+}
+
+func setWorkflowSidecarAfterRead(t *testing.T, hook func()) {
+	t.Helper()
+	previous := workflowSidecarAfterRead
+	workflowSidecarAfterRead = hook
+	t.Cleanup(func() { workflowSidecarAfterRead = previous })
+}
+
+func setWorkflowTranscriptAfterRead(t *testing.T, hook func()) {
+	t.Helper()
+	previous := workflowTranscriptAfterRead
+	workflowTranscriptAfterRead = hook
+	t.Cleanup(func() { workflowTranscriptAfterRead = previous })
 }
