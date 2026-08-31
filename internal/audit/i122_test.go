@@ -536,6 +536,110 @@ func TestWorkflowNestedSemanticKeyValidationPreservesUnrelatedToolFields(t *test
 	}
 }
 
+// A nested dispatch is its own carrier: a workflow worker whose opening
+// message cannot be directly attributed must not erase the nested dispatch's
+// explicit prompt, model, and tool-use identity.
+func TestWorkflowNestedDispatchSurvivesUnattributableParent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		opening string
+	}{
+		{name: "ticketless parent", opening: "Coordinate the work"},
+		{name: "multi-ticket parent", opening: "Coordinate I122 and I123"},
+		{name: "malformed parent", opening: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{
+				"I121": "routine", "I122": "primary", "I123": "primary",
+			})
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "unused", "", "workflow-subagent")
+			path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+			parent := fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":%q}}`+"\n", repo, tc.opening)
+			if tc.name == "malformed parent" {
+				parent = fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":1}}`+"\n", repo)
+			}
+			raw := parent + fmt.Sprintf(`{"type":"assistant","cwd":%q,"message":{"role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"tool-121","name":"Agent","input":{"description":"I121 nested dispatch","prompt":"Implement I121 exactly","model":"claude-haiku-4-5"}}]}}`+"\n", repo)
+			if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := rowsByID(t, rep)
+			if row := rows["I121"]; row.Verdict != VerdictSilentDescent || !reflect.DeepEqual(row.Actuals, []string{"claude-haiku-4-5"}) {
+				t.Fatalf("I121 = %+v, want its own nested dispatch evidence despite the parent opening", row)
+			}
+			for _, id := range []string{"I122", "I123"} {
+				if row := rows[id]; row.Verdict != VerdictNoTranscript || len(row.Actuals) != 0 {
+					t.Fatalf("%s = %+v, want no parent model evidence from an unattributable opening", id, row)
+				}
+			}
+		})
+	}
+}
+
+// The exact workflow-scoped identity still governs I078 DISCARDED matching
+// when the parent worker is ticketless. A parent-level shortcut must not
+// change the nested event's source/session/workflow/agent/tool-use identity.
+func TestWorkflowTicketlessParentNestedDispatchKeepsDiscardedIdentity(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I078": "primary"})
+	if err := os.MkdirAll(filepath.Join(repo, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".superpowers", "sdd", "progress.md"), []byte(
+		"DISCARDED I078 source:claude session:session-1/wf_1/agent-worker dispatch:tool-078 tier:mechanical reason: nested prototype was discarded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transcripts := t.TempDir()
+	writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Coordinate the work", "", "workflow-subagent")
+	path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+	raw := fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":"Coordinate the work"}}`+"\n"+
+		`{"type":"assistant","cwd":%q,"message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-078","name":"Agent","input":{"description":"I078 nested prototype","prompt":"Implement I078 exactly","model":"claude-haiku-4-5"}}]}}`+"\n", repo, repo)
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := rowsByID(t, rep)["I078"]
+	if row.Verdict != VerdictDiscardedWithReason || rep.Blocking() {
+		t.Fatalf("I078 = %+v, blocking=%v; want exact nested identity to retain its discarded record", row, rep.Blocking())
+	}
+	if !strings.Contains(row.Detail, "nested prototype was discarded") {
+		t.Fatalf("I078 detail = %q, want the exact discarded-record reason", row.Detail)
+	}
+}
+
+// Admission occurs before any workflow parsing, so a ticketless parent cannot
+// turn an excluded workflow file into nested routing evidence.
+func TestWorkflowTicketlessParentNestedDispatchStillRequiresAdmission(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I121": "routine"})
+	transcripts := t.TempDir()
+	writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Coordinate the work", "", "code-reviewer")
+	path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+	raw := fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":"Coordinate the work"}}`+"\n"+
+		`{"type":"assistant","cwd":%q,"message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-121","name":"Agent","input":{"description":"I121 nested dispatch","prompt":"Implement I121 exactly","model":"claude-haiku-4-5"}}]}}`+"\n", repo, repo)
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row := rowsByID(t, rep)["I121"]; row.Verdict != VerdictNoTranscript || len(row.Actuals) != 0 {
+		t.Fatalf("I121 = %+v, want excluded workflow metadata to suppress nested evidence", row)
+	}
+}
+
 func TestWorkflowFirstValidUserEventLatchesAfterMalformedCarrier(t *testing.T) {
 	for _, tc := range []struct {
 		name string

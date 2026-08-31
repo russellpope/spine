@@ -1903,6 +1903,17 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 					continue
 				}
 				openingLine, more, models, cwd := scanWorkflowJSONL(sub, file, warnings)
+				// A valid nested tool-use dispatch is independent evidence. Its
+				// prompt/description and complete workflow-scoped identity decide
+				// attribution, so retain it after admission and safe parsing even
+				// when the parent opening cannot be attributed to one ticket.
+				workflowSession := id + "/" + filepath.Base(filepath.Dir(sub)) + "/" + strings.TrimSuffix(filepath.Base(sub), ".jsonl")
+				for i := range more {
+					more[i].observedHarness = source
+					more[i].source = source
+					more[i].identity = evidenceIdentity{source: source, session: workflowSession, dispatch: more[i].toolUseID}
+				}
+				dispatches = append(dispatches, more...)
 				referenceCount := ticketref.ReferenceCount(openingLine, ticketTokens)
 				if referenceCount == 0 {
 					continue
@@ -1921,15 +1932,8 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 						models = []string{model}
 					}
 				}
-				workflowSession := id + "/" + filepath.Base(filepath.Dir(sub)) + "/" + strings.TrimSuffix(filepath.Base(sub), ".jsonl")
-				for i := range more {
-					more[i].observedHarness = source
-					more[i].source = source
-					more[i].identity = evidenceIdentity{source: source, session: workflowSession, dispatch: more[i].toolUseID}
-				}
 				a.models = models
 				a.cwd = cwd
-				dispatches = append(dispatches, more...)
 				agents = append(agents, a)
 			}
 		}
