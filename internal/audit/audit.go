@@ -428,6 +428,31 @@ func aggregateDeclarationEvents(events []DeclarationEvidence) (Verdict, string, 
 	return verdict, "host declaration evidence: " + string(verdict), true
 }
 
+func combineDeclarationVerdict(legacy, declaration Verdict) Verdict {
+	if severity[declaration] >= severity[legacy] {
+		return declaration
+	}
+	return legacy
+}
+
+func legacyTokensForDeclarationEvents(tokens []evidenceToken, events []DeclarationEvidence) []evidenceToken {
+	if len(events) == 0 {
+		return tokens
+	}
+	identities := make(map[evidenceIdentity]bool, len(events))
+	for _, event := range events {
+		identities[event.Identity] = true
+	}
+	filtered := make([]evidenceToken, 0, len(tokens))
+	for _, token := range tokens {
+		if token.identity.usable() && identities[token.identity] {
+			continue
+		}
+		filtered = append(filtered, token)
+	}
+	return filtered
+}
+
 func summarizeDeclarationEvents(events []DeclarationEvidence) (expected, declared, status, observed string) {
 	values := func(selectValue func(DeclarationEvidence) string) string {
 		out := make([]string, 0, len(events))
@@ -755,13 +780,15 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 		tokens := evidence[t.id]
 		row := TicketRow{ID: t.id, Tier: t.tier, Actuals: dedupSorted(tokenValues(tokens))}
 		row.ExpectedEffort, row.DeclaredEffort, row.DeclarationStatus, row.ObservedEffort = summarizeEffortDeclarations(repoDir, t, declarations[t.id], ledger)
-		row.Verdict, row.Detail = judge(t, tokens, mappings, ledger)
 		if hostConfigured {
 			row.DeclarationEvents = judgeHostDeclarations(repoDir, hostPath, t, declarations[t.id], agents, observedRoutes, ledger)
-			if verdict, detail, ok := aggregateDeclarationEvents(row.DeclarationEvents); ok {
+		}
+		row.Verdict, row.Detail = judge(t, legacyTokensForDeclarationEvents(tokens, row.DeclarationEvents), mappings, ledger)
+		if verdict, detail, ok := aggregateDeclarationEvents(row.DeclarationEvents); ok {
+			if combineDeclarationVerdict(row.Verdict, verdict) == verdict {
 				row.Verdict, row.Detail = verdict, detail
-				row.ExpectedEffort, row.DeclaredEffort, row.DeclarationStatus, row.ObservedEffort = summarizeDeclarationEvents(row.DeclarationEvents)
 			}
+			row.ExpectedEffort, row.DeclaredEffort, row.DeclarationStatus, row.ObservedEffort = summarizeDeclarationEvents(row.DeclarationEvents)
 		}
 		// D24 (ticket I044): a ticket that landed on no-transcript — zero
 		// attributed evidence — upgrades to unattributed-transcript when

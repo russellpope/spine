@@ -68,6 +68,15 @@ func TestDeclarationVerdictMatrixAndAggregation(t *testing.T) {
 	}
 }
 
+func TestDeclarationAggregationDoesNotMaskIndependentLegacyDescent(t *testing.T) {
+	if got := combineDeclarationVerdict(VerdictSilentDescent, VerdictDeclarationUnconfirmable); got != VerdictSilentDescent {
+		t.Fatalf("combined verdict = %q, want independent legacy silent-descent", got)
+	}
+	if !(Report{Tickets: []TicketRow{{Verdict: combineDeclarationVerdict(VerdictSilentDescent, VerdictDeclarationUnconfirmable)}}}).Blocking() {
+		t.Fatal("independent legacy silent descent must remain blocking")
+	}
+}
+
 func withObservedEffort(evidence DeclarationEvidence, effort string) DeclarationEvidence {
 	evidence.ObservedEffort = effort
 	return evidence
