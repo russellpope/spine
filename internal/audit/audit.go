@@ -821,15 +821,6 @@ func runWithHostPath(opts Options, hostPath string, lookup func(string) (string,
 	return rep, nil
 }
 
-// preflightHostConfig validates only local configuration structure, declared
-// executable availability, and exact pins before any transcript work. It
-// intentionally does not infer reachability for unpinned preferences or
-// alter any preference-only audit mapping; those are I074 concerns.
-func preflightHostConfig(path string, lookup func(string) (string, error)) error {
-	_, _, err := loadHostConfig(path, lookup)
-	return err
-}
-
 func loadHostConfig(path string, lookup func(string) (string, error)) (hostconfig.Config, bool, error) {
 	if path == "" {
 		var err error
@@ -1649,9 +1640,8 @@ func repoQualifies(text, cwd, absRepoDir, repoBase string) bool {
 // WITHIN a single path component or repo name — '-', '_', '.' — so a
 // boundary check built on it treats "praxis-web" as one unbroken word
 // rather than "praxis" + a boundary + "-web". Used only by repoQualifies'
-// two text clauses (I047 review C1); containsToken's ticket-id matching
-// stays alnum-only and untouched — ticket ids never carry these
-// characters, and loosening that boundary was never in scope.
+// two text clauses (I047 review C1); ticketref independently owns ticket-ID
+// and range boundaries.
 func isPathWordChar(c byte) bool {
 	return isAlnum(c) || c == '-' || c == '_' || c == '.'
 }
@@ -1660,7 +1650,7 @@ func isPathWordChar(c byte) bool {
 // clauses (I047 review C1, amended D28): text references path as a whole
 // path-word — the absolute-path clause and the basename clause both use
 // this, since a repo's basename is exactly a one-component path. Without
-// this, `strings.Contains`/`containsToken`'s alnum-only boundary let
+// this, `strings.Contains`/the old alnum-only ticket boundary let
 // "praxis" match inside "praxis-web" (a real sibling-repo directory name,
 // hyphen not being alnum) — readmitting the exact I008 cross-repo
 // collision class for any two repos sharing a name prefix. Boundary is
@@ -1698,10 +1688,9 @@ func containsCodexDispatchTaskReference(text, id string) bool {
 	}
 }
 
-// containsTokenWith generalizes containsToken's word-boundary matching
-// over a caller-supplied word-character predicate — containsToken itself
-// stays pinned to isAlnum (ticket ids), while containsPathToken supplies
-// isPathWordChar (repo path/basename references, I047 review C1).
+// containsTokenWith applies word-boundary matching over a caller-supplied
+// word-character predicate. containsPathToken supplies isPathWordChar for
+// repo path/basename references (I047 review C1).
 func containsTokenWith(text, id string, isWordChar func(byte) bool) bool {
 	if id == "" {
 		return false
@@ -2469,13 +2458,6 @@ func parseWorkflowRunProgress(raw json.RawMessage) (workflowRunProgress, bool, b
 	}
 }
 
-// unmarshalUniqueJSON rejects duplicate member names in every object before
-// decoding, so untrusted metadata never inherits encoding/json's last-value-
-// wins behavior.
-func unmarshalUniqueJSON(data []byte, dst any) (bool, error) {
-	return unmarshalUniqueJSONWithMemberValidator(data, dst, nil)
-}
-
 // unmarshalWorkflowMetadata additionally rejects case-variant spellings of
 // the sidecar fields that admit a workflow transcript. encoding/json matches
 // struct fields case-insensitively, so accepting aliases here would reintroduce
@@ -2986,12 +2968,6 @@ func parseLine(line []byte, briefs *briefTable, position *int) (dispatches []dis
 }
 
 // --- helpers ---
-
-// containsToken reports whether text contains id as a whole token (so I20
-// never matches a dispatch for I201).
-func containsToken(text, id string) bool {
-	return containsTokenWith(text, id, isAlnum)
-}
 
 func isAlnum(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
