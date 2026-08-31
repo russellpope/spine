@@ -45,15 +45,15 @@ const effortDefault = "high"
 // ADR 0011): an override keeps the repo's on-disk value verbatim; everything
 // else — inherited historical defaults and the table-rendered template rows
 // alike — is set to the table's current default, with each actual value
-// change itemized as a refresh. Rows cover every (flavor, tier) the table
+// change itemized as a refresh. Rows cover every (harness, tier) the table
 // ships (design D8); a gen ≤9 repo's bare tier keys reach here as
-// claude-flavored values via the shared resolver's transitional affordance
+// claude-harnessed values via the shared resolver's transitional affordance
 // and land in the dotted claude rows.
 //
 // extracted is the on-disk key set from ExtractKeys (nil for a file being
 // created), used to write an override back exactly as the repo spelled it
 // and to migrate a customized top-level effort: value into per-entry
-// overrides on the repo's claude entries — the only flavor any generation
+// overrides on the repo's claude entries — the only harness any generation
 // that rendered that key ever dispatched (D16). Migrated entries are
 // reported as overrides so the plan surfaces them.
 func applyModelRouting(repoDir, content string, extracted map[string]string) (string, []ModelRefresh, []ModelOverride, error) {
@@ -63,14 +63,14 @@ func applyModelRouting(repoDir, content string, extracted map[string]string) (st
 	}
 	var refreshes []ModelRefresh
 	var overrides []ModelOverride
-	for _, flavor := range model.Flavors() {
+	for _, harness := range model.Harnesses() {
 		for _, tier := range model.Tiers {
-			key := "model_routing." + flavor + "." + tier
-			def, err := model.Resolve("", flavor, tier)
+			key := "model_routing." + harness + "." + tier
+			def, err := model.Resolve("", harness, tier)
 			if err != nil {
 				return "", nil, nil, err
 			}
-			live, err := model.Resolve(repoDir, flavor, tier)
+			live, err := model.Resolve(repoDir, harness, tier)
 			if err != nil {
 				return "", nil, nil, err
 			}
@@ -78,7 +78,7 @@ func applyModelRouting(repoDir, content string, extracted map[string]string) (st
 			switch live.Provenance {
 			case model.Override:
 				target = model.MirrorValue(live)
-				if raw := rawOverride(extracted, flavor, tier); raw != "" {
+				if raw := rawOverride(extracted, harness, tier); raw != "" {
 					target = raw // the repo's own spelling, e.g. an effort suffix
 				}
 			case model.Inherited:
@@ -97,14 +97,14 @@ func applyModelRouting(repoDir, content string, extracted map[string]string) (st
 			// also the tier default. Existing explicit per-entry effort
 			// overrides keep winning, as before.
 			migrated := false
-			if effortMigration != "" && flavor == "claude" &&
+			if effortMigration != "" && harness == "claude" &&
 				(live.Provenance != model.Override || !strings.Contains(target, "@")) {
 				id, _, _ := strings.Cut(target, " @ ")
 				candidate := model.MirrorValue(model.Entry{
-					Flavor: flavor,
-					Tier:   tier,
-					ID:     id,
-					Effort: effortMigration,
+					Harness: harness,
+					Tier:    tier,
+					ID:      id,
+					Effort:  effortMigration,
 				})
 				if candidate != target {
 					target = candidate
@@ -120,14 +120,14 @@ func applyModelRouting(repoDir, content string, extracted map[string]string) (st
 	return content, refreshes, overrides, nil
 }
 
-// rawOverride is the repo's on-disk spelling for (flavor, tier): the gen-10
+// rawOverride is the repo's on-disk spelling for (harness, tier): the gen-10
 // dotted key if present, else — for claude only — the bare gen ≤9 tier key
 // (the same precedence the shared resolver applies).
-func rawOverride(extracted map[string]string, flavor, tier string) string {
-	if raw := extracted["model_routing."+flavor+"."+tier]; raw != "" {
+func rawOverride(extracted map[string]string, harness, tier string) string {
+	if raw := extracted["model_routing."+harness+"."+tier]; raw != "" {
 		return raw
 	}
-	if flavor == "claude" {
+	if harness == "claude" {
 		return extracted["model_routing."+tier]
 	}
 	return ""

@@ -169,7 +169,7 @@ func TestUltimaHandWrittenCursorSectionSuperseded(t *testing.T) {
 		"exactly one, among the non-done stages", // canonical marker-semantics wording (I018 post-fix)
 		"spine cursor",                           // handoff rule: verbatim `spine cursor` output
 		"<!-- spine:cursor -->",                  // grammar reference embedded as documentation
-		"template_version: 13",
+		"template_version: 14",
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("migrated WORKFLOW.md missing %q", want)

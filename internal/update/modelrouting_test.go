@@ -101,7 +101,7 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5 @ low}", routine)
 	}
 	m := wf.ModelRefreshes[1]
-	// I036: refreshes itemize under the flavor-qualified dotted key.
+	// I036: refreshes itemize under the harness-qualified dotted key.
 	if m.Key != "model_routing.claude.fallback" || m.Old != "claude-opus-4-8" || m.New != "claude-opus-5" {
 		t.Errorf("refresh item = %+v, want {model_routing.claude.fallback claude-opus-4-8 claude-opus-5}", m)
 	}
@@ -404,7 +404,7 @@ func gen10WithoutPiRows(t *testing.T, mutate func(string) string) (dir, before s
 // I079 AC3 negative control: a gen-10 repo with no pi rows is unaffected by
 // the pi addition — its claude/codex rows come through byte-identical and
 // nothing about them is itemized. The pi rows arrive as table-rendered
-// additions (design D8 renders every (flavor, tier) the table ships), which
+// additions (design D8 renders every (harness, tier) the table ships), which
 // is an addition, not a change to what the repo already declared.
 func TestGen10WithoutPiRowsIsUnaffected(t *testing.T) {
 	dir, before := gen10WithoutPiRows(t, nil)
@@ -427,7 +427,7 @@ func TestGen10WithoutPiRowsIsUnaffected(t *testing.T) {
 		t.Fatal(err)
 	}
 	// I110: compare mirror rows with their column padding collapsed. Adding a
-	// flavor whose name is longer than any existing one repads the whole block,
+	// harness whose name is longer than any existing one repads the whole block,
 	// so an existing row survives with its content intact but not byte-for-byte.
 	// What this guard is really asserting — that nothing about the repo's own
 	// rows is refreshed, overridden or reported — is checked above and stays

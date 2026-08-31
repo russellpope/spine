@@ -36,7 +36,7 @@ func TestGen12To13PreservesI050AcceptanceContract(t *testing.T) {
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
 		t.Fatal(err)
 	}
-	assertFileContains(t, dir, "WORKFLOW.md", "template_version: 13", "DISCARDED <ticket-id>", "## Acceptance exceptions", "APPROVED-UNTESTED")
+	assertFileContains(t, dir, "WORKFLOW.md", "template_version: 14", "DISCARDED <ticket-id>", "## Acceptance exceptions", "APPROVED-UNTESTED")
 	raw, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
 	if err != nil {
 		t.Fatal(err)

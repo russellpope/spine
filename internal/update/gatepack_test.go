@@ -624,7 +624,7 @@ func TestNoMaipipeSkipsMaipipeAndWritesOtherPendingFiles(t *testing.T) {
 	if got := readFile(t, mpPath); got != sentinel {
 		t.Errorf("%s changed without maipipe:\nwant %q\n got %q", MaipipeFile, sentinel, got)
 	}
-	if got := readFile(t, wfPath); got == beforeWorkflow || !strings.Contains(got, "template_version: 13") {
+	if got := readFile(t, wfPath); got == beforeWorkflow || !strings.Contains(got, "template_version: 14") {
 		t.Errorf("another pending file was not applied:\n%s", got)
 	}
 }

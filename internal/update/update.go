@@ -712,6 +712,9 @@ func dropRetiredKeyLines(unrec []string) []string {
 // render verbatim, copied off the old template rather than retyped, with
 // on-disk indentation intact (unrecognizedLines only right-trims).
 var supersededLines = map[string]bool{
+	// Generation 14 changes active model-table wording while keeping the
+	// migration reader and deprecated JSON field. This was emitted by gen 13.
+	"owns the public flavor-to-harness rename.": true,
 	// gen 12's record-scope sentence is expanded in gen 13 by I078 to add the
 	// identity-scoped DISCARDED grammar. I050's Acceptance exceptions lines
 	// remain emitted unchanged and therefore are deliberately not listed.
@@ -776,7 +779,7 @@ var supersededLines = map[string]bool{
 	"**Handoff rule:** `/handoff` and any resume/kickoff prompt MUST embed the verbatim output of `spine cursor` — a prose paraphrase of stage state is incomplete; the reader can't see which upstream stage was skipped from a summary alone. Alongside `spine audit stages` blocking on a missing/stale cursor block in the newest handoff, `spine doctor` advises (warns) on the same condition.": true,
 
 	// gen 6–9 WORKFLOW.md model_routing block, superseded in gen 10 (I036,
-	// design D8/D16) by the flavor-axis dotted mirror rendered from the model
+	// design D8/D16) by the harness-axis dotted mirror rendered from the model
 	// table: the uncommented block header, the four bare claude tier rows
 	// (both fallback values gen 9 ever emitted — pre- and post-I035), and the
 	// retired top-level effort: and model_default: keys. The retired keys'
@@ -850,7 +853,7 @@ func unrecognizedLines(got, expected, current string) []string {
 			return
 		}
 		// A bare tier key is carry-forwardable exactly when the current
-		// generation renders its claude-flavored dotted successor: the
+		// generation renders its claude-harnessed dotted successor: the
 		// gen ≤9 bare rows are claude rows by definition (the transitional
 		// affordance in internal/model), and applyModelRouting writes their
 		// values into the dotted mirror rather than dropping them.
@@ -882,7 +885,7 @@ func unrecognizedLines(got, expected, current string) []string {
 
 // keyLineSignature is the identifying signature of a "key: value  #
 // comment" line — a top-level key, a two-space-indented model_routing
-// sub-key, or a gen-10 dotted "<flavor>.<tier>" mirror key — with the value
+// sub-key, or a gen-10 dotted "<harness>.<tier>" mirror key — with the value
 // dropped and the comment kept verbatim, plus the bare key so callers can
 // gate on which keys the current generation still renders. ok is false for
 // anything that isn't a recognized key: value line (prose, headers, unknown

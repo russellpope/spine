@@ -17,7 +17,7 @@ import (
 // claude tier rows every gen 6–9 render emitted (both fallback values gen 9
 // ever carried, pre- and post-I035), and the retired top-level effort: and
 // model_default: keys (gen-0 and gen-1+ spellings). The added ("+") side —
-// the dotted flavor-axis mirror rows — is rendered from the model table via
+// the dotted harness-axis mirror rows — is rendered from the model table via
 // the same code path the template uses, deliberately NOT pinned as literals:
 // pinning current table values here would recreate the coupling I036 removes
 // (a defaults change must not require touching this lock).
@@ -94,11 +94,11 @@ func mustReplace(t *testing.T, content, old, new string) string {
 	return out
 }
 
-// The model_routing mirror pads its key column to the longest flavor.tier key
-// in the table, so adding a flavor with a longer name reflows every row —
+// The model_routing mirror pads its key column to the longest harness.tier key
+// in the table, so adding a harness with a longer name reflows every row —
 // I110's "openweights" did exactly that and broke six tests that had the old
 // column widths baked into string literals. The two helpers below match and
-// rewrite rows by content instead, so the next flavor cannot repeat it.
+// rewrite rows by content instead, so the next harness cannot repeat it.
 
 // replaceRow rewrites the value of the model_routing row for key, whatever
 // padding the fixture happens to carry. The single space it writes is a legal
@@ -138,8 +138,8 @@ func normalizeRow(line string) string {
 	return strings.Join(strings.Fields(body), " ")
 }
 
-// mirrorRowKey returns the flavor.tier key of a model_routing mirror row
-// carried in a diff line. It insists on a known flavor and a known tier so an
+// mirrorRowKey returns the harness.tier key of a model_routing mirror row
+// carried in a diff line. It insists on a known harness and a known tier so an
 // unrelated dotted key cannot be waved through as mirror rendering.
 func mirrorRowKey(line string) (string, bool) {
 	fields := strings.Fields(strings.TrimLeft(line, "+-"))
@@ -147,11 +147,11 @@ func mirrorRowKey(line string) (string, bool) {
 		return "", false
 	}
 	key := strings.TrimSuffix(fields[0], ":")
-	flavor, tier, ok := strings.Cut(key, ".")
+	harness, tier, ok := strings.Cut(key, ".")
 	if !ok {
 		return "", false
 	}
-	if !slices.Contains(model.Flavors(), flavor) || !slices.Contains(model.Tiers, tier) {
+	if !slices.Contains(model.Harnesses(), harness) || !slices.Contains(model.Tiers, tier) {
 		return "", false
 	}
 	return key, true
@@ -160,8 +160,8 @@ func mirrorRowKey(line string) (string, bool) {
 // mirrorRenderDiff classifies the mirror rows in a diff into the two changes
 // that are pure rendering rather than content (I110): rows whose body is
 // unchanged once padding is collapsed — the reflow every existing row
-// undergoes when a longer flavor name widens the key column — and rows for a
-// key that the diff only adds, which is a new (flavor, tier) the table now
+// undergoes when a longer harness name widens the key column — and rows for a
+// key that the diff only adds, which is a new (harness, tier) the table now
 // ships (design D8). A row whose value genuinely changed appears on both sides
 // with different bodies and is deliberately left unsanctioned, so it still has
 // to be an itemized model refresh.
@@ -253,7 +253,7 @@ func TestGen9To10PristineUpdatesCleanly(t *testing.T) {
 		}
 	}
 	// Both stale inherited Claude pairs are refreshed and itemized under their
-	// flavor-qualified keys.
+	// harness-qualified keys.
 	wf := report(t, reports, "WORKFLOW.md")
 	if len(wf.ModelRefreshes) != 2 {
 		t.Fatalf("ModelRefreshes = %+v, want routine and fallback refreshes", wf.ModelRefreshes)
@@ -272,11 +272,11 @@ func TestGen9To10PristineUpdatesCleanly(t *testing.T) {
 }
 
 // AC (I036/I060): the written migration stamps generation 10, renders every
-// flavor and tier as dotted mirror rows, retires the top-level effort: and
+// harness and tier as dotted mirror rows, retires the top-level effort: and
 // model_default: keys, leaves the cursor grammar untouched (D17), replaces
 // the manual handoff-copy rule with the sole-writer and automatic-embed rules,
 // and is idempotent.
-func TestGen9To10MigrationWritesFlavorMirror(t *testing.T) {
+func TestGen9To10MigrationWritesHarnessMirror(t *testing.T) {
 	dir := stageGen9Repo(t, nil)
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
 		t.Fatal(err)
@@ -286,8 +286,8 @@ func TestGen9To10MigrationWritesFlavorMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 	gotStr := string(got)
-	if !strings.Contains(gotStr, "template_version: 13") {
-		t.Error("migrated WORKFLOW.md missing template_version: 13")
+	if !strings.Contains(gotStr, "template_version: 14") {
+		t.Error("migrated WORKFLOW.md missing template_version: 14")
 	}
 	for _, row := range model.MirrorRows() {
 		if !containsLine(gotStr, row) {
@@ -383,7 +383,7 @@ func TestGen9To10PreservesCustomizedSurroundingConfiguration(t *testing.T) {
 }
 
 // AC (I036, D16): a customized top-level effort: value survives as
-// per-entry effort overrides on the repo's claude entries — the only flavor
+// per-entry effort overrides on the repo's claude entries — the only harness
 // the generations that rendered the key ever dispatched — rather than being
 // discarded, and the migrated entries are surfaced in the plan.
 func TestGen9To10CustomEffortMigratesToPerEntryOverrides(t *testing.T) {
@@ -650,9 +650,9 @@ func TestWorkflowTemplateCarriesNoModelIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, flavor := range model.Flavors() {
+	for _, harness := range model.Harnesses() {
 		for _, tier := range model.Tiers {
-			e, err := model.Resolve("", flavor, tier)
+			e, err := model.Resolve("", harness, tier)
 			if err != nil {
 				t.Fatal(err)
 			}

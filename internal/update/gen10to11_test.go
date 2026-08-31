@@ -101,7 +101,7 @@ func TestGen10To11PristineUpdatesCleanly(t *testing.T) {
 				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh; see modelrouting_test.go
 					continue
 				}
-				if isRenderOnly(line) { // mirror reflow or a newly shipped (flavor, tier); see mirrorRenderDiff
+				if isRenderOnly(line) { // mirror reflow or a newly shipped (harness, tier); see mirrorRenderDiff
 					continue
 				}
 				t.Errorf("%s: unexpected changed line %q — 10→11 must be stamp plus declared gen-11 content only", r.Path, line)
@@ -129,8 +129,8 @@ func TestGen10To11MigrationAddsGatePackKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(raw)
-	if !strings.Contains(got, "template_version: 13") {
-		t.Error("migrated WORKFLOW.md missing template_version: 13")
+	if !strings.Contains(got, "template_version: 14") {
+		t.Error("migrated WORKFLOW.md missing template_version: 14")
 	}
 	keys := ExtractKeys(got)
 	if keys["gate_pack"] != "" {

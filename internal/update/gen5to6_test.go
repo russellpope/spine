@@ -163,14 +163,14 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"template_version: 13",
+		"template_version: 14",
 		"spine audit routing",
 	} {
 		if !strings.Contains(string(wf), want) {
 			t.Errorf("migrated WORKFLOW.md missing %q", want)
 		}
 	}
-	// I036: the migrated mirror is the table-rendered dotted flavor rows —
+	// I036: the migrated mirror is the table-rendered dotted harness rows —
 	// including the fixture's inherited claude-opus-4-8 fallback refreshed to
 	// the current table default during migration (design D6, I035).
 	for _, row := range model.MirrorRows() {
@@ -187,7 +187,7 @@ func TestGen5To6MigrationCarriesFixtureForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(cl), "<!-- spine:begin v13 -->") {
+	if !strings.HasPrefix(string(cl), "<!-- spine:begin v14 -->") {
 		t.Error("migrated CLAUDE.md missing v11 marker")
 	}
 	if !strings.Contains(string(cl), "primary / routine / mechanical / fallback") {

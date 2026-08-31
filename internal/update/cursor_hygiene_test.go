@@ -52,6 +52,8 @@ var i075ContentLines = map[string]bool{
 	"no documented observed-effort extractor, so supported real records retain":       true,
 	"`observed-effort=-` and are unconfirmable rather than confirmed. I073 alone":     true,
 	"owns the public flavor-to-harness rename.":                                       true,
+	"owns the public harness migration; generation 14 retains deprecated JSON and":    true,
+	"defaults-input compatibility only.":                                              true,
 }
 
 func isI075ContentDiffLine(line string) bool {

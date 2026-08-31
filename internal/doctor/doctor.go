@@ -105,7 +105,7 @@ func hostRoutingCheck(repoDir, hostPath string, lookup func(string) (string, err
 	if lookup == nil {
 		lookup = exec.LookPath
 	}
-	config, err := hostconfig.Load(path, model.Flavors(), lookup)
+	config, err := hostconfig.Load(path, model.Harnesses(), lookup)
 	if errors.Is(err, hostconfig.ErrNotConfigured) {
 		return nil
 	}
@@ -120,15 +120,15 @@ func hostRoutingCheck(repoDir, hostPath string, lookup func(string) (string, err
 	}
 	sort.Strings(names)
 	var findings []Finding
-	for _, flavor := range names {
-		harness := config.Harnesses[flavor]
+	for _, harnessName := range names {
+		harness := config.Harnesses[harnessName]
 		for _, tier := range model.Tiers {
-			requested, err := model.Resolve(repoDir, flavor, tier)
+			requested, err := model.Resolve(repoDir, harnessName, tier)
 			if err != nil {
-				findings = append(findings, Finding{"D16", "error", path, fmt.Sprintf("cannot resolve %s.%s preference", flavor, tier)})
+				findings = append(findings, Finding{"D16", "error", path, fmt.Sprintf("cannot resolve %s.%s preference", harnessName, tier)})
 				return append(findings, pinEvidenceCheck(repoDir, config)...)
 			}
-			key := flavor + "." + tier
+			key := harnessName + "." + tier
 			if pin, pinned := config.Pins[key]; pinned {
 				if pin.Model != requested.ID {
 					findings = append(findings, Finding{"D16", "warn", path, fmt.Sprintf("repository %s %s requested %s@%s has a divergent host pin and is not auditable until I074", normalizedRepo, key, requested.ID, requested.Effort)})

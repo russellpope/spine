@@ -52,11 +52,11 @@ func TestGen11To12WritesConventionAndIsIdempotent(t *testing.T) {
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
 		t.Fatal(err)
 	}
-	assertFileContains(t, dir, "WORKFLOW.md", "template_version: 13", "## Acceptance exceptions", "APPROVED-UNTESTED", "provenance", "does not authenticate")
+	assertFileContains(t, dir, "WORKFLOW.md", "template_version: 14", "## Acceptance exceptions", "APPROVED-UNTESTED", "provenance", "does not authenticate")
 	assertFileContains(t, dir, "docs/issues/_template.md", "## Acceptance criteria", "WORKFLOW.md")
 	assertFileContains(t, dir, "docs/issues/README.md", "approved without a test", "WORKFLOW.md")
-	assertFileContains(t, dir, "AGENTS.md", "<!-- spine:begin v13 -->")
-	assertFileContains(t, dir, "CLAUDE.md", "<!-- spine:begin v13 -->")
+	assertFileContains(t, dir, "AGENTS.md", "<!-- spine:begin v14 -->")
+	assertFileContains(t, dir, "CLAUDE.md", "<!-- spine:begin v14 -->")
 	reports, err := Run(Options{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
