@@ -2,7 +2,8 @@
 id: I122
 title: "audit routing: workflow (spawnDepth 1) subagent transcripts are not scanned"
 severity: med
-status: open
+status: fixed
+commits: [3294058, 59dc240, eaa8ff3, 9ceabf3, da4bf93, b676642, 8fe8dbf, eb080d3, 16b3945, b9e9f22, 3595c9b, 6bc5554, a348868, e077838, aba1f1e]
 affects: []
 blocked-by: []
 execution-mode: inline
@@ -39,3 +40,19 @@ control).
 
 - I121 — range-token attribution (same audit, same observed session).
 - maikanban `.superpowers/sdd/progress.md` ROUTING AUDIT FACTS entry, 2026-08-29.
+
+## Resolution
+
+Fixed 2026-08-30 at final I122 product SHA `aba1f1e`. Routing audit now
+discovers admitted depth-1 workflow workers, latches only a coherent first user
+opening, preserves independently attributable nested dispatches, and obtains
+missing model evidence from one exact agent entry in the real heterogeneous
+workflow run format. Sidecar, JSONL, and run evidence are bounded where
+specified, exact-key validated, descriptor-rooted, and retained as one snapshot
+whose root, ancestors, artifact identities, and cross-read consistency are
+revalidated against symlink and atomic replacement attacks. I121 range grammar,
+I073 harness/source separation, I075 declarations, I074 verdicts, session/cwd
+scope, exclusions, and exact nested identities remain intact. A fresh primary
+review and a separate fresh primary verifier passed 34 hostile groups repeated
+ten times plus full/race/vet/build and Windows gates. The batch-final exact-SHA
+maipipe lane remains the ship gate.

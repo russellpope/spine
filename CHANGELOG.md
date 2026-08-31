@@ -8,6 +8,7 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Fixed
 
+- **Routing audit now includes depth-1 Workflow subagents without mixing mutable evidence trees.** Exact workflow admission, coherent opening-line attribution, agent-correlated model fallback, and independent nested dispatches are supported. Sidecar, JSONL, and run evidence share a descriptor-rooted snapshot with exact semantic keys, bounds, temporal latching, and root/ancestor/file/cross-read replacement defenses; excluded roles, wrong sessions/cwd, and ambiguous shapes fail closed. (I122)
 - **Routing audit now attributes every member of a ticket range without accepting malformed hyphen chains.** Shared bounded range matching covers Claude, Codex, workflow, and discovery paths, including interior-only Codex evidence and huge ranges without materializing them. Chained, partial, or surrounding-hyphen forms attribute no endpoint; the exact `dispatch-task-I###.md` carrier and existing lowercase/later-message behavior remain compatible. (I121)
 - **`spine doctor` now advises on meaningful Go toolchain skew.** D14 compares
   the binary's Go release with `go env GOVERSION` on PATH at major/minor
