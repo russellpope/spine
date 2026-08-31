@@ -1,0 +1,130 @@
+# Workflow — spine
+
+profile: library-cli
+template_version: 13
+reviewers: [go-reviewer, python-reviewer]
+functional_harness: cli    # cli | rest | framebuffer | none
+gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
+model_routing:                     # spine-managed defaults; edit a value to override
+  claude.primary:         claude-fable-5
+  claude.routine:         claude-opus-5 @ low
+  claude.mechanical:      claude-haiku-4-5
+  claude.fallback:        claude-opus-5
+  codex.primary:          gpt-5.6-sol @ xhigh
+  codex.routine:          gpt-5.6-terra
+  codex.mechanical:       gpt-5.6-luna
+  codex.fallback:         gpt-5.6-terra @ xhigh
+  openweights.primary:    FW-Kimi-K3
+  openweights.routine:    DeepSeek-V4-Pro @ high
+  openweights.mechanical: FW-GLM-5.2 @ high
+  openweights.fallback:   FW-Kimi-K3
+  pi.primary:             qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh
+  pi.routine:             qwen3.8-27b-q8_0 alt: qwen3.8-27b-q8_0 @ xhigh
+  pi.mechanical:          qwen3.8-27b-q8_0 alt: qwen3.8-27b-q8_0 @ xhigh
+  pi.fallback:            qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh
+gate_pack: go@1    # gate pack rendered into maipipe.toml (go@1); empty = no pack
+gate_pack_disabled: [test-enum-vs-spec, n-plus-one, fixture-manifest]    # check classes dropped from the rendered pipeline
+gate_pack_config:                  # per-check inputs; a non-empty value reaches its stage as SPINE_GATE_<KEY>
+  test_enum_spec:                  # spec file test-enum-vs-spec reads the enumerated values from
+  fixture_manifest:                # manifest path fixture-manifest requires
+  build_outputs: bin/spine    # build output paths gitignore-control requires to be ignored
+  n_plus_one_clients:              # client method names n-plus-one looks for in loops
+  tskip_allow: cmd/spine/dogfood_test.go,internal/cursor/dogfood_test.go    # test files tskip tolerates a skip in
+stages: [grill, prd, issues, implement, functional-test, review, verify, ship, deploy, docs, handoff]
+
+See `docs/harness-interface.md` for the functional-test harness contract.
+Mandatory gates: a PRD up front (grill-with-docs -> to-spec), spec-review of the finished diff against the PRD, and verification before completion.
+
+## Template authoring
+
+Any content-changing template edit appends its predecessors' dropped lines to the superseded set in the same change.
+
+## Stage cursor (consistency rule)
+
+Stages run **in order**; none may be silently skipped (the miss mode is a handoff that names an
+abbreviated path — e.g. "grill -> to-spec -> build" quietly dropping `issues`/`to-tickets`). To
+prevent it, every SDD effort's `.superpowers/sdd/progress.md` opens with a machine-readable
+stage cursor block — one `<!-- spine:cursor -->` block naming the effort, PRD, ticket range, and
+every stage's marker. `[x]` marks a done stage, `[<]` marks YOU ARE HERE (exactly one, among the non-done stages), `[ ]` marks pending.
+The cursor is the single source of truth for "where are we"; check it at session start before acting.
+**Sole-writer rule:** `spine` is the only legal cursor writer. Mutate the block only with `spine cursor start`, `spine cursor tick <stage>`, `spine cursor here <stage>`, or `spine cursor set`; hand-editing it is a workflow violation.
+
+Grammar reference (documentation only — the real block lives at the head of
+`.superpowers/sdd/progress.md`, never here):
+
+    <!-- spine:cursor -->
+    effort: <kebab-name>
+    prd: docs/specs/<file>.md
+    tickets: I0NN | I0NN,I0MM[,...] | I0NN-I0MM | prefix I0
+    stages: grill[x] prd[x] issues[x] implement[<] functional-test[ ] review[ ] verify[ ] ship[ ] ...
+    <!-- /spine:cursor -->
+
+**Handoff rule:** `spine handoff new` automatically embeds the current cursor block in the handoff it creates; do not copy `spine cursor` output by hand. Alongside `spine audit stages` blocking on a missing/stale cursor block in the newest handoff, `spine doctor` advises (warns) on the same condition.
+
+## Model routing
+
+Artifacts (plans, tickets) reference tiers, never model ids — the mapping above is per-repo remappable (new model families, local models, other providers).
+
+Escalation: dispatch may exceed a ticket's annotated tier or effort freely, WITH a recorded reason; dispatching below the annotation without a matching record is silent descent and fails the verify gate. Record grammar (exact — arrow is unspaced `->`; spaced arrows do not parse), one line each in `.superpowers/sdd/progress.md`:
+
+    ESCALATION <ticket-id> <from-tier>-><to-tier> reason: <one line>
+    ESCALATION <ticket-id> effort <from>-><to> reason: <one line>
+    FALLBACK <ticket-id> reason: <one line>
+    DISCARDED <ticket-id> source:<claude|codex> session:<session-id> dispatch:<event-id> tier:<mechanical|routine|primary|fallback> reason: <one line>
+
+A record excuses exactly its to-tier, nothing else. Any record not matching the grammar exactly excuses nothing — spaced arrows, missing `reason:`, missing tokens, all of it. A discarded record covers one identified event only: its source, session, dispatch event, and resolved tier must all match an otherwise lower-tier token. Malformed, duplicate, zero-match, or multi-match discarded records are warned and excuse nothing. `discarded-with-reason` remains visible and advisory; a separate lower-tier event still reports blocking `silent-descent`.
+
+## Acceptance exceptions
+
+An applicable acceptance criterion that was consciously approved without a test stays unchecked and records the decision on one physical line under the ticket's exact column-0 `## Acceptance criteria` heading:
+
+    - [ ] <criterion> -- APPROVED-UNTESTED <YYYY-MM-DD> by <approver> ref: <docs/YYYY-MM-DD-artifact.md#anchor> reason: <one-line reason>
+
+The dated Markdown reference must be a clean repository-relative `docs/` path to a regular file. Spine verifies durable local provenance but does not authenticate the approver or resolve the fragment. A complete record is silent in `spine doctor`; an incomplete or invalid record is a D15 warning. `spine audit stages` scans only cursor-resolved tickets, keeps acceptance warnings nonblocking, and prints `acceptance: approved-untested=<valid-count> invalid=<invalid-count>` when the scoped tickets contain candidates. Ordinary unchecked criteria and tickets with no uppercase candidate keep their existing behavior.
+
+Reviewer floor: review-tier is never below tier; inline tickets carry `review-tier: n/a` — no per-task review cycle exists, verify-stage gates still apply. Risk triggers force primary-tier review — cross-task-integration, concurrency-subtle-state, security-surface, plan-flagged-ambiguity. The final whole-branch review and acceptance simulation always run primary. Reviewers re-run claims and demand raw transcripts at every tier.
+
+Fallback routing: proactive — security-framed work (attacker/exploit framing) routes to fallback from the first dispatch; security-touching but quality-framed work stays on its natural tier with the security-surface trigger. Reactive — on a primary refusal the orchestrator re-dispatches on fallback with quality framing, writes a FALLBACK record, and push-notifies the owner.
+
+Dispatch conventions the audit depends on: every subagent dispatch carries an explicit model (never inherit), and its description contains the ticket id token (the correlation contract). Verify stage: run `spine audit routing` (add `--transcripts <dir>` when the controller session runs in a different repo than the audited one) — reasoned escalations are advisory, silent descent blocks.
+
+## Raw dispatch effort declarations
+
+Every controlled launch records the exact raw declaration before launch:
+
+    harness=<raw execution vehicle> model=<exact selected ID> effort=<exact raw token>
+
+`harness`, `model`, and `effort` are a dispatch declaration, not evidence of
+what a provider, gateway, or agent runtime used. A supplied effort token is
+validated byte-exactly against the selected harness vocabulary; no ordering or
+cross-harness comparison is implied. A retry is a new declaration and may use
+a different token only with its own exact authorization record.
+
+The exact effort authorization grammar is:
+
+    ESCALATION <ticket-id> effort <from>-><to> reason: <one line>
+
+The arrow is unspaced; `<from>` and `<to>` are non-empty raw tokens without
+spaces; `reason:` appears once with non-empty one-line text. It authorizes
+only that ticket's declaration when its selected target effort is exactly
+`<from>` and its declared effort is exactly `<to>`. A malformed, reversed,
+or different-ticket pair authorizes nothing and does not alter model-tier
+judgment.
+
+`spine audit routing` preserves its leading `ticket tier actual verdict detail`
+layout and appends declaration fields only for a complete, host-correlated
+declaration. Confirmation requires an exact `(source, session, dispatch)`
+identity and linked worker event, plus a byte-exact `observed_ids` mapping in
+the local validated host configuration for the final selected `(model, effort)`
+pair. Aliases, history, canonical IDs, normalization, family inference,
+cross-host lookup, and root-only linkage do not confirm. A mapped other route
+or documented observed-effort mismatch blocks as `declared-observed-mismatch`;
+an unauthorized exact effort declaration blocks as `declared-effort-mismatch`;
+missing proof is nonblocking `unconfirmable`. Current transcript formats have
+no documented observed-effort extractor, so supported real records retain
+`observed-effort=-` and are unconfirmable rather than confirmed. I073 alone
+owns the public flavor-to-harness rename.
+
+## Execution modes
+
+subagent-driven is the default for planned build work. ultracode is for work whose shape demands parallel orchestration (unknown-size discovery, cross-cutting audits, N-perspective verification); opt-in is granted by the owner's ticket approval, mid-build escalation is recommend-only. inline is the rare justified exception — tightly-coupled sequential chains, verbatim pre-specified diffs, live-system/secret/interactive steps — and requires a one-line justification in the ticket.

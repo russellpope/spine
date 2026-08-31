@@ -216,6 +216,24 @@ func decodeTable(raw []byte) (table, error) {
 	if err := validateTableTopLevelMembers(raw); err != nil {
 		return table{}, err
 	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return table{}, err
+	}
+	canonical, hasCanonical := members["harnesses"]
+	legacy, hasLegacy := members["flavors"]
+	if hasCanonical == hasLegacy {
+		return table{}, fmt.Errorf("models defaults must contain exactly one harnesses or flavors object")
+	}
+	selected := canonical
+	selectedName := "harnesses"
+	if !hasCanonical {
+		selected = legacy
+		selectedName = "flavors"
+	}
+	if bytes.Equal(bytes.TrimSpace(selected), []byte("null")) {
+		return table{}, fmt.Errorf("models defaults %s must be a non-null object", selectedName)
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var wire tableWire
@@ -228,12 +246,6 @@ func decodeTable(raw []byte) (table, error) {
 			return table{}, fmt.Errorf("multiple JSON values")
 		}
 		return table{}, err
-	}
-	if wire.Harnesses == nil && wire.LegacyFlavors == nil {
-		return table{}, fmt.Errorf("models defaults must contain exactly one harnesses or flavors object")
-	}
-	if wire.Harnesses != nil && wire.LegacyFlavors != nil {
-		return table{}, fmt.Errorf("models defaults must not contain both harnesses and flavors")
 	}
 	harnesses := wire.Harnesses
 	if harnesses == nil {

@@ -111,7 +111,7 @@ func TestCurrentWorkflowIsStamped(t *testing.T) {
 	if !strings.Contains(got, "template_version: 2") {
 		t.Error("current WORKFLOW template lacks template_version stamp")
 	}
-	// I036: the mirror rows are table-rendered dotted flavor keys (D8).
+	// I036: the mirror rows are table-rendered dotted harness keys (D8).
 	if !strings.Contains(got, "claude.primary:") || !strings.Contains(got, "claude-fable-5") {
 		t.Error("current WORKFLOW template lacks the model_routing mirror")
 	}

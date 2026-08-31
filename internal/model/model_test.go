@@ -759,6 +759,7 @@ func TestValidateTableModelValidationRejectsInvalidPolicy(t *testing.T) {
 
 func TestValidateTableModelValidationRejectsUnknownJSONMembers(t *testing.T) {
 	_, err := decodeTable([]byte(`{
+		"harnesses": {},
 		"modelValidation": {
 			"idPattern": "^[a-z]+$",
 			"forbiddenTokens": ["auto"],
@@ -845,11 +846,16 @@ func TestDecodeTableAcceptsOneHarnessesOrLegacyFlavorsObject(t *testing.T) {
 	}
 	for _, input := range [][]byte{
 		[]byte(`{"harnesses":{},"flavors":{}}`),
+		[]byte(`{"harnesses":{},"flavors":null}`),
+		[]byte(`{"harnesses":null,"flavors":{}}`),
+		[]byte(`{"harnesses":null}`),
+		[]byte(`{"flavors":null}`),
 		[]byte(`{}`),
 		[]byte(`{"Harnesses":{}}`),
+		[]byte(`{"harnesses":{},"Harnesses":{}}`),
 	} {
 		if _, err := decodeTable(input); err == nil {
-			t.Fatalf("decodeTable(%s) accepted an ambiguous or missing model table", input)
+			t.Fatalf("decodeTable(%s) accepted a missing, null, ambiguous, or case-variant model table", input)
 		}
 	}
 }

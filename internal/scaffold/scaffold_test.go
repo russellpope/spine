@@ -103,7 +103,7 @@ func TestInitGen6DispatchContract(t *testing.T) {
 	}
 	content := string(wf)
 
-	// I036: the mirror renders every (flavor, tier) of the model table as
+	// I036: the mirror renders every (harness, tier) of the model table as
 	// dotted rows (design D8) — asserted via the table's own renderer so a
 	// defaults change needs no edit here. The retired effort: key's tier
 	// defaults now live in the table (D3/D16), no longer stated in prose.

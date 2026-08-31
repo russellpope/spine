@@ -99,7 +99,7 @@ declares exactly one.
   default (primary=high, routine=medium, mechanical=low, fallback=high)
   (amended 2026-07-10, final review); per-ticket overrides follow the
   escalation rule. A model-table entry may carry its own effort, overriding
-  the tier default for that (flavor, tier) — the tier's default effort does
+  the tier default for that (harness, tier) — the tier's default effort does
   not always produce the expected behavior from a given model. Resolution
   always yields a determinate effort; an entry that omits one inherits the
   tier default rather than deferring to a runtime's own setting. "xhigh
@@ -261,7 +261,7 @@ declares exactly one.
   model. Declared evidence; superseded by the dispatched agent's own actuals
   when linkable.
 - **orchestrator session** — any session containing dispatch records. Its
-  own models are never ticket evidence, in any flavor; only what it
+  own models are never ticket evidence, in any harness; only what it
   dispatches counts. Generalizes the Claude reader's main-session rule.
   _Avoid_: lead session (herdr/cmux role name, narrower than this concept).
 - **worker session** — a top-level codex session attributed to a ticket

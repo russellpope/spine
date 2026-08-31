@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- codex fixture helpers ---
@@ -205,7 +206,7 @@ func TestCodexBareOrIncompleteRecordsDoNotFabricateCompleteDeclaration(t *testin
 			"task_name": "I075 model missing", "reasoning_effort": "medium",
 		}),
 		codexFunctionCallLineWithID("spawn_agent", "call-incomplete", map[string]string{
-			"task_name": "I075 incomplete", "model": "gpt-5.6-terra",
+			"task_name": "I075 incomplete", "model": "gpt-5.6-terra", "harness": "codex",
 		}),
 	}, "\n"))
 	got, ok := parseCodexBytes("fixture.jsonl", data, new([]string))
@@ -224,6 +225,30 @@ func TestCodexBareOrIncompleteRecordsDoNotFabricateCompleteDeclaration(t *testin
 	}}, ledger{})
 	if expected != "-" || declared != "medium" || status != "unconfirmable" || observed != "-" {
 		t.Fatalf("coarse Codex source declaration = expected=%q declared=%q status=%q observed=%q, want -/medium/unconfirmable/-", expected, declared, status, observed)
+	}
+}
+
+// Session normalization supplies transcript provenance, never a raw controller
+// declaration. This exercises readCodexSessions rather than parseCodexBytes so
+// a mechanical field rename cannot put source back into dispatch.harness.
+func TestReadCodexSessionsIncompleteSpawnKeepsSourceWithoutRawHarness(t *testing.T) {
+	repo, codexDir := t.TempDir(), t.TempDir()
+	writeCodexFile(t, filepath.Join(codexDir, "lead.jsonl"),
+		codexSessionMetaLine("root", "root", "", repo, "user", topLevelSource),
+		codexFunctionCallLineWithID("spawn_agent", "call-incomplete", map[string]string{
+			"task_name": "I075 incomplete", "model": "gpt-5.6-terra", "harness": "codex",
+		}),
+	)
+	dispatches, _, _, _ := readCodexSessions(codexDir, repo, time.Time{}, "", []string{"I075"}, new([]string))
+	if len(dispatches) != 1 {
+		t.Fatalf("readCodexSessions() dispatches=%+v, want one unfiltered dispatch", dispatches)
+	}
+	d := dispatches[0]
+	if d.source != "codex" {
+		t.Fatalf("incomplete spawn source = %q, want codex", d.source)
+	}
+	if d.harness != "" {
+		t.Fatalf("incomplete spawn raw harness = %q, want absent declaration", d.harness)
 	}
 }
 

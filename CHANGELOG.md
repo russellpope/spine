@@ -31,6 +31,13 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Changed
 
+- **The model table now calls its first axis a harness.** `spine model` help
+  and diagnostics use the canonical term, defaults write `harnesses`, and
+  generation 14 updates active workflow wording without changing route values
+  or `functional_harness`. JSON retains equal deprecated `flavor` fields and
+  the defaults reader accepts exactly one legacy `flavors` or canonical
+  `harnesses` object for the compatibility window. (I073)
+
 - **No subcommand silently discards input.** The I116 ordering guard is
   generalized to every parsing subcommand via a shared strict-parse helper:
   a flag after a positional errors `flags must precede positionals` naming

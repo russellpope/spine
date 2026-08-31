@@ -454,7 +454,7 @@ func scanCodexLine(line []byte, st *codexScanState) bool {
 					} else if effort = args["effort"]; effort != "" {
 						effortSource = "effort"
 					}
-					harness := args["harness"]
+					harness := ""
 					// A native spawn_agent function call is itself the Codex raw
 					// controller vehicle. Only its explicit model and effort fields
 					// complete the declaration; transcript source alone never does.
@@ -963,7 +963,6 @@ func readCodexSessions(dir, repoDir string, since time.Time, sessionID string, t
 		root := res.meta.rootID()
 		for i := range res.dispatches {
 			res.dispatches[i].toolUseID = "codex:" + root
-			res.dispatches[i].harness = "codex"
 			res.dispatches[i].source = "codex"
 			res.dispatches[i].sourceFile = path
 			res.dispatches[i].identity.source = "codex"
