@@ -760,6 +760,7 @@ func TestValidateTableModelValidationRejectsInvalidPolicy(t *testing.T) {
 func TestValidateTableModelValidationRejectsUnknownJSONMembers(t *testing.T) {
 	_, err := decodeTable([]byte(`{
 		"harnesses": {},
+		"tierDefaultEffortByHarness": {},
 		"modelValidation": {
 			"idPattern": "^[a-z]+$",
 			"forbiddenTokens": ["auto"],
@@ -840,23 +841,54 @@ func TestDecodeTableAcceptsOneHarnessesOrLegacyFlavorsObject(t *testing.T) {
 	if _, err := decodeTable(canonical); err != nil {
 		t.Fatalf("decodeTable canonical harnesses: %v", err)
 	}
-	legacy := []byte(strings.Replace(string(raw), `"harnesses":`, `"flavors":`, 1))
-	if _, err := decodeTable(legacy); err != nil {
-		t.Fatalf("decodeTable legacy flavors: %v", err)
-	}
 	for _, input := range [][]byte{
 		[]byte(`{"harnesses":{},"flavors":{}}`),
+		[]byte(`{"harnesses":{},"tierDefaultEffortByHarness":{},"tierDefaultEffortByFlavor":{}}`),
 		[]byte(`{"harnesses":{},"flavors":null}`),
 		[]byte(`{"harnesses":null,"flavors":{}}`),
-		[]byte(`{"harnesses":null}`),
-		[]byte(`{"flavors":null}`),
+		[]byte(`{"harnesses":null,"tierDefaultEffortByHarness":{}}`),
+		[]byte(`{"flavors":null,"tierDefaultEffortByFlavor":{}}`),
+		[]byte(`{"harnesses":{},"tierDefaultEffortByFlavor":{}}`),
+		[]byte(`{"flavors":{},"tierDefaultEffortByHarness":{}}`),
+		[]byte(`{"harnesses":{}}`),
+		[]byte(`{"flavors":{}}`),
+		[]byte(`{"tierDefaultEffortByHarness":{}}`),
+		[]byte(`{"tierDefaultEffortByFlavor":{}}`),
 		[]byte(`{}`),
 		[]byte(`{"Harnesses":{}}`),
 		[]byte(`{"harnesses":{},"Harnesses":{}}`),
+		[]byte(`{"harnesses":{},"TierDefaultEffortByHarness":{}}`),
+		[]byte(`{"harnesses":[],"tierDefaultEffortByHarness":{}}`),
+		[]byte(`{"harnesses":{},"tierDefaultEffortByHarness":[]}`),
 	} {
 		if _, err := decodeTable(input); err == nil {
 			t.Fatalf("decodeTable(%s) accepted a missing, null, ambiguous, or case-variant model table", input)
 		}
+	}
+}
+
+// The generation-13 source blob used the two legacy top-level names together.
+// Reading it must produce the same canonical in-memory table as generation 14;
+// replacing only the table-axis key would instead test an impossible hybrid.
+func TestDecodeTableNormalizesExactGeneration13DefaultsPair(t *testing.T) {
+	canonicalRaw, err := models.FS.ReadFile("defaults.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := decodeTable(canonicalRaw)
+	if err != nil {
+		t.Fatalf("decodeTable canonical defaults: %v", err)
+	}
+	legacyRaw, err := os.ReadFile(filepath.Join("testdata", "defaults-gen13.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := decodeTable(legacyRaw)
+	if err != nil {
+		t.Fatalf("decodeTable exact generation-13 defaults: %v", err)
+	}
+	if !reflect.DeepEqual(legacy, canonical) {
+		t.Fatalf("generation-13 defaults normalize differently from canonical generation-14 defaults\nlegacy: %#v\ncanonical: %#v", legacy, canonical)
 	}
 }
 

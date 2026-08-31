@@ -15,7 +15,7 @@ Behaviour changes visible to repos that consume `spine`. Format follows
   patch-only skew quiet. It is a warning-only proxy for the importer condition,
   not a gate preflight or a claim that the binary cannot run. (I108, ADR 0021)
 - **`spine audit routing` recognizes openweights models in Claude-layout transcripts.**
-  The audit now derives each evidence token's flavor from its observed model id,
+  The audit now derives each evidence token's harness from its observed model id,
   so mixed Claude and openweights sessions resolve against the correct model
   tables. Transcript source still breaks ambiguous-id ties and preserves unknown-id
   behavior. D28 repo qualification remains attached to the Claude transcript
@@ -80,7 +80,7 @@ Behaviour changes visible to repos that consume `spine`. Format follows
   generation 13 publishes the workflow grammar. (I078)
 
 - **Fail-closed active model validation.** `spine model [--dir D] validate
-  [--expect MODEL_ID] <flavor> <tier>` reads one repository snapshot and emits
+  [--expect MODEL_ID] <harness> <tier>` reads one repository snapshot and emits
   only the exact active ID. It refuses forbidden, unsafe, retired,
   wrong-tier, and unmapped IDs with stable exit-1 reasons; malformed
   invocation or repository policy exits 2; failures write no stdout. I119's
@@ -126,7 +126,7 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 - **`spine model` names the flag-ordering rule at the point of failure.** A
   flag placed after the positionals (or standing in for one) previously
-  printed bare usage or an unknown-tier error, reading as a broken flavor;
+  printed bare usage or an unknown-tier error, reading as a broken harness;
   it now errors `flags must precede positionals (saw … after …)` naming the
   offending token. The leading-flag form is unchanged. (I116)
 - **The implement-tick zero-evidence message no longer misdirects to a
@@ -148,19 +148,19 @@ Behaviour changes visible to repos that consume `spine`. Format follows
   guarded by a comment; and a fence-less ticket's silence is pinned by a test.
   (I115)
 
-- **An `openweights` model flavor.** `spine model openweights <primary|routine|mechanical|fallback>`
+- **An `openweights` model-table harness.** `spine model openweights <primary|routine|mechanical|fallback>`
   resolves to `FW-Kimi-K3`, `DeepSeek-V4-Pro`, `FW-GLM-5.2` and `FW-Kimi-K3`, every
   tier at effort `high` — `routine` and `mechanical` included, which the global tier
   defaults would otherwise give `medium` and `low`. `fallback` deliberately shares
-  `primary`'s model: the flavor exists to measure open-weights models, so a refusal
+  `primary`'s model: the model-table harness exists to measure open-weights models, so a refusal
   re-run must not silently leave open weights. Repos override these rows in
-  `WORKFLOW.md` like any other flavor's. Resolution for `claude`, `codex` and `pi` is
+  `WORKFLOW.md` like any other harness's. Resolution for `claude`, `codex` and `pi` is
   unchanged. (I110)
 
 ### Changed
 
 - **Every repo's `model_routing` block reflows on the next `spine update`.** The mirror
-  pads its key column to the longest `flavor.tier` key, and `openweights.mechanical:`
+  pads its key column to the longest `harness.tier` key, and `openweights.mechanical:`
   is longer than anything that came before, so all pre-existing rows gain padding.
   This is whitespace only — no id, effort or provenance changes, and no row is
   refreshed, overridden or reported — but it does mean one unavoidable diff in a file

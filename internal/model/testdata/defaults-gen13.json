@@ -1,0 +1,141 @@
+{
+  "tierDefaultEffort": {
+    "primary": "high",
+    "routine": "medium",
+    "mechanical": "low",
+    "fallback": "high"
+  },
+  "tierDefaultEffortByFlavor": {
+    "openweights": {
+      "primary": "high",
+      "routine": "high",
+      "mechanical": "high",
+      "fallback": "high"
+    },
+    "pi": {
+      "primary": "xhigh",
+      "routine": "medium",
+      "mechanical": "low",
+      "fallback": "xhigh"
+    }
+  },
+  "effortVocabulary": {
+    "pi": ["low", "medium", "xhigh"]
+  },
+  "modelValidation": {
+    "idPattern": "^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,127}$",
+    "forbiddenTokens": [
+      "auto", "default", "latest",
+      "fable", "opus", "sonnet", "haiku",
+      "sol", "terra", "luna",
+      "kimi-k3", "deepseek-v4-pro", "glm-5.2",
+      "qwen3.8", "qwen"
+    ],
+    "forbiddenPatterns": [
+      {"name": "generic-selector", "re": "(?i)^(auto|default|latest)$"},
+      {"name": "bare-family", "re": "(?i)^(fable|opus|sonnet|haiku|sol|terra|luna|qwen)$"},
+      {"name": "vendor-auto", "re": "(?i)(^|[-._/:])auto($|[-._/:])"}
+    ]
+  },
+  "flavors": {
+    "claude": {
+      "primary": {
+        "id": "claude-fable-5",
+        "aliases": ["claude-fable-5", "fable"],
+        "history": []
+      },
+      "routine": {
+        "id": "claude-opus-5",
+        "effort": "low",
+        "aliases": ["claude-opus-5", "opus"],
+        "history": [{"id": "claude-sonnet-5"}]
+      },
+      "mechanical": {
+        "id": "claude-haiku-4-5",
+        "aliases": ["claude-haiku-4-5", "haiku"],
+        "history": []
+      },
+      "fallback": {
+        "id": "claude-opus-5",
+        "aliases": ["claude-opus-5", "opus"],
+        "history": [{"id": "claude-opus-4-8"}]
+      }
+    },
+    "codex": {
+      "primary": {
+        "id": "gpt-5.6-sol",
+        "effort": "xhigh",
+        "aliases": ["gpt-5.6-sol", "sol"],
+        "history": []
+      },
+      "routine": {
+        "id": "gpt-5.6-terra",
+        "aliases": ["gpt-5.6-terra", "terra"],
+        "history": []
+      },
+      "mechanical": {
+        "id": "gpt-5.6-luna",
+        "aliases": ["gpt-5.6-luna", "luna"],
+        "history": []
+      },
+      "fallback": {
+        "id": "gpt-5.6-terra",
+        "effort": "xhigh",
+        "aliases": ["gpt-5.6-terra", "terra"],
+        "history": []
+      }
+    },
+    "openweights": {
+      "primary": {
+        "id": "FW-Kimi-K3",
+        "aliases": ["FW-Kimi-K3", "kimi-k3"],
+        "history": []
+      },
+      "routine": {
+        "id": "DeepSeek-V4-Pro",
+        "aliases": ["DeepSeek-V4-Pro", "deepseek-v4-pro"],
+        "history": []
+      },
+      "mechanical": {
+        "id": "FW-GLM-5.2",
+        "aliases": ["FW-GLM-5.2", "glm-5.2"],
+        "history": []
+      },
+      "fallback": {
+        "id": "FW-Kimi-K3",
+        "aliases": ["FW-Kimi-K3", "kimi-k3"],
+        "history": []
+      }
+    },
+    "pi": {
+      "primary": {
+        "id": "qwen3.8-27b-q8_0",
+        "effort": "xhigh",
+        "aliases": ["qwen3.8", "qwen"],
+        "alternate": {"id": "qwen3.8-27b-q8_0", "effort": "xhigh"},
+        "history": []
+      },
+      "routine": {
+        "id": "qwen3.8-27b-q8_0",
+        "effort": "medium",
+        "aliases": ["qwen3.8", "qwen"],
+        "alternate": {"id": "qwen3.8-27b-q8_0", "effort": "xhigh"},
+        "history": []
+      },
+      "mechanical": {
+        "id": "qwen3.8-27b-q8_0",
+        "effort": "low",
+        "aliases": ["qwen3.8", "qwen"],
+        "alternate": {"id": "qwen3.8-27b-q8_0", "effort": "xhigh"},
+        "history": []
+      },
+      "fallback": {
+        "id": "qwen3.8-27b-q8_0",
+        "effort": "xhigh",
+        "aliases": ["qwen3.8", "qwen"],
+        "alternate": {"id": "qwen3.8-27b-q8_0", "effort": "xhigh"},
+        "history": []
+      }
+    }
+  }
+}

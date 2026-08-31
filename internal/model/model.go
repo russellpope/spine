@@ -181,12 +181,13 @@ type table struct {
 // legacy flavors object remains readable until the fleet compatibility window
 // closes in a later generation.
 type tableWire struct {
-	TierDefaultEffort          map[string]string                `json:"tierDefaultEffort"`
-	TierDefaultEffortByHarness map[string]map[string]string     `json:"tierDefaultEffortByHarness"`
-	EffortVocabulary           map[string][]string              `json:"effortVocabulary"`
-	ModelValidation            *modelValidationPolicy           `json:"modelValidation"`
-	Harnesses                  map[string]map[string]tableEntry `json:"harnesses"`
-	LegacyFlavors              map[string]map[string]tableEntry `json:"flavors"`
+	TierDefaultEffort               map[string]string                `json:"tierDefaultEffort"`
+	TierDefaultEffortByHarness      map[string]map[string]string     `json:"tierDefaultEffortByHarness"`
+	LegacyTierDefaultEffortByFlavor map[string]map[string]string     `json:"tierDefaultEffortByFlavor"`
+	EffortVocabulary                map[string][]string              `json:"effortVocabulary"`
+	ModelValidation                 *modelValidationPolicy           `json:"modelValidation"`
+	Harnesses                       map[string]map[string]tableEntry `json:"harnesses"`
+	LegacyFlavors                   map[string]map[string]tableEntry `json:"flavors"`
 }
 
 var defaults = mustLoadDefaults()
@@ -220,19 +221,25 @@ func decodeTable(raw []byte) (table, error) {
 	if err := json.Unmarshal(raw, &members); err != nil {
 		return table{}, err
 	}
-	canonical, hasCanonical := members["harnesses"]
-	legacy, hasLegacy := members["flavors"]
-	if hasCanonical == hasLegacy {
+	canonicalHarnesses, hasCanonicalHarnesses := members["harnesses"]
+	legacyFlavors, hasLegacyFlavors := members["flavors"]
+	if hasCanonicalHarnesses == hasLegacyFlavors {
 		return table{}, fmt.Errorf("models defaults must contain exactly one harnesses or flavors object")
 	}
-	selected := canonical
-	selectedName := "harnesses"
-	if !hasCanonical {
-		selected = legacy
-		selectedName = "flavors"
+	canonicalEfforts, hasCanonicalEfforts := members["tierDefaultEffortByHarness"]
+	legacyEfforts, hasLegacyEfforts := members["tierDefaultEffortByFlavor"]
+	if hasCanonicalEfforts == hasLegacyEfforts {
+		return table{}, fmt.Errorf("models defaults must contain exactly one tierDefaultEffortByHarness or tierDefaultEffortByFlavor object")
 	}
-	if bytes.Equal(bytes.TrimSpace(selected), []byte("null")) {
-		return table{}, fmt.Errorf("models defaults %s must be a non-null object", selectedName)
+	if hasCanonicalHarnesses != hasCanonicalEfforts {
+		return table{}, fmt.Errorf("models defaults must contain a coherent generation-14 harnesses/tierDefaultEffortByHarness or generation-13 flavors/tierDefaultEffortByFlavor pair")
+	}
+	if hasCanonicalHarnesses {
+		if bytes.Equal(bytes.TrimSpace(canonicalHarnesses), []byte("null")) || bytes.Equal(bytes.TrimSpace(canonicalEfforts), []byte("null")) {
+			return table{}, fmt.Errorf("models defaults generation-14 pair members must be non-null objects")
+		}
+	} else if bytes.Equal(bytes.TrimSpace(legacyFlavors), []byte("null")) || bytes.Equal(bytes.TrimSpace(legacyEfforts), []byte("null")) {
+		return table{}, fmt.Errorf("models defaults generation-13 pair members must be non-null objects")
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -248,12 +255,14 @@ func decodeTable(raw []byte) (table, error) {
 		return table{}, err
 	}
 	harnesses := wire.Harnesses
-	if harnesses == nil {
+	efforts := wire.TierDefaultEffortByHarness
+	if hasLegacyFlavors {
 		harnesses = wire.LegacyFlavors
+		efforts = wire.LegacyTierDefaultEffortByFlavor
 	}
 	return table{
 		TierDefaultEffort:          wire.TierDefaultEffort,
-		TierDefaultEffortByHarness: wire.TierDefaultEffortByHarness,
+		TierDefaultEffortByHarness: efforts,
 		EffortVocabulary:           wire.EffortVocabulary,
 		ModelValidation:            wire.ModelValidation,
 		Harnesses:                  harnesses,
@@ -269,7 +278,7 @@ func validateTableTopLevelMembers(raw []byte) error {
 		return fmt.Errorf("models defaults must be an object")
 	}
 	allowed := map[string]struct{}{
-		"tierDefaultEffort": {}, "tierDefaultEffortByHarness": {}, "effortVocabulary": {},
+		"tierDefaultEffort": {}, "tierDefaultEffortByHarness": {}, "tierDefaultEffortByFlavor": {}, "effortVocabulary": {},
 		"modelValidation": {}, "harnesses": {}, "flavors": {},
 	}
 	for name := range members {

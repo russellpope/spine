@@ -122,7 +122,11 @@ The coupling is thin by design. maikanban only needs the ledger file convention 
 ## Caveats
 
 - `spine audit routing` reads transcripts where the harnesses write them: `~/.claude/projects/<slug>` for Claude Code and `~/.codex/sessions` (or `$CODEX_HOME`) for Codex. Those formats are undocumented upstream and drift; the audit tracks them but may lag a harness release.
-- **Known gap:** the audit derives the harness from the *transcript source*, so `openweights` dispatches — which run Claude Code and therefore land in the Claude transcript layout — are currently judged against the `claude` tier table, where their model ids do not appear. Until **I111** lands, treat routing verdicts on open-weights runs as unreliable. Every other harness is unaffected.
+- `spine audit routing` derives the harness from the observed model identity.
+  When an identity is declared by more than one harness, transcript source is
+  the tiebreaker; source is not itself a harness selector. This keeps
+  `openweights` dispatches in the Claude transcript layout mapped to their
+  declared model-table harness.
 - The workflow templates assume the superpowers plugin's `.superpowers/sdd/` layout for progress files and checkpoints.
 - Developed and used on macOS; the code is portable Go with no cgo, but other platforms get little testing.
 
