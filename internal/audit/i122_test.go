@@ -437,6 +437,105 @@ func TestWorkflowInvalidEventShapesNeverSupplyRoutingEvidence(t *testing.T) {
 	}
 }
 
+// Nested tool-use fields cross the workflow validator into parseLine, where
+// encoding/json would otherwise case-fold aliases and apply last-member-wins.
+// Each of these mutations must instead discard the whole carrier, independent
+// of member order, so no nested dispatch or assistant model becomes evidence.
+func TestWorkflowNestedSemanticKeysFailClosedBeforeGenericDispatchParsing(t *testing.T) {
+	validInput := `{"description":"I121 nested dispatch","prompt":"Implement I121","model":"claude-haiku-4-5","command":"herdr agent start worker --kind claude -- claude --model claude-haiku-4-5 I121"}`
+	tests := []struct {
+		name  string
+		block string
+	}{
+		{name: "exact duplicate content type", block: `{"type":"tool_use","type":"text","id":"tool-1","name":"Agent","input":` + validInput + `}`},
+		{name: "content type alias first", block: `{"TYPE":"text","type":"tool_use","id":"tool-1","name":"Agent","input":` + validInput + `}`},
+		{name: "content type alias last", block: `{"type":"tool_use","TYPE":"text","id":"tool-1","name":"Agent","input":` + validInput + `}`},
+		{name: "exact duplicate tool id", block: `{"type":"tool_use","id":"tool-1","id":"tool-2","name":"Agent","input":` + validInput + `}`},
+		{name: "tool id alias first", block: `{"type":"tool_use","ID":"tool-2","id":"tool-1","name":"Agent","input":` + validInput + `}`},
+		{name: "tool id alias last", block: `{"type":"tool_use","id":"tool-1","ID":"tool-2","name":"Agent","input":` + validInput + `}`},
+		{name: "exact duplicate tool name", block: `{"type":"tool_use","id":"tool-1","name":"noop","name":"Agent","input":` + validInput + `}`},
+		{name: "tool name alias first", block: `{"type":"tool_use","id":"tool-1","NAME":"Agent","name":"noop","input":` + validInput + `}`},
+		{name: "tool name alias last", block: `{"type":"tool_use","id":"tool-1","name":"noop","NAME":"Agent","input":` + validInput + `}`},
+		{name: "exact duplicate tool input", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"description":"ignore"},"input":` + validInput + `}`},
+		{name: "tool input alias first", block: `{"type":"tool_use","id":"tool-1","name":"Agent","INPUT":` + validInput + `,"input":{"description":"ignore"}}`},
+		{name: "tool input alias last", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"description":"ignore"},"INPUT":` + validInput + `}`},
+		{name: "exact duplicate description", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"description":"ignore","description":"I121 nested dispatch","prompt":"Implement I121","model":"claude-haiku-4-5"}}`},
+		{name: "description alias first", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"DESCRIPTION":"I121 nested dispatch","description":"ignore","prompt":"Implement I121","model":"claude-haiku-4-5"}}`},
+		{name: "description alias last", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"description":"ignore","DESCRIPTION":"I121 nested dispatch","prompt":"Implement I121","model":"claude-haiku-4-5"}}`},
+		{name: "exact duplicate prompt", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"description":"I121 nested dispatch","prompt":"ignore","prompt":"Implement I121","model":"claude-haiku-4-5"}}`},
+		{name: "prompt alias first", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"description":"I121 nested dispatch","PROMPT":"Implement I121","prompt":"ignore","model":"claude-haiku-4-5"}}`},
+		{name: "prompt alias last", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"description":"I121 nested dispatch","prompt":"ignore","PROMPT":"Implement I121","model":"claude-haiku-4-5"}}`},
+		{name: "exact duplicate model", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"description":"I121 nested dispatch","prompt":"Implement I121","model":"claude-sonnet-5","model":"claude-haiku-4-5"}}`},
+		{name: "model alias first", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"description":"I121 nested dispatch","prompt":"Implement I121","MODEL":"claude-haiku-4-5","model":"claude-sonnet-5"}}`},
+		{name: "model alias last", block: `{"type":"tool_use","id":"tool-1","name":"Agent","input":{"description":"I121 nested dispatch","prompt":"Implement I121","model":"claude-sonnet-5","MODEL":"claude-haiku-4-5"}}`},
+		{name: "exact duplicate command", block: `{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"echo ignore","command":"herdr agent start worker --kind claude -- claude --model claude-haiku-4-5 I121"}}`},
+		{name: "command alias first", block: `{"type":"tool_use","id":"tool-1","name":"Bash","input":{"COMMAND":"herdr agent start worker --kind claude -- claude --model claude-haiku-4-5 I121","command":"echo ignore"}}`},
+		{name: "command alias last", block: `{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"echo ignore","COMMAND":"herdr agent start worker --kind claude -- claude --model claude-haiku-4-5 I121"}}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I121": "routine", "I122": "primary"})
+			transcripts := t.TempDir()
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I122", "", "workflow-subagent")
+			path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+			raw := fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":"Implement I122"}}`+"\n"+
+				`{"type":"assistant","cwd":%q,"message":{"role":"assistant","model":"claude-fable-5","content":[%s]}}`+"\n", repo, repo, tc.block)
+			if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var firstWarnings []string
+			for attempt := 0; attempt < 3; attempt++ {
+				rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+				if err != nil {
+					t.Fatal(err)
+				}
+				rows := rowsByID(t, rep)
+				for _, id := range []string{"I121", "I122"} {
+					if row := rows[id]; row.Verdict != VerdictNoTranscript || len(row.Actuals) != 0 {
+						t.Fatalf("attempt %d: %s = %+v, want no routing evidence from an ambiguous nested member", attempt, id, row)
+					}
+				}
+				if !warningContains(rep.Warnings, "1 malformed line(s) skipped") {
+					t.Fatalf("attempt %d: warnings = %q, want one stable malformed workflow warning", attempt, rep.Warnings)
+				}
+				if attempt == 0 {
+					firstWarnings = rep.Warnings
+				} else if !reflect.DeepEqual(rep.Warnings, firstWarnings) {
+					t.Fatalf("attempt %d: warnings = %q, want stable %q", attempt, rep.Warnings, firstWarnings)
+				}
+			}
+		})
+	}
+}
+
+func TestWorkflowNestedSemanticKeyValidationPreservesUnrelatedToolFields(t *testing.T) {
+	repo := t.TempDir()
+	writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I121": "routine", "I122": "primary"})
+	transcripts := t.TempDir()
+	writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I122", "", "workflow-subagent")
+	path := filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl")
+	raw := fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":"Implement I122"}}`+"\n"+
+		`{"type":"assistant","cwd":%q,"message":{"role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"tool-1","name":"Agent","cache_control":{"type":"ephemeral"},"input":{"description":"I121 nested dispatch","prompt":"Implement I121","model":"claude-haiku-4-5","opaque_input":{"trace":"retain"}}}]}}`+"\n", repo, repo)
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := rowsByID(t, rep)
+	if row := rows["I121"]; row.Verdict != VerdictSilentDescent || !reflect.DeepEqual(row.Actuals, []string{"claude-haiku-4-5"}) {
+		t.Fatalf("I121 = %+v, want the valid nested Agent dispatch despite unrelated fields", row)
+	}
+	if row := rows["I122"]; row.Verdict != VerdictMatch {
+		t.Fatalf("I122 = %+v, want the transcript model from the valid assistant carrier", row)
+	}
+}
+
 func TestWorkflowFirstValidUserEventLatchesAfterMalformedCarrier(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -2405,7 +2405,7 @@ func parseWorkflowEvent(line []byte) (workflowEvent, bool) {
 }
 
 func unmarshalWorkflowEvent(data []byte, dst any) (bool, error) {
-	return unmarshalUniqueJSONWithMemberValidator(data, dst, func(path []string, name string) bool {
+	duplicate, err := unmarshalUniqueJSONWithMemberValidator(data, dst, func(path []string, name string) bool {
 		switch {
 		case len(path) == 0:
 			return caseVariantJSONMember(name, "type", "cwd", "message")
@@ -2417,6 +2417,60 @@ func unmarshalWorkflowEvent(data []byte, dst any) (bool, error) {
 			return false
 		}
 	})
+	if duplicate || err != nil {
+		return duplicate, err
+	}
+
+	// parseLine decodes only tool_use blocks, but encoding/json case-folds
+	// their struct fields. Validate precisely that subset before parseLine sees
+	// it, keeping unrelated content-block and tool-input fields compatible.
+	var carrier struct {
+		Type    string `json:"type"`
+		Message *struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(data, &carrier); err != nil {
+		return false, err
+	}
+	if carrier.Type != "assistant" || carrier.Message == nil {
+		return false, nil
+	}
+	return validateWorkflowToolUseMembers(carrier.Message.Content)
+}
+
+// validateWorkflowToolUseMembers rejects aliases for the fields parseLine
+// consumes as routing evidence. It deliberately inspects only blocks whose
+// exact type is tool_use, and only the immediate input members parseLine uses.
+func validateWorkflowToolUseMembers(content json.RawMessage) (bool, error) {
+	var blocks []json.RawMessage
+	if json.Unmarshal(content, &blocks) != nil {
+		return false, nil // workflowAssistantMessageContent reports the malformed shape
+	}
+	for _, block := range blocks {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(block, &fields) != nil {
+			return false, nil // workflowAssistantMessageContent reports the malformed shape
+		}
+		var blockType string
+		if json.Unmarshal(fields["type"], &blockType) != nil || blockType != "tool_use" {
+			continue
+		}
+		duplicate, err := unmarshalUniqueJSONWithMemberValidator(block, &struct{}{}, func(path []string, name string) bool {
+			switch {
+			case len(path) == 0:
+				return caseVariantJSONMember(name, "type", "id", "name", "input")
+			case len(path) == 1 && path[0] == "input":
+				return caseVariantJSONMember(name, "description", "prompt", "model", "command")
+			default:
+				return false
+			}
+		})
+		if duplicate || err != nil {
+			return duplicate, err
+		}
+	}
+	return false, nil
 }
 
 // workflowUserMessageText preserves the string and text-block forms observed
