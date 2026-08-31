@@ -1,6 +1,7 @@
 package yield
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -198,5 +199,83 @@ func TestAggregateCountsOnlyCompleteModelTierEscalationsAndFallbacks(t *testing.
 	}
 	if report.Totals.Escalations != 1 || report.Totals.Fallbacks != 1 {
 		t.Fatalf("totals=%+v", report.Totals)
+	}
+}
+
+func makeFleetRepository(t *testing.T, parent, name, ledger string) string {
+	t.Helper()
+	dir := filepath.Join(parent, name)
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if ledger != "" {
+		writeLedger(t, dir, ledger)
+	}
+	return dir
+}
+
+func TestFleetReadsImmediatePrimaryRepositoriesOnceAndKeepsChildrenIsolated(t *testing.T) {
+	fleet := t.TempDir()
+	writeLedger(t, fleet, "REVIEW I999 harness:claude model:parent-only tier:primary round:1 verdict:accepted scope:task")
+	makeFleetRepository(t, fleet, "zeta", "REVIEW I076 harness:codex model:shared tier:routine round:1 verdict:accepted scope:task")
+	makeFleetRepository(t, fleet, "alpha", "REVIEW I076 harness:codex model:shared tier:routine round:1 verdict:accepted scope:task")
+	makeFleetRepository(t, fleet, "missing", "")
+	broken := makeFleetRepository(t, fleet, "broken", "")
+	if err := os.MkdirAll(filepath.Join(broken, ".superpowers", "sdd", "progress.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(fleet, "linked")
+	if err := os.MkdirAll(linked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(linked, ".git"), []byte("gitdir: elsewhere"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hidden := makeFleetRepository(t, fleet, ".hidden", acceptedTask)
+	nested := makeFleetRepository(t, filepath.Join(hidden, "nested"), "inner", acceptedTask)
+	_ = nested
+	if err := os.Symlink(filepath.Join(fleet, "alpha"), filepath.Join(fleet, "symlink")); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Run(Options{Fleet: fleet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Scope != "fleet" || len(report.Cells) != 1 || report.Cells[0].N != 2 || report.Cells[0].ModelID != "shared" {
+		t.Fatalf("report=%+v", report)
+	}
+	if report.Totals.ValidReviewLines != 2 || report.Totals.IgnoredIdentities != 0 || report.ExitCode() != 1 {
+		t.Fatalf("totals=%+v exit=%d", report.Totals, report.ExitCode())
+	}
+	if got := report.Repositories; len(got) != 4 || got[0] != (RepositoryStatus{Name: "alpha", Status: "ok"}) || got[1] != (RepositoryStatus{Name: "broken", Status: "error"}) || got[2] != (RepositoryStatus{Name: "missing", Status: "missing-ledger"}) || got[3] != (RepositoryStatus{Name: "zeta", Status: "ok"}) {
+		t.Fatalf("repositories=%+v", got)
+	}
+	for _, diagnostic := range report.Diagnostics {
+		if strings.Contains(diagnostic.Message, fleet) || strings.Contains(diagnostic.Message, "parent-only") {
+			t.Fatalf("diagnostic leaked path or ledger content: %+v", diagnostic)
+		}
+	}
+}
+
+func TestFleetRejectsInvalidParentAndDoesNotFollowGitSymlinks(t *testing.T) {
+	parentFile := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(parentFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(Options{Fleet: parentFile}); !errors.Is(err, ErrInvalidRoot) {
+		t.Fatalf("Run invalid fleet error=%v", err)
+	}
+	fleet := t.TempDir()
+	child := filepath.Join(fleet, "symlinked-git")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(fleet, "missing-target"), filepath.Join(child, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(Options{Fleet: fleet})
+	if err != nil || len(report.Repositories) != 0 || report.Totals.ValidReviewLines != 0 {
+		t.Fatalf("report=%+v err=%v", report, err)
 	}
 }

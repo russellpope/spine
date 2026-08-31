@@ -112,7 +112,8 @@ func (r Report) ExitCode() int {
 }
 
 type Options struct {
-	Dir string
+	Dir   string
+	Fleet string
 }
 
 var ErrInvalidRoot = errors.New("invalid yield root")
@@ -120,6 +121,12 @@ var ErrInvalidRoot = errors.New("invalid yield root")
 func Run(opts Options) (Report, error) {
 	if opts.Dir == "" {
 		opts.Dir = "."
+	}
+	if opts.Fleet != "" {
+		if opts.Dir != "." {
+			return Report{}, fmt.Errorf("%w: --dir and --fleet are mutually exclusive", ErrInvalidRoot)
+		}
+		return runFleet(opts.Fleet)
 	}
 	info, err := os.Stat(opts.Dir)
 	if err != nil || !info.IsDir() {
