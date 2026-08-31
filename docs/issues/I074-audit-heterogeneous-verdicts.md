@@ -2,7 +2,8 @@
 id: I074
 title: Audit routing verdicts for heterogeneous dispatches
 severity: med
-status: open
+status: fixed
+commits: [5836ef6, 86d4c55, be2e3e9, 9914e8e, b665095, 430e54b, 8e482a5]
 affects: [audit]
 blocked-by: [I070]
 labels: [wayfinder:task]
@@ -24,12 +25,18 @@ a routine ticket running the host's pinned gpt-5.6-sol is conformant, not an
 escalation. Blocked on [I070](I070-proxied-model-ids-in-claude-transcripts.md)
 for what observed ids exist to confirm against.
 
-## Implementation notes
+## Resolution
 
-I074 implementation is in review. It consumes only complete I075 declarations
-and validated I072 host-local observed IDs, compares final pinned targets, and
-requires complete event identity plus a linked worker event. No current
-transcript format proves observed effort, so supported records remain
-`observed-effort=-` and `unconfirmable`; the confirmed/mismatch matrix is
-exercised through the narrow internal evidence seam. This ticket remains open
-for fresh review and independent verification.
+Fixed 2026-08-30 at final I074 product SHA `8e482a5`. Heterogeneous judgment
+consumes only complete I075 declarations, validated I072 host-local observed
+IDs, the final pinned route, and a completely correlated linked worker event.
+Exact different-route or unauthorized-effort proof blocks; missing, unmapped,
+unavailable, unreachable, or effort-unobserved evidence remains explicit and
+nonblocking `unconfirmable`. Same-identity legacy evidence is not double judged,
+while independent legacy silent descent still blocks. No current transcript
+format proves observed effort, so production retains `observed-effort=-` and
+adds no extractor. A fresh routine review and a different independent routine
+verifier passed the exhaustive matrix, hostile host/identity/output probes,
+full/race/vet/build, Windows compile, and template-migration gates. I073 may now
+perform the public naming migration. The batch-final exact-SHA maipipe lane
+remains the ship gate.
