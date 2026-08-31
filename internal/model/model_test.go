@@ -23,8 +23,8 @@ func writeWorkflow(t *testing.T, content string) string {
 }
 
 // AC: resolution with no repo context returns embedded defaults for every
-// (flavor, tier).
-func TestResolve_NoRepoContext_ReturnsDefaultsForEveryFlavorTier(t *testing.T) {
+// (harness, tier).
+func TestResolve_NoRepoContext_ReturnsDefaultsForEveryHarnessTier(t *testing.T) {
 	want := map[string]map[string]struct{ id, effort string }{
 		"claude": {
 			"primary":    {"claude-fable-5", "high"},
@@ -40,9 +40,9 @@ func TestResolve_NoRepoContext_ReturnsDefaultsForEveryFlavorTier(t *testing.T) {
 		},
 		// I110. Every tier resolves at effort "high", including routine and
 		// mechanical — the two the global tierDefaultEffort would otherwise
-		// give "medium" and "low". That is what tierDefaultEffortByFlavor is
+		// give "medium" and "low". That is what tierDefaultEffortByHarness is
 		// for, and asserting those two specifically is the point of this
-		// block. fallback deliberately shares primary's id: the flavor exists
+		// block. fallback deliberately shares primary's id: the harness exists
 		// to measure open-weights models, so a refusal re-run must not
 		// silently leave open weights.
 		"openweights": {
@@ -59,37 +59,37 @@ func TestResolve_NoRepoContext_ReturnsDefaultsForEveryFlavorTier(t *testing.T) {
 		},
 	}
 	for _, repoDir := range []string{"", "/nonexistent/not-a-repo"} {
-		for _, flavor := range Flavors() {
-			tiers, ok := want[flavor]
+		for _, harness := range Harnesses() {
+			tiers, ok := want[harness]
 			if !ok {
-				t.Fatalf("Flavors() includes %q but the default-resolution test has no expectations for it", flavor)
+				t.Fatalf("Harnesses() includes %q but the default-resolution test has no expectations for it", harness)
 			}
 			for _, tier := range Tiers {
 				exp, ok := tiers[tier]
 				if !ok {
-					t.Fatalf("default-resolution expectations for %q omit tier %q", flavor, tier)
+					t.Fatalf("default-resolution expectations for %q omit tier %q", harness, tier)
 				}
-				entry, err := Resolve(repoDir, flavor, tier)
+				entry, err := Resolve(repoDir, harness, tier)
 				if err != nil {
-					t.Fatalf("Resolve(%q, %q, %q): %v", repoDir, flavor, tier, err)
+					t.Fatalf("Resolve(%q, %q, %q): %v", repoDir, harness, tier, err)
 				}
 				if entry.ID != exp.id || entry.Effort != exp.effort {
 					t.Errorf("Resolve(%q, %q, %q) = {%s, %s}, want {%s, %s}",
-						repoDir, flavor, tier, entry.ID, entry.Effort, exp.id, exp.effort)
+						repoDir, harness, tier, entry.ID, entry.Effort, exp.id, exp.effort)
 				}
 				if entry.Provenance != Default {
-					t.Errorf("Resolve(%q, %q, %q).Provenance = %s, want %s", repoDir, flavor, tier, entry.Provenance, Default)
+					t.Errorf("Resolve(%q, %q, %q).Provenance = %s, want %s", repoDir, harness, tier, entry.Provenance, Default)
 				}
 			}
 		}
 	}
 }
 
-func TestDefaultModelTokensAreDisjointAcrossFlavors(t *testing.T) {
+func TestDefaultModelTokensAreDisjointAcrossHarnesses(t *testing.T) {
 	seen := map[string]string{}
-	for _, flavor := range Flavors() {
+	for _, harness := range Harnesses() {
 		for _, tier := range Tiers {
-			entry := defaults.Flavors[flavor][tier]
+			entry := defaults.Harnesses[harness][tier]
 			tokens := append([]string{entry.ID}, entry.Aliases...)
 			for _, historical := range entry.History {
 				tokens = append(tokens, historical.ID)
@@ -98,11 +98,11 @@ func TestDefaultModelTokensAreDisjointAcrossFlavors(t *testing.T) {
 				if token == "" {
 					continue
 				}
-				if prior, ok := seen[token]; ok && prior != flavor {
-					t.Errorf("model token %q is declared under both %s and %s", token, prior, flavor)
+				if prior, ok := seen[token]; ok && prior != harness {
+					t.Errorf("model token %q is declared under both %s and %s", token, prior, harness)
 					continue
 				}
-				seen[token] = flavor
+				seen[token] = harness
 			}
 		}
 	}
@@ -181,7 +181,7 @@ func TestResolveDispatchTargetUsesFinalResolvedEffortWhenOmitted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := ResolveDispatchTarget(DispatchTargetRequest{RepoDir: dir, Flavor: "pi", Tier: "routine"})
+	got, err := ResolveDispatchTarget(DispatchTargetRequest{RepoDir: dir, Harness: "pi", Tier: "routine"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestResolveDispatchTargetOverridesOnlyEffortAfterSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := ResolveDispatchTarget(DispatchTargetRequest{RepoDir: dir, Flavor: "pi", Tier: "routine", RequestedEffort: "xhigh"})
+	got, err := ResolveDispatchTarget(DispatchTargetRequest{RepoDir: dir, Harness: "pi", Tier: "routine", RequestedEffort: "xhigh"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,10 +208,10 @@ func TestResolveDispatchTargetOverridesOnlyEffortAfterSelection(t *testing.T) {
 	}
 }
 
-func TestResolveDispatchTargetRejectsWhitespaceAndInvalidSelectedFlavorEffort(t *testing.T) {
+func TestResolveDispatchTargetRejectsWhitespaceAndInvalidSelectedHarnessEffort(t *testing.T) {
 	for _, requested := range []string{" ", "high"} {
 		t.Run(strconv.Quote(requested), func(t *testing.T) {
-			_, err := ResolveDispatchTarget(DispatchTargetRequest{Flavor: "pi", Tier: "routine", RequestedEffort: requested})
+			_, err := ResolveDispatchTarget(DispatchTargetRequest{Harness: "pi", Tier: "routine", RequestedEffort: requested})
 			if err == nil {
 				t.Fatal("ResolveDispatchTarget() unexpectedly succeeded")
 			}
@@ -296,11 +296,11 @@ func TestResolve_ValueMatchingCurrentDefault_ReportsInherited(t *testing.T) {
 	}
 }
 
-// AC: unknown flavor is rejected with a clear error, not silently defaulted.
-func TestResolve_UnknownFlavor_Rejected(t *testing.T) {
+// AC: unknown harness is rejected with a clear error, not silently defaulted.
+func TestResolve_UnknownHarness_Rejected(t *testing.T) {
 	_, err := Resolve("", "gemini", "primary")
 	if err == nil {
-		t.Fatal("expected an error for unknown flavor, got nil")
+		t.Fatal("expected an error for unknown harness, got nil")
 	}
 }
 
@@ -313,7 +313,7 @@ func TestResolve_UnknownTier_Rejected(t *testing.T) {
 }
 
 // I110. A repo may pin different open models without waiting on a spine
-// release, exactly as it may for any other flavor. Guards that the new flavor
+// release, exactly as it may for any other harness. Guards that the new harness
 // went in as data and did not acquire a special resolution path.
 func TestResolve_OpenweightsRowOverriddenByRepo(t *testing.T) {
 	dir := writeWorkflow(t, "model_routing:\n  openweights.routine:    some-other-open-model\n")
@@ -334,18 +334,18 @@ func TestResolve_OpenweightsRowOverriddenByRepo(t *testing.T) {
 	}
 }
 
-// AC: flavors are data-driven — Flavors() reflects the embedded table's
-// keys rather than a hardcoded enum, so a third flavor added to
+// AC: harnesses are data-driven — Harnesses() reflects the embedded table's
+// keys rather than a hardcoded enum, so a third harness added to
 // models/defaults.json needs no change here.
-func TestFlavors_DataDriven(t *testing.T) {
-	flavors := Flavors()
+func TestHarnesses_DataDriven(t *testing.T) {
+	harnesses := Harnesses()
 	want := []string{"claude", "codex", "openweights", "pi"}
-	if len(flavors) != len(want) {
-		t.Fatalf("Flavors() = %v, want %v", flavors, want)
+	if len(harnesses) != len(want) {
+		t.Fatalf("Harnesses() = %v, want %v", harnesses, want)
 	}
 	for i, f := range want {
-		if flavors[i] != f {
-			t.Errorf("Flavors() = %v, want %v", flavors, want)
+		if harnesses[i] != f {
+			t.Errorf("Harnesses() = %v, want %v", harnesses, want)
 			break
 		}
 	}
@@ -376,16 +376,16 @@ func TestResolve_RepoDirWithoutWorkflowFile(t *testing.T) {
 	}
 }
 
-// A dotted override for one (flavor, tier) must not leak into a sibling
-// tier or flavor's resolution.
-func TestResolve_OverrideScopedToItsOwnFlavorAndTier(t *testing.T) {
+// A dotted override for one (harness, tier) must not leak into a sibling
+// tier or harness's resolution.
+func TestResolve_OverrideScopedToItsOwnHarnessAndTier(t *testing.T) {
 	dir := writeWorkflow(t, "model_routing:\n  claude.primary: claude-custom\n")
 
 	if entry, err := Resolve(dir, "claude", "routine"); err != nil || entry.Provenance != Default {
 		t.Errorf("sibling tier claude.routine leaked override: %+v, err=%v", entry, err)
 	}
 	if entry, err := Resolve(dir, "codex", "primary"); err != nil || entry.Provenance != Default {
-		t.Errorf("sibling flavor codex.primary leaked override: %+v, err=%v", entry, err)
+		t.Errorf("sibling harness codex.primary leaked override: %+v, err=%v", entry, err)
 	}
 }
 
@@ -428,16 +428,16 @@ func TestResolve_DefaultIDOmittedEffortDivergesFromShipped_ReportsOverride(t *te
 	}
 }
 
-// Regression for task review Important #2: a flavor present in the table
+// Regression for task review Important #2: a harness present in the table
 // but missing one of the four tiers (the shape a partially-populated third
-// flavor would take) must error, never resolve to a zero-value Entry with
+// harness would take) must error, never resolve to a zero-value Entry with
 // an empty id. Exercised via resolveFrom against a synthetic table, since
 // the real models/defaults.json is validated complete at load time and
 // can't itself be made partial without touching the shipped data.
 func TestResolveFrom_PartialTable_ReturnsError(t *testing.T) {
 	partial := table{
 		TierDefaultEffort: map[string]string{"primary": "high", "routine": "medium", "mechanical": "low", "fallback": "high"},
-		Flavors: map[string]map[string]tableEntry{
+		Harnesses: map[string]map[string]tableEntry{
 			"local": {
 				"primary": {ID: "local-big-model"},
 				// routine, mechanical, fallback deliberately absent.
@@ -505,10 +505,10 @@ func TestResolve_BlankLineEndsRoutingBlock(t *testing.T) {
 }
 
 // TRANSITIONAL bare-tier affordance (I035): a gen ≤9 mirror's bare tier key
-// (`fallback: claude-opus-4-8`) is read as a claude-flavored value — this is
+// (`fallback: claude-opus-4-8`) is read as a claude-harnessed value — this is
 // what every real repo carries today, so the refresh rule must see it. A
 // historical value reports Inherited, exactly as its dotted equivalent would.
-func TestResolve_BareTierKey_ReadAsClaudeFlavored(t *testing.T) {
+func TestResolve_BareTierKey_ReadAsClaudeHarnessed(t *testing.T) {
 	dir := writeWorkflow(t, "model_routing:\n  fallback: claude-opus-4-8        # primary-refused or security-framed work\n")
 	entry, err := Resolve(dir, "claude", "fallback")
 	if err != nil {
@@ -532,9 +532,9 @@ func TestResolve_BareTierKey_UnknownValue_ReportsOverride(t *testing.T) {
 	}
 }
 
-// Bare tier keys are claude-only: the flavor they imply is the one every
-// gen ≤9 mirror rendered. They must stay invisible to any other flavor.
-func TestResolve_BareTierKey_InvisibleToOtherFlavors(t *testing.T) {
+// Bare tier keys are claude-only: the harness they imply is the one every
+// gen ≤9 mirror rendered. They must stay invisible to any other harness.
+func TestResolve_BareTierKey_InvisibleToOtherHarnesses(t *testing.T) {
 	dir := writeWorkflow(t, "model_routing:\n  fallback: claude-opus-4-8\n")
 	entry, err := Resolve(dir, "codex", "fallback")
 	if err != nil {
@@ -572,7 +572,7 @@ func TestResolve_DottedKeyWinsOverBare(t *testing.T) {
 func TestResolveFrom_HistoryPairMatchesOnEffortToo(t *testing.T) {
 	synth := table{
 		TierDefaultEffort: map[string]string{"primary": "high", "routine": "medium", "mechanical": "low", "fallback": "high"},
-		Flavors: map[string]map[string]tableEntry{
+		Harnesses: map[string]map[string]tableEntry{
 			"claude": {
 				"primary":    {ID: "new-model"},
 				"routine":    {ID: "r"},
@@ -610,16 +610,16 @@ func TestResolveFrom_HistoryPairMatchesOnEffortToo(t *testing.T) {
 
 // Load-time validation (the fix vehicle task review Minor #6 names for
 // Important #2) must reject an incomplete table before Resolve ever sees
-// it: a flavor missing a tier's id fails fast.
-func TestValidateTable_PanicsOnFlavorMissingTierID(t *testing.T) {
+// it: a harness missing a tier's id fails fast.
+func TestValidateTable_PanicsOnHarnessMissingTierID(t *testing.T) {
 	defer func() {
 		if recover() == nil {
-			t.Error("expected validateTable to panic on a flavor missing a tier id")
+			t.Error("expected validateTable to panic on a harness missing a tier id")
 		}
 	}()
 	validateTable(table{
 		TierDefaultEffort: map[string]string{"primary": "high", "routine": "medium", "mechanical": "low", "fallback": "high"},
-		Flavors: map[string]map[string]tableEntry{
+		Harnesses: map[string]map[string]tableEntry{
 			"local": {"primary": {ID: "local-big-model"}},
 		},
 	})
@@ -639,7 +639,7 @@ func TestValidateTable_PanicsOnMissingTierDefaultEffort(t *testing.T) {
 	}
 	validateTable(table{
 		TierDefaultEffort: map[string]string{"primary": "high"}, // routine/mechanical/fallback missing
-		Flavors:           map[string]map[string]tableEntry{"claude": complete},
+		Harnesses:         map[string]map[string]tableEntry{"claude": complete},
 	})
 }
 
@@ -710,9 +710,9 @@ func TestValidateTableModelValidationRejectsInvalidPolicy(t *testing.T) {
 		{
 			name: "current id syntax failure",
 			mutate: func(tbl *table) {
-				entry := tbl.Flavors["codex"]["primary"]
+				entry := tbl.Harnesses["codex"]["primary"]
 				entry.ID = "bad id"
-				tbl.Flavors["codex"]["primary"] = entry
+				tbl.Harnesses["codex"]["primary"] = entry
 			},
 		},
 		{
@@ -724,9 +724,9 @@ func TestValidateTableModelValidationRejectsInvalidPolicy(t *testing.T) {
 		{
 			name: "historical id syntax failure",
 			mutate: func(tbl *table) {
-				entry := tbl.Flavors["claude"]["routine"]
+				entry := tbl.Harnesses["claude"]["routine"]
 				entry.History[0].ID = "bad id"
-				tbl.Flavors["claude"]["routine"] = entry
+				tbl.Harnesses["claude"]["routine"] = entry
 			},
 		},
 		{
@@ -799,7 +799,7 @@ func TestDecodeTableRejectsDuplicateJSONMembersRecursively(t *testing.T) {
 			replacement: `{"name": "shadow", "name": "generic-selector",`,
 		},
 		{
-			name:        "flavor member",
+			name:        "harness member",
 			old:         `"claude": {`,
 			replacement: `"claude": {}, "claude": {`,
 		},
@@ -826,13 +826,41 @@ func TestDecodeTableRejectsDuplicateJSONMembersRecursively(t *testing.T) {
 	}
 }
 
+// A generation-14 defaults file writes harnesses, while the one-release
+// compatibility reader still accepts the legacy flavors spelling.  A later
+// removal of either branch, or an ambiguous input that silently wins by JSON
+// decoder order, must fail this boundary test.
+func TestDecodeTableAcceptsOneHarnessesOrLegacyFlavorsObject(t *testing.T) {
+	raw, err := models.FS.ReadFile("defaults.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := raw
+	if _, err := decodeTable(canonical); err != nil {
+		t.Fatalf("decodeTable canonical harnesses: %v", err)
+	}
+	legacy := []byte(strings.Replace(string(raw), `"harnesses":`, `"flavors":`, 1))
+	if _, err := decodeTable(legacy); err != nil {
+		t.Fatalf("decodeTable legacy flavors: %v", err)
+	}
+	for _, input := range [][]byte{
+		[]byte(`{"harnesses":{},"flavors":{}}`),
+		[]byte(`{}`),
+		[]byte(`{"Harnesses":{}}`),
+	} {
+		if _, err := decodeTable(input); err == nil {
+			t.Fatalf("decodeTable(%s) accepted an ambiguous or missing model table", input)
+		}
+	}
+}
+
 const testMaxTemplateVersion = 12
 
-func validateWorkflow(t *testing.T, content, flavor, tier, expected string) (Entry, error) {
+func validateWorkflow(t *testing.T, content, harness, tier, expected string) (Entry, error) {
 	t.Helper()
 	return ValidateLaunch(LaunchRequest{
 		RepoDir:            writeWorkflow(t, content),
-		Flavor:             flavor,
+		Harness:            harness,
 		Tier:               tier,
 		Expected:           expected,
 		MaxTemplateVersion: testMaxTemplateVersion,
@@ -867,7 +895,7 @@ func requireConfigurationError(t *testing.T, err error) {
 
 func TestValidateLaunchPositiveRoutes(t *testing.T) {
 	t.Run("embedded default without repo", func(t *testing.T) {
-		entry, err := ValidateLaunch(LaunchRequest{Flavor: "codex", Tier: "primary", MaxTemplateVersion: testMaxTemplateVersion})
+		entry, err := ValidateLaunch(LaunchRequest{Harness: "codex", Tier: "primary", MaxTemplateVersion: testMaxTemplateVersion})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -877,15 +905,15 @@ func TestValidateLaunchPositiveRoutes(t *testing.T) {
 	})
 
 	t.Run("absent workflow", func(t *testing.T) {
-		entry, err := ValidateLaunch(LaunchRequest{RepoDir: t.TempDir(), Flavor: "codex", Tier: "routine", MaxTemplateVersion: testMaxTemplateVersion})
+		entry, err := ValidateLaunch(LaunchRequest{RepoDir: t.TempDir(), Harness: "codex", Tier: "routine", MaxTemplateVersion: testMaxTemplateVersion})
 		if err != nil || entry.ID != "gpt-5.6-terra" || entry.Provenance != Default {
 			t.Fatalf("entry=%#v err=%v", entry, err)
 		}
 	})
 
 	cases := []struct {
-		name, content, flavor, tier, wantID string
-		wantProvenance                      Provenance
+		name, content, harness, tier, wantID string
+		wantProvenance                       Provenance
 	}{
 		{"current dotted", "template_version: 12\nmodel_routing:\n  codex.primary: gpt-5.6-sol @ xhigh\n", "codex", "primary", "gpt-5.6-sol", Inherited},
 		{"current legacy bare", "model_routing:\n  routine: claude-opus-5 @ low\n", "claude", "routine", "claude-opus-5", Inherited},
@@ -896,7 +924,7 @@ func TestValidateLaunchPositiveRoutes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			entry, err := validateWorkflow(t, tc.content, tc.flavor, tc.tier, "")
+			entry, err := validateWorkflow(t, tc.content, tc.harness, tc.tier, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -984,7 +1012,7 @@ func TestResolveForHostAbsentConfigIsRepositoryCompatible(t *testing.T) {
 
 func TestValidateLaunchForHostRejectsDivergentPinButPermitsIdenticalPin(t *testing.T) {
 	repo := writeWorkflow(t, "template_version: 12\nmodel_routing:\n  codex.primary: repository-safe\n")
-	request := LaunchRequest{RepoDir: repo, Flavor: "codex", Tier: "primary", MaxTemplateVersion: testMaxTemplateVersion}
+	request := LaunchRequest{RepoDir: repo, Harness: "codex", Tier: "primary", MaxTemplateVersion: testMaxTemplateVersion}
 	divergent := writeHostConfig(t, `{
   "schema_version": 1, "host_id": "test-host", "harnesses": {
     "codex": {"available": true, "executable": "codex", "launch_contract_ref": "fleet:test", "models": {"repository-safe": {"efforts": ["high"]}, "host-safe": {"efforts": ["high"]}}}
@@ -1043,7 +1071,7 @@ func TestParseLaunchRoutingRejectsGlobalAmbiguity(t *testing.T) {
 
 func TestValidateLaunchRejectsStrictRequestedInput(t *testing.T) {
 	cases := []struct {
-		name, content, flavor, tier string
+		name, content, harness, tier string
 	}{
 		{"duplicate requested dotted key", "model_routing:\n  codex.primary: one\n  codex.primary: two\n", "codex", "primary"},
 		{"duplicate selected bare key", "model_routing:\n  primary: one\n  primary: two\n", "claude", "primary"},
@@ -1056,7 +1084,7 @@ func TestValidateLaunchRejectsStrictRequestedInput(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := validateWorkflow(t, tc.content, tc.flavor, tc.tier, "")
+			_, err := validateWorkflow(t, tc.content, tc.harness, tc.tier, "")
 			requireConfigurationError(t, err)
 		})
 	}
@@ -1066,7 +1094,7 @@ func TestValidateLaunchRejectsStrictRequestedInput(t *testing.T) {
 		if err := os.WriteFile(repoFile, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		_, err := ValidateLaunch(LaunchRequest{RepoDir: repoFile, Flavor: "codex", Tier: "primary", MaxTemplateVersion: testMaxTemplateVersion})
+		_, err := ValidateLaunch(LaunchRequest{RepoDir: repoFile, Harness: "codex", Tier: "primary", MaxTemplateVersion: testMaxTemplateVersion})
 		requireConfigurationError(t, err)
 	})
 }
@@ -1084,23 +1112,23 @@ func TestValidateLaunchRequestedKeyIsolationAndClaudePrecedence(t *testing.T) {
 
 func TestValidateLaunchPreservesStrictRoutingSyntax(t *testing.T) {
 	for _, tc := range []struct {
-		name, content, flavor, tier string
+		name, content, harness, tier string
 	}{
 		{
 			name:    "malformed routing header",
 			content: "model_routing: bogus\n  codex.primary: bespoke-safe\n",
-			flavor:  "codex",
+			harness: "codex",
 			tier:    "primary",
 		},
 		{
 			name:    "whitespace before requested key colon",
 			content: "model_routing:\n  codex.primary : bespoke-safe\n",
-			flavor:  "codex",
+			harness: "codex",
 			tier:    "primary",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := validateWorkflow(t, tc.content, tc.flavor, tc.tier, "")
+			_, err := validateWorkflow(t, tc.content, tc.harness, tc.tier, "")
 			requireConfigurationError(t, err)
 		})
 	}
@@ -1125,11 +1153,11 @@ func TestValidateLaunchPreservesStrictRoutingSyntax(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			flavor := "codex"
+			harness := "codex"
 			if strings.HasPrefix(tc.wantID, "dotted") {
-				flavor = "claude"
+				harness = "claude"
 			}
-			entry, err := validateWorkflow(t, tc.content, flavor, "primary", "")
+			entry, err := validateWorkflow(t, tc.content, harness, "primary", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1166,7 +1194,7 @@ func TestValidateLaunchUsesOnlyExactAlternateDelimiter(t *testing.T) {
 	}
 }
 
-func TestValidateLaunchClassifiesFlavorHistoryCurrentFirst(t *testing.T) {
+func TestValidateLaunchClassifiesHarnessHistoryCurrentFirst(t *testing.T) {
 	t.Run("cross-cell history is retired", func(t *testing.T) {
 		_, err := validateWorkflow(t, "model_routing:\n  claude.primary: claude-sonnet-5\n", "claude", "primary", "")
 		requireLaunchRefusal(t, err, ReasonRetiredModel, "claude.primary", "claude-sonnet-5", "")
@@ -1174,9 +1202,9 @@ func TestValidateLaunchClassifiesFlavorHistoryCurrentFirst(t *testing.T) {
 
 	t.Run("current ID wins over history elsewhere", func(t *testing.T) {
 		tbl := cloneDefaultTable(t)
-		primary := tbl.Flavors["claude"]["primary"]
+		primary := tbl.Harnesses["claude"]["primary"]
 		primary.History = append(primary.History, historyEntry{ID: "claude-opus-5"})
-		tbl.Flavors["claude"]["primary"] = primary
+		tbl.Harnesses["claude"]["primary"] = primary
 		validateTable(tbl)
 		snap, err := parseLaunchRouting("model_routing:\n  claude.primary: claude-opus-5\n", testMaxTemplateVersion)
 		if err != nil {
@@ -1187,16 +1215,16 @@ func TestValidateLaunchClassifiesFlavorHistoryCurrentFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 		if entry.ID != "claude-opus-5" {
-			t.Fatalf("entry.ID = %q, want current flavor ID", entry.ID)
+			t.Fatalf("entry.ID = %q, want current harness ID", entry.ID)
 		}
 	})
 }
 
 func TestValidateLaunchRefusesSelectedPolicyViolations(t *testing.T) {
 	for _, tc := range []struct {
-		name, content, flavor, tier, value string
-		reason                             LaunchReason
-		rule                               string
+		name, content, harness, tier, value string
+		reason                              LaunchReason
+		rule                                string
 	}{
 		{"historical dotted", "model_routing:\n  claude.routine: claude-sonnet-5\n", "claude", "routine", "claude-sonnet-5", ReasonRetiredModel, ""},
 		{"historical changed effort", "model_routing:\n  claude.routine: claude-sonnet-5 @ xhigh\n", "claude", "routine", "claude-sonnet-5", ReasonRetiredModel, ""},
@@ -1207,8 +1235,8 @@ func TestValidateLaunchRefusesSelectedPolicyViolations(t *testing.T) {
 		{"vendor auto pattern", "model_routing:\n  codex.primary: vendor-AUTO-model\n", "codex", "primary", "vendor-AUTO-model", ReasonForbiddenModel, "vendor-auto"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := validateWorkflow(t, tc.content, tc.flavor, tc.tier, "")
-			requireLaunchRefusal(t, err, tc.reason, tc.flavor+"."+tc.tier, tc.value, tc.rule)
+			_, err := validateWorkflow(t, tc.content, tc.harness, tc.tier, "")
+			requireLaunchRefusal(t, err, tc.reason, tc.harness+"."+tc.tier, tc.value, tc.rule)
 		})
 	}
 
@@ -1222,9 +1250,9 @@ func TestValidateLaunchRefusesSelectedPolicyViolations(t *testing.T) {
 
 func TestValidateLaunchExpectedCandidateClassification(t *testing.T) {
 	cases := []struct {
-		name, flavor, tier, candidate string
-		reason                        LaunchReason
-		rule, detail                  string
+		name, harness, tier, candidate string
+		reason                         LaunchReason
+		rule, detail                   string
 	}{
 		{"syntax before deny", "codex", "primary", "auto ", ReasonInvalidModelID, "", ""},
 		{"shorthand alias", "claude", "routine", "opus", ReasonForbiddenModel, "token:opus", ""},
@@ -1235,21 +1263,21 @@ func TestValidateLaunchExpectedCandidateClassification(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ValidateLaunch(LaunchRequest{Flavor: tc.flavor, Tier: tc.tier, Expected: tc.candidate, MaxTemplateVersion: testMaxTemplateVersion})
-			refusal := requireLaunchRefusal(t, err, tc.reason, tc.flavor+"."+tc.tier, tc.candidate, tc.rule)
+			_, err := ValidateLaunch(LaunchRequest{Harness: tc.harness, Tier: tc.tier, Expected: tc.candidate, MaxTemplateVersion: testMaxTemplateVersion})
+			refusal := requireLaunchRefusal(t, err, tc.reason, tc.harness+"."+tc.tier, tc.candidate, tc.rule)
 			if refusal.Detail != tc.detail {
 				t.Fatalf("Detail = %q, want %q", refusal.Detail, tc.detail)
 			}
 		})
 	}
 
-	entry, err := ValidateLaunch(LaunchRequest{Flavor: "codex", Tier: "primary", Expected: "gpt-5.6-sol", MaxTemplateVersion: testMaxTemplateVersion})
+	entry, err := ValidateLaunch(LaunchRequest{Harness: "codex", Tier: "primary", Expected: "gpt-5.6-sol", MaxTemplateVersion: testMaxTemplateVersion})
 	if err != nil || entry.ID != "gpt-5.6-sol" {
 		t.Fatalf("exact expected entry=%#v err=%v", entry, err)
 	}
 
 	for _, tier := range Tiers {
-		entry, err := ValidateLaunch(LaunchRequest{Flavor: "pi", Tier: tier, Expected: "qwen3.8-27b-q8_0", MaxTemplateVersion: testMaxTemplateVersion})
+		entry, err := ValidateLaunch(LaunchRequest{Harness: "pi", Tier: tier, Expected: "qwen3.8-27b-q8_0", MaxTemplateVersion: testMaxTemplateVersion})
 		if err != nil || entry.ID != "qwen3.8-27b-q8_0" {
 			t.Errorf("shared pi id for tier %s: entry=%#v err=%v", tier, entry, err)
 		}
@@ -1264,7 +1292,7 @@ func TestValidateLaunchExpectedRejectsUnsafeIDSyntax(t *testing.T) {
 		`back\slash`, "pipe|id", "amp&id", "left<id", "right>id", "(group)",
 	} {
 		t.Run(strconv.Quote(candidate), func(t *testing.T) {
-			_, err := ValidateLaunch(LaunchRequest{Flavor: "codex", Tier: "primary", Expected: candidate, MaxTemplateVersion: testMaxTemplateVersion})
+			_, err := ValidateLaunch(LaunchRequest{Harness: "codex", Tier: "primary", Expected: candidate, MaxTemplateVersion: testMaxTemplateVersion})
 			requireLaunchRefusal(t, err, ReasonInvalidModelID, "codex.primary", candidate, "")
 		})
 	}
@@ -1327,18 +1355,18 @@ func TestMirrorValue_EffortSuffixOnlyOnDeviation(t *testing.T) {
 	}
 }
 
-// I036 (D8): MirrorRows renders one row per (flavor, tier) of the embedded
-// table — flavors sorted, tiers in Tiers order — and every row round-trips
+// I036 (D8): MirrorRows renders one row per (harness, tier) of the embedded
+// table — harnesses sorted, tiers in Tiers order — and every row round-trips
 // through Resolve: written to a WORKFLOW.md, each row resolves back to the
 // table's own (id, effort), so the rendered mirror and the reader can never
 // disagree on the emitted format.
-func TestMirrorRows_CoverEveryFlavorTierAndRoundTrip(t *testing.T) {
+func TestMirrorRows_CoverEveryHarnessTierAndRoundTrip(t *testing.T) {
 	rows := MirrorRows()
-	if want := len(Flavors()) * len(Tiers); len(rows) != want {
-		t.Fatalf("MirrorRows() = %d rows, want %d (every flavor x tier)", len(rows), want)
+	if want := len(Harnesses()) * len(Tiers); len(rows) != want {
+		t.Fatalf("MirrorRows() = %d rows, want %d (every harness x tier)", len(rows), want)
 	}
 	// Assert the row's content, not its column alignment: the key column is
-	// padded to the longest flavor.tier key, so adding a flavor with a longer
+	// padded to the longest harness.tier key, so adding a harness with a longer
 	// name reflows every row (I110's "openweights" did exactly that). The
 	// alignment itself is covered by the round-trip below, which is what
 	// actually has to hold.
@@ -1358,28 +1386,28 @@ func TestMirrorRows_CoverEveryFlavorTierAndRoundTrip(t *testing.T) {
 	}
 	dir := writeWorkflow(t, content)
 	i := 0
-	for _, flavor := range Flavors() {
+	for _, harness := range Harnesses() {
 		for _, tier := range Tiers {
-			key := flavor + "." + tier + ":"
+			key := harness + "." + tier + ":"
 			if !strings.Contains(rows[i], key) {
-				t.Errorf("rows[%d] = %q, want key %q (flavor-sorted, tier-fixed order)", i, rows[i], key)
+				t.Errorf("rows[%d] = %q, want key %q (harness-sorted, tier-fixed order)", i, rows[i], key)
 			}
 			i++
-			def, err := Resolve("", flavor, tier)
+			def, err := Resolve("", harness, tier)
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := Resolve(dir, flavor, tier)
+			got, err := Resolve(dir, harness, tier)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if got.ID != def.ID || got.Effort != def.Effort {
-				t.Errorf("round-trip %s.%s = {%s, %s}, want {%s, %s}", flavor, tier, got.ID, got.Effort, def.ID, def.Effort)
+				t.Errorf("round-trip %s.%s = {%s, %s}, want {%s, %s}", harness, tier, got.ID, got.Effort, def.ID, def.Effort)
 			}
 			// A rendered default read back from disk reports Inherited, the
 			// provenance the refresh rule keys on.
 			if got.Provenance != Inherited {
-				t.Errorf("round-trip %s.%s provenance = %s, want %s", flavor, tier, got.Provenance, Inherited)
+				t.Errorf("round-trip %s.%s provenance = %s, want %s", harness, tier, got.Provenance, Inherited)
 			}
 		}
 	}

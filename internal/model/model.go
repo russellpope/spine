@@ -1,26 +1,26 @@
 // Package model resolves the estate's model table: what model id and effort
-// back a given (flavor, tier) in a given repo. The boundary is the pure
-// function Resolve (repo dir + flavor + tier in, Entry out); the CLI and the
+// back a given (harness, tier) in a given repo. The boundary is the pure
+// function Resolve (repo dir + harness + tier in, Entry out); the CLI and the
 // routing audit are thin consumers wired in later tickets (ADR 0011).
 //
 // Two layers only (design D4): the embedded defaults in ../../models, then a
 // per-repo override read from WORKFLOW.md's model_routing mirror. A repo
 // with no override — including no repo at all — resolves to the embedded
-// default. Flavors are open-ended data (the keys of the embedded table), not
-// an enum; a third flavor is addable as data with no code change here.
+// default. Harnesses are open-ended data (the keys of the embedded table), not
+// an enum; a third harness is addable as data with no code change here.
 //
 // Design-latitude choices (the ticket leaves these open; pinned here):
-//   - The override mirror this reader prefers is the dotted "<flavor>.<tier>"
+//   - The override mirror this reader prefers is the dotted "<harness>.<tier>"
 //     syntax design D8 specifies for template generation 10, with an
 //     optional " @ <effort>" suffix (D9); gen-10 repos render it (I036).
 //     TRANSITIONAL (I035, emitted format retired by I036): a bare tier key
 //     (`fallback: claude-opus-4-8`) — the format every gen ≤9 mirror
-//     actually carries — is also read, as a claude-flavored override, since
-//     claude is the only flavor those generations ever rendered. Without
+//     actually carries — is also read, as a claude-harnessed override, since
+//     claude is the only harness those generations ever rendered. Without
 //     this, the I035 refresh rule would see zero overrides in every real
 //     repo while passing dotted-key-only tests. A dotted key wins over a
 //     bare one for the same tier; bare keys are invisible to every other
-//     flavor. The EMITTED format is retired in gen-10 mirrors (I036), but
+//     harness. The EMITTED format is retired in gen-10 mirrors (I036), but
 //     the READ affordance stays live: 18 gen-9 worktrees remain until their
 //     branches merge/rebase, and resolution with --dir may target a worktree.
 //   - An on-disk value is Inherited when its (id, effective effort) pair
@@ -43,14 +43,14 @@
 //     " alt: <id> @ <effort>" and read back under the same rules, and part
 //     of the pair everShipped compares, so editing or deleting only a cell's
 //     alternate reads as the deliberate choice it is (I079).
-//   - A flavor may declare an effort vocabulary in the table
+//   - A harness may declare an effort vocabulary in the table
 //     (effortVocabulary); an effort outside it — the pi harness has no
 //     "high" — is refused at resolution rather than mapped onto a
 //     neighbouring level. Translating an effort to a model's own reasoning
-//     aliases is the harness's job, not spine's. Flavors with no declared
+//     aliases is the harness's job, not spine's. Harnesses with no declared
 //     vocabulary are unconstrained, as claude and codex always were.
-//   - A (flavor, tier) pair with no id in the table (an unshipped tier on an
-//     otherwise-known flavor — the shape a partially-populated third flavor
+//   - A (harness, tier) pair with no id in the table (an unshipped tier on an
+//     otherwise-known harness — the shape a partially-populated third harness
 //     would take) is a hard error, never a zero-value Entry: an empty model
 //     id silently interpolated into a dispatch command is exactly the loud-
 //     failure principle D8 itself is justified by. Guarded twice: load-time
@@ -77,7 +77,7 @@ import (
 )
 
 // Tiers is the fixed set of semantic routing tiers (CONTEXT.md model tier).
-// Unlike flavor, tiers are not open-ended: adding a fifth is a design change.
+// Unlike harness, tiers are not open-ended: adding a fifth is a design change.
 var Tiers = []string{"primary", "routine", "mechanical", "fallback"}
 
 // Provenance classifies where a resolved entry's id/effort came from.
@@ -85,7 +85,7 @@ type Provenance string
 
 // Provenance values.
 const (
-	// Default: no on-disk value for this (flavor, tier); the embedded
+	// Default: no on-disk value for this (harness, tier); the embedded
 	// default answered the resolution.
 	Default Provenance = "default"
 	// Inherited: an on-disk value is present and matches the entry's
@@ -110,10 +110,10 @@ type Alternate struct {
 	Effort string `json:"effort,omitempty"`
 }
 
-// Entry is one resolved (flavor, tier) row. Alternate is nil for a cell
+// Entry is one resolved (harness, tier) row. Alternate is nil for a cell
 // that ships none — most cells do not.
 type Entry struct {
-	Flavor     string
+	Harness    string
 	Tier       string
 	ID         string
 	Effort     string
@@ -122,7 +122,7 @@ type Entry struct {
 	Provenance Provenance
 }
 
-// tableEntry is one (flavor, tier) row as shipped in models/defaults.json.
+// tableEntry is one (harness, tier) row as shipped in models/defaults.json.
 type tableEntry struct {
 	ID        string         `json:"id"`
 	Effort    string         `json:"effort,omitempty"`
@@ -164,16 +164,29 @@ type modelValidationPolicy struct {
 
 type table struct {
 	TierDefaultEffort map[string]string `json:"tierDefaultEffort"`
-	// TierDefaultEffortByFlavor overrides TierDefaultEffort for one flavor
+	// TierDefaultEffortByHarness overrides TierDefaultEffort for one harness
 	// (I079 fix round 1): the global map's primary/fallback "high" is a word
 	// the pi harness's effort vocabulary does not have, so a bare-id pi
-	// mirror row would inherit an effort pi cannot run. A flavor listed here
+	// mirror row would inherit an effort pi cannot run. A harness listed here
 	// supplies the tier defaults for its own cells; every tier it omits, and
-	// every flavor absent from the map, falls back to the global map.
-	TierDefaultEffortByFlavor map[string]map[string]string     `json:"tierDefaultEffortByFlavor"`
-	EffortVocabulary          map[string][]string              `json:"effortVocabulary"`
-	ModelValidation           *modelValidationPolicy           `json:"modelValidation"`
-	Flavors                   map[string]map[string]tableEntry `json:"flavors"`
+	// every harness absent from the map, falls back to the global map.
+	TierDefaultEffortByHarness map[string]map[string]string `json:"tierDefaultEffortByHarness"`
+	EffortVocabulary           map[string][]string          `json:"effortVocabulary"`
+	ModelValidation            *modelValidationPolicy       `json:"modelValidation"`
+	Harnesses                  map[string]map[string]tableEntry
+}
+
+// tableWire separates the generation-14 input compatibility envelope from
+// the canonical in-memory table. New defaults write harnesses; one supported
+// legacy flavors object remains readable until the fleet compatibility window
+// closes in a later generation.
+type tableWire struct {
+	TierDefaultEffort          map[string]string                `json:"tierDefaultEffort"`
+	TierDefaultEffortByHarness map[string]map[string]string     `json:"tierDefaultEffortByHarness"`
+	EffortVocabulary           map[string][]string              `json:"effortVocabulary"`
+	ModelValidation            *modelValidationPolicy           `json:"modelValidation"`
+	Harnesses                  map[string]map[string]tableEntry `json:"harnesses"`
+	LegacyFlavors              map[string]map[string]tableEntry `json:"flavors"`
 }
 
 var defaults = mustLoadDefaults()
@@ -200,10 +213,13 @@ func decodeTable(raw []byte) (table, error) {
 	if err := rejectDuplicateJSONMembers(raw); err != nil {
 		return table{}, err
 	}
+	if err := validateTableTopLevelMembers(raw); err != nil {
+		return table{}, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	var t table
-	if err := dec.Decode(&t); err != nil {
+	var wire tableWire
+	if err := dec.Decode(&wire); err != nil {
 		return table{}, err
 	}
 	var trailing any
@@ -213,7 +229,43 @@ func decodeTable(raw []byte) (table, error) {
 		}
 		return table{}, err
 	}
-	return t, nil
+	if wire.Harnesses == nil && wire.LegacyFlavors == nil {
+		return table{}, fmt.Errorf("models defaults must contain exactly one harnesses or flavors object")
+	}
+	if wire.Harnesses != nil && wire.LegacyFlavors != nil {
+		return table{}, fmt.Errorf("models defaults must not contain both harnesses and flavors")
+	}
+	harnesses := wire.Harnesses
+	if harnesses == nil {
+		harnesses = wire.LegacyFlavors
+	}
+	return table{
+		TierDefaultEffort:          wire.TierDefaultEffort,
+		TierDefaultEffortByHarness: wire.TierDefaultEffortByHarness,
+		EffortVocabulary:           wire.EffortVocabulary,
+		ModelValidation:            wire.ModelValidation,
+		Harnesses:                  harnesses,
+	}, nil
+}
+
+func validateTableTopLevelMembers(raw []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return err
+	}
+	if members == nil {
+		return fmt.Errorf("models defaults must be an object")
+	}
+	allowed := map[string]struct{}{
+		"tierDefaultEffort": {}, "tierDefaultEffortByHarness": {}, "effortVocabulary": {},
+		"modelValidation": {}, "harnesses": {}, "flavors": {},
+	}
+	for name := range members {
+		if _, ok := allowed[name]; !ok {
+			return fmt.Errorf("unknown or case-variant defaults member %q", name)
+		}
+	}
+	return nil
 }
 
 func rejectDuplicateJSONMembers(raw []byte) error {
@@ -274,9 +326,9 @@ func scanJSONValue(dec *json.Decoder) error {
 	}
 }
 
-// validateTable enforces the completeness Resolve depends on: every flavor
+// validateTable enforces the completeness Resolve depends on: every harness
 // carries a non-empty id for all four Tiers, and tierDefaultEffort covers
-// every tier. Without this, a data edit that ships a flavor with a partial
+// every tier. Without this, a data edit that ships a harness with a partial
 // tier table would resolve silently to an empty id at runtime instead of
 // failing the build's own tests (task review Important #2 / Minor #6).
 func validateTable(t table) {
@@ -286,42 +338,42 @@ func validateTable(t table) {
 			panic(fmt.Sprintf("models/defaults.json: tierDefaultEffort has no default for tier %q", tier))
 		}
 	}
-	for flavor, tiers := range t.Flavors {
+	for harness, tiers := range t.Harnesses {
 		for _, tier := range Tiers {
 			if tiers[tier].ID == "" {
-				panic(fmt.Sprintf("models/defaults.json: flavor %q has no id for tier %q", flavor, tier))
+				panic(fmt.Sprintf("models/defaults.json: harness %q has no id for tier %q", harness, tier))
 			}
-			validateShippedModelIDs(t, flavor, tier, tiers[tier])
+			validateShippedModelIDs(t, harness, tier, tiers[tier])
 			checkAlternate := func(what string, alt *Alternate) {
 				if alt == nil {
 					return
 				}
 				if alt.ID == "" {
-					panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q %s alternate has no id", flavor, tier, what))
+					panic(fmt.Sprintf("models/defaults.json: harness %q tier %q %s alternate has no id", harness, tier, what))
 				}
 				if alt.Effort == "" {
-					panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q %s alternate has no effort", flavor, tier, what))
+					panic(fmt.Sprintf("models/defaults.json: harness %q tier %q %s alternate has no effort", harness, tier, what))
 				}
 			}
 			checkAlternate("current", tiers[tier].Alternate)
 			for _, h := range tiers[tier].History {
 				if h.ID == "" {
-					panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q has a history entry with no id", flavor, tier))
+					panic(fmt.Sprintf("models/defaults.json: harness %q tier %q has a history entry with no id", harness, tier))
 				}
 				checkAlternate("history", h.Alternate)
 			}
-			// A shipped cell must speak its own flavor's effort vocabulary,
+			// A shipped cell must speak its own harness's effort vocabulary,
 			// so a data edit that ships (say) a pi cell at "high" fails the
 			// build's tests rather than erroring at every resolution.
 			// The effort a cell INHERITS must be speakable too (I079 fix
-			// round 1): without this, a flavor whose vocabulary excludes the
+			// round 1): without this, a harness whose vocabulary excludes the
 			// global tier default ships a table where a bare-id mirror row
-			// is unresolvable, which is exactly the bug the per-flavor
-			// tierDefaultEffortByFlavor override exists to prevent.
-			efforts := append(shippedEfforts(tiers[tier]), tierDefaultEffortOf(t, flavor, tier))
+			// is unresolvable, which is exactly the bug the per-harness
+			// tierDefaultEffortByHarness override exists to prevent.
+			efforts := append(shippedEfforts(tiers[tier]), tierDefaultEffortOf(t, harness, tier))
 			for _, effort := range efforts {
-				if err := checkEffort(t, flavor, effort); err != nil {
-					panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q: %v", flavor, tier, err))
+				if err := checkEffort(t, harness, effort); err != nil {
+					panic(fmt.Sprintf("models/defaults.json: harness %q tier %q: %v", harness, tier, err))
 				}
 			}
 		}
@@ -378,17 +430,17 @@ func validateModelPolicy(t table) {
 	}
 }
 
-func validateShippedModelIDs(t table, flavor, tier string, entry tableEntry) {
+func validateShippedModelIDs(t table, harness, tier string, entry tableEntry) {
 	p := t.ModelValidation
 	if !p.idPattern.MatchString(entry.ID) {
-		panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q current id %q fails modelValidation.idPattern", flavor, tier, entry.ID))
+		panic(fmt.Sprintf("models/defaults.json: harness %q tier %q current id %q fails modelValidation.idPattern", harness, tier, entry.ID))
 	}
 	if rule := deniedModelRule(p, entry.ID); rule != "" {
-		panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q current id %q matches deny rule %q", flavor, tier, entry.ID, rule))
+		panic(fmt.Sprintf("models/defaults.json: harness %q tier %q current id %q matches deny rule %q", harness, tier, entry.ID, rule))
 	}
 	for _, h := range entry.History {
 		if !p.idPattern.MatchString(h.ID) {
-			panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q historical id %q fails modelValidation.idPattern", flavor, tier, h.ID))
+			panic(fmt.Sprintf("models/defaults.json: harness %q tier %q historical id %q fails modelValidation.idPattern", harness, tier, h.ID))
 		}
 	}
 	tokens := map[string]bool{}
@@ -397,7 +449,7 @@ func validateShippedModelIDs(t table, flavor, tier string, entry tableEntry) {
 	}
 	for _, alias := range entry.Aliases {
 		if alias != entry.ID && !tokens[alias] {
-			panic(fmt.Sprintf("models/defaults.json: flavor %q tier %q shorthand alias %q is absent from forbiddenTokens", flavor, tier, alias))
+			panic(fmt.Sprintf("models/defaults.json: harness %q tier %q shorthand alias %q is absent from forbiddenTokens", harness, tier, alias))
 		}
 	}
 }
@@ -440,14 +492,14 @@ func shippedEfforts(def tableEntry) []string {
 	return efforts
 }
 
-// checkEffort enforces a flavor's effort vocabulary (design: pi speaks
-// low | medium | xhigh and has no "high"). A flavor absent from the
+// checkEffort enforces a harness's effort vocabulary (design: pi speaks
+// low | medium | xhigh and has no "high"). A harness absent from the
 // vocabulary table accepts any effort — the pre-existing behavior for
 // claude and codex, whose efforts spine never constrained. Translating an
 // effort to a model's own reasoning aliases is the harness's job, not
 // spine's; spine only refuses a word the harness does not have.
-func checkEffort(t table, flavor, effort string) error {
-	vocab, ok := t.EffortVocabulary[flavor]
+func checkEffort(t table, harness, effort string) error {
+	vocab, ok := t.EffortVocabulary[harness]
 	if !ok || effort == "" {
 		return nil
 	}
@@ -456,13 +508,13 @@ func checkEffort(t table, flavor, effort string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("effort %q is not in the %s effort vocabulary (known: %s)", effort, flavor, strings.Join(vocab, ", "))
+	return fmt.Errorf("effort %q is not in the %s effort vocabulary (known: %s)", effort, harness, strings.Join(vocab, ", "))
 }
 
-// Flavors returns the known flavors, sorted. Data-driven: a third flavor
+// Harnesses returns the known harnesses, sorted. Data-driven: a third harness
 // becomes known by adding it to models/defaults.json, no code change.
-func Flavors() []string {
-	return flavorsOf(defaults)
+func Harnesses() []string {
+	return harnessesOf(defaults)
 }
 
 func isKnownTier(tier string) bool {
@@ -474,13 +526,13 @@ func isKnownTier(tier string) bool {
 	return false
 }
 
-// Resolve answers what model id and effort back (flavor, tier) in repoDir.
+// Resolve answers what model id and effort back (harness, tier) in repoDir.
 // repoDir may be "", a nonexistent path, or a directory with no
 // WORKFLOW.md — every one of those falls back to the embedded default (D11:
 // outside a spine repo, resolution returns embedded defaults). Pure: no
 // current-directory lookup, no mutation of package state.
-func Resolve(repoDir, flavor, tier string) (Entry, error) {
-	return resolveFrom(defaults, repoDir, flavor, tier)
+func Resolve(repoDir, harness, tier string) (Entry, error) {
+	return resolveFrom(defaults, repoDir, harness, tier)
 }
 
 // DispatchTargetRequest identifies one dispatch target and its optional raw
@@ -488,18 +540,18 @@ func Resolve(repoDir, flavor, tier string) (Entry, error) {
 // override; non-empty values are preserved byte-for-byte after validation.
 type DispatchTargetRequest struct {
 	RepoDir         string
-	Flavor          string
+	Harness         string
 	Tier            string
 	RequestedEffort string
 }
 
 // ResolveDispatchTarget resolves the ordinary final repository target and,
 // when requested, replaces only its effort with a raw token valid for that
-// target's flavor. It deliberately does not apply host configuration: a
+// target's harness. It deliberately does not apply host configuration: a
 // host-aware caller must validate its already selected final Entry through
 // the same override seam rather than duplicating host precedence here.
 func ResolveDispatchTarget(req DispatchTargetRequest) (Entry, error) {
-	entry, err := Resolve(req.RepoDir, req.Flavor, req.Tier)
+	entry, err := Resolve(req.RepoDir, req.Harness, req.Tier)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -515,7 +567,7 @@ func ApplyDispatchEffort(entry Entry, requested string) (Entry, error) {
 	if requested == "" || strings.TrimSpace(requested) == "" {
 		return Entry{}, fmt.Errorf("requested effort must not be empty or whitespace")
 	}
-	if err := checkEffort(defaults, entry.Flavor, requested); err != nil {
+	if err := checkEffort(defaults, entry.Harness, requested); err != nil {
 		return Entry{}, err
 	}
 	entry.Effort = requested
@@ -571,8 +623,8 @@ type Resolution struct {
 // estate and repository preference resolution. configPath is an internal
 // test seam when non-empty; production callers pass "" and use DefaultPath.
 // lookup is normally exec.LookPath and is never used to execute anything.
-func ResolveForHost(repoDir, configPath, flavor, tier string, lookup func(string) (string, error)) (Resolution, error) {
-	requested, err := Resolve(repoDir, flavor, tier)
+func ResolveForHost(repoDir, configPath, harness, tier string, lookup func(string) (string, error)) (Resolution, error) {
+	requested, err := Resolve(repoDir, harness, tier)
 	if err != nil {
 		return Resolution{}, err
 	}
@@ -584,7 +636,7 @@ func resolveForHost(requested Entry, configPath string, lookup func(string) (str
 	if err != nil {
 		return Resolution{}, err
 	}
-	config, err := hostconfig.Load(path, Flavors(), hostLookup(lookup))
+	config, err := hostconfig.Load(path, Harnesses(), hostLookup(lookup))
 	if errors.Is(err, hostconfig.ErrNotConfigured) {
 		return Resolution{Entry: requested, Requested: requested, Host: HostResolution{Status: HostUnconfigured, ConfigPath: path}}, nil
 	}
@@ -609,12 +661,12 @@ func hostLookup(lookup func(string) (string, error)) func(string) (string, error
 }
 
 func applyHostConfig(requested Entry, path string, config hostconfig.Config) (Resolution, error) {
-	harness, ok := config.Harnesses[requested.Flavor]
+	harness, ok := config.Harnesses[requested.Harness]
 	if !ok || !harness.Available {
-		return Resolution{}, fmt.Errorf("host routing configuration %q: harness %q is unavailable", path, requested.Flavor)
+		return Resolution{}, fmt.Errorf("host routing configuration %q: harness %q is unavailable", path, requested.Harness)
 	}
 	trail := HostResolution{ID: config.HostID, Status: HostReachable, ConfigPath: path}
-	key := requested.Flavor + "." + requested.Tier
+	key := requested.Harness + "." + requested.Tier
 	if pin, pinned := config.Pins[key]; pinned {
 		final := requested
 		if pin.Model != requested.ID || pin.Effort != requested.Effort {
@@ -629,7 +681,7 @@ func applyHostConfig(requested Entry, path string, config hostconfig.Config) (Re
 	}
 	route, reachable := harness.Models[requested.ID]
 	if !reachable || !containsString(route.Efforts, requested.Effort) {
-		return Resolution{}, fmt.Errorf("host routing configuration %q: requested %s.%s route %q @ %q is not reachable", path, requested.Flavor, requested.Tier, requested.ID, requested.Effort)
+		return Resolution{}, fmt.Errorf("host routing configuration %q: requested %s.%s route %q @ %q is not reachable", path, requested.Harness, requested.Tier, requested.ID, requested.Effort)
 	}
 	return Resolution{Entry: requested, Requested: requested, Host: trail}, nil
 }
@@ -659,7 +711,7 @@ const (
 // ID a caller intends to pass to a launcher.
 type LaunchRequest struct {
 	RepoDir            string
-	Flavor             string
+	Harness            string
 	Tier               string
 	Expected           string
 	MaxTemplateVersion int
@@ -716,8 +768,8 @@ type launchSnapshot struct {
 
 // ValidateLaunch resolves and validates one route from one WORKFLOW.md read.
 func ValidateLaunch(req LaunchRequest) (Entry, error) {
-	if _, ok := defaults.Flavors[req.Flavor]; !ok {
-		return Entry{}, fmt.Errorf("unknown flavor %q (known: %s)", req.Flavor, strings.Join(flavorsOf(defaults), ", "))
+	if _, ok := defaults.Harnesses[req.Harness]; !ok {
+		return Entry{}, fmt.Errorf("unknown harness %q (known: %s)", req.Harness, strings.Join(harnessesOf(defaults), ", "))
 	}
 	if !isKnownTier(req.Tier) {
 		return Entry{}, fmt.Errorf("unknown tier %q (known: %s)", req.Tier, strings.Join(Tiers, ", "))
@@ -726,15 +778,15 @@ func ValidateLaunch(req LaunchRequest) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
-	return validateLaunchFrom(defaults, snap, req.Flavor, req.Tier, req.Expected)
+	return validateLaunchFrom(defaults, snap, req.Harness, req.Tier, req.Expected)
 }
 
 // ValidateLaunchForHost performs I051 validation and local host inspection
 // from one strict repository snapshot. A divergent host pin is deliberately
 // non-launchable until I074 makes that final ID auditable.
 func ValidateLaunchForHost(req LaunchRequest, configPath string, lookup func(string) (string, error)) (Resolution, error) {
-	if _, ok := defaults.Flavors[req.Flavor]; !ok {
-		return Resolution{}, fmt.Errorf("unknown flavor %q (known: %s)", req.Flavor, strings.Join(flavorsOf(defaults), ", "))
+	if _, ok := defaults.Harnesses[req.Harness]; !ok {
+		return Resolution{}, fmt.Errorf("unknown harness %q (known: %s)", req.Harness, strings.Join(harnessesOf(defaults), ", "))
 	}
 	if !isKnownTier(req.Tier) {
 		return Resolution{}, fmt.Errorf("unknown tier %q (known: %s)", req.Tier, strings.Join(Tiers, ", "))
@@ -743,7 +795,7 @@ func ValidateLaunchForHost(req LaunchRequest, configPath string, lookup func(str
 	if err != nil {
 		return Resolution{}, err
 	}
-	requested, err := validateLaunchFrom(defaults, snap, req.Flavor, req.Tier, "")
+	requested, err := validateLaunchFrom(defaults, snap, req.Harness, req.Tier, "")
 	if err != nil {
 		return Resolution{}, err
 	}
@@ -751,9 +803,9 @@ func ValidateLaunchForHost(req LaunchRequest, configPath string, lookup func(str
 	if err != nil {
 		return Resolution{}, err
 	}
-	config, err := hostconfig.Load(path, Flavors(), hostLookup(lookup))
+	config, err := hostconfig.Load(path, Harnesses(), hostLookup(lookup))
 	if errors.Is(err, hostconfig.ErrNotConfigured) {
-		entry, err := validateLaunchFrom(defaults, snap, req.Flavor, req.Tier, req.Expected)
+		entry, err := validateLaunchFrom(defaults, snap, req.Harness, req.Tier, req.Expected)
 		if err != nil {
 			return Resolution{}, err
 		}
@@ -767,16 +819,16 @@ func ValidateLaunchForHost(req LaunchRequest, configPath string, lookup func(str
 		return Resolution{}, err
 	}
 	if resolution.Pin != nil {
-		if refusal := modelPolicyRefusal(defaults.ModelValidation, req.Flavor+"."+req.Tier, resolution.Pin.Model); refusal != nil {
+		if refusal := modelPolicyRefusal(defaults.ModelValidation, req.Harness+"."+req.Tier, resolution.Pin.Model); refusal != nil {
 			// A pin is owner-managed host configuration. Do not forward the
 			// policy refusal because it would print its raw model value.
-			return Resolution{}, fmt.Errorf("%s host pin failed launch policy", req.Flavor+"."+req.Tier)
+			return Resolution{}, fmt.Errorf("%s host pin failed launch policy", req.Harness+"."+req.Tier)
 		}
-		if err := ValidateHostPinForLaunch(req.Flavor+"."+req.Tier, requested.ID, resolution.Pin.Model); err != nil {
+		if err := ValidateHostPinForLaunch(req.Harness+"."+req.Tier, requested.ID, resolution.Pin.Model); err != nil {
 			return Resolution{}, err
 		}
 	}
-	if _, err := validateLaunchFrom(defaults, snap, req.Flavor, req.Tier, req.Expected); err != nil {
+	if _, err := validateLaunchFrom(defaults, snap, req.Harness, req.Tier, req.Expected); err != nil {
 		return Resolution{}, err
 	}
 	return resolution, nil
@@ -787,9 +839,9 @@ func ValidateLaunchForHost(req LaunchRequest, configPath string, lookup func(str
 // apply launch-only deny or retired-ID policy; audit layers retained aliases
 // and history over this exact active row. Audit keeps its existing template
 // version and unreadable-file compatibility behavior.
-func ResolveStrictActive(repoDir, flavor, tier string) (Entry, error) {
-	if _, ok := defaults.Flavors[flavor]; !ok {
-		return Entry{}, fmt.Errorf("unknown flavor %q (known: %s)", flavor, strings.Join(flavorsOf(defaults), ", "))
+func ResolveStrictActive(repoDir, harness, tier string) (Entry, error) {
+	if _, ok := defaults.Harnesses[harness]; !ok {
+		return Entry{}, fmt.Errorf("unknown harness %q (known: %s)", harness, strings.Join(harnessesOf(defaults), ", "))
 	}
 	if !isKnownTier(tier) {
 		return Entry{}, fmt.Errorf("unknown tier %q (known: %s)", tier, strings.Join(Tiers, ", "))
@@ -804,7 +856,7 @@ func ResolveStrictActive(repoDir, flavor, tier string) (Entry, error) {
 			}
 		}
 	}
-	entry, _, err := resolveStrictCell(defaults, snap, flavor, tier)
+	entry, _, err := resolveStrictCell(defaults, snap, harness, tier)
 	return entry, err
 }
 
@@ -948,15 +1000,15 @@ func parseLaunchPair(value string) (string, string, error) {
 	return id, effort, nil
 }
 
-func validateLaunchFrom(t table, snap launchSnapshot, flavor, tier, expected string) (Entry, error) {
-	entry, err := resolveLaunchCell(t, snap, flavor, tier)
+func validateLaunchFrom(t table, snap launchSnapshot, harness, tier, expected string) (Entry, error) {
+	entry, err := resolveLaunchCell(t, snap, harness, tier)
 	if err != nil {
 		return Entry{}, err
 	}
 	if expected == "" || ActiveIDMatches(entry.ID, expected) {
 		return entry, nil
 	}
-	key := flavor + "." + tier
+	key := harness + "." + tier
 	if refusal := modelPolicyRefusal(t.ModelValidation, key, expected); refusal != nil {
 		return Entry{}, refusal
 	}
@@ -964,13 +1016,13 @@ func validateLaunchFrom(t table, snap launchSnapshot, flavor, tier, expected str
 		if otherTier == tier {
 			continue
 		}
-		other, err := resolveLaunchCell(t, snap, flavor, otherTier)
+		other, err := resolveLaunchCell(t, snap, harness, otherTier)
 		if err == nil && ActiveIDMatches(other.ID, expected) {
-			return Entry{}, &LaunchRefusal{Reason: ReasonRouteMismatch, Key: key, Value: expected, Detail: flavor + "." + otherTier}
+			return Entry{}, &LaunchRefusal{Reason: ReasonRouteMismatch, Key: key, Value: expected, Detail: harness + "." + otherTier}
 		}
 	}
 	for _, candidateTier := range Tiers {
-		for _, historical := range t.Flavors[flavor][candidateTier].History {
+		for _, historical := range t.Harnesses[harness][candidateTier].History {
 			if historical.ID == expected {
 				return Entry{}, &LaunchRefusal{Reason: ReasonRetiredModel, Key: key, Value: expected}
 			}
@@ -979,13 +1031,13 @@ func validateLaunchFrom(t table, snap launchSnapshot, flavor, tier, expected str
 	return Entry{}, &LaunchRefusal{Reason: ReasonUnmappedDispatch, Key: key, Value: expected}
 }
 
-func resolveLaunchCell(t table, snap launchSnapshot, flavor, tier string) (Entry, error) {
-	entry, selected, err := resolveStrictCell(t, snap, flavor, tier)
+func resolveLaunchCell(t table, snap launchSnapshot, harness, tier string) (Entry, error) {
+	entry, selected, err := resolveStrictCell(t, snap, harness, tier)
 	if err != nil {
 		return Entry{}, err
 	}
-	key := flavor + "." + tier
-	if selected && !flavorHasCurrentID(t, flavor, entry.ID) && flavorHasHistoricalID(t, flavor, entry.ID) {
+	key := harness + "." + tier
+	if selected && !harnessHasCurrentID(t, harness, entry.ID) && harnessHasHistoricalID(t, harness, entry.ID) {
 		return Entry{}, &LaunchRefusal{Reason: ReasonRetiredModel, Key: key, Value: entry.ID}
 	}
 	if refusal := modelPolicyRefusal(t.ModelValidation, key, entry.ID); refusal != nil {
@@ -994,22 +1046,22 @@ func resolveLaunchCell(t table, snap launchSnapshot, flavor, tier string) (Entry
 	return entry, nil
 }
 
-func resolveStrictCell(t table, snap launchSnapshot, flavor, tier string) (Entry, bool, error) {
-	tiers, ok := t.Flavors[flavor]
+func resolveStrictCell(t table, snap launchSnapshot, harness, tier string) (Entry, bool, error) {
+	tiers, ok := t.Harnesses[harness]
 	if !ok {
-		return Entry{}, false, fmt.Errorf("unknown flavor %q (known: %s)", flavor, strings.Join(flavorsOf(t), ", "))
+		return Entry{}, false, fmt.Errorf("unknown harness %q (known: %s)", harness, strings.Join(harnessesOf(t), ", "))
 	}
 	if !isKnownTier(tier) {
 		return Entry{}, false, fmt.Errorf("unknown tier %q (known: %s)", tier, strings.Join(Tiers, ", "))
 	}
 	def := tiers[tier]
-	key := flavor + "." + tier
-	value, found, err := selectedLaunchValue(snap, flavor, tier)
+	key := harness + "." + tier
+	value, found, err := selectedLaunchValue(snap, harness, tier)
 	if err != nil {
 		return Entry{}, false, err
 	}
 	entry := Entry{
-		Flavor: flavor, Tier: tier, ID: def.ID, Effort: def.Effort,
+		Harness: harness, Tier: tier, ID: def.ID, Effort: def.Effort,
 		Aliases: def.Aliases, Alternate: def.Alternate, Provenance: Default,
 	}
 	if found {
@@ -1020,7 +1072,7 @@ func resolveStrictCell(t table, snap launchSnapshot, flavor, tier string) (Entry
 		entry.ID = ov.id
 		entry.Effort = ov.effort
 		entry.Alternate = ov.alternate
-		if everShipped(def, tierDefaultEffortOf(t, flavor, tier), ov) {
+		if everShipped(def, tierDefaultEffortOf(t, harness, tier), ov) {
 			entry.Provenance = Inherited
 		} else {
 			entry.Provenance = Override
@@ -1028,24 +1080,24 @@ func resolveStrictCell(t table, snap launchSnapshot, flavor, tier string) (Entry
 		}
 	}
 	if entry.Effort == "" {
-		entry.Effort = tierDefaultEffortOf(t, flavor, tier)
+		entry.Effort = tierDefaultEffortOf(t, harness, tier)
 	}
 	if entry.Alternate != nil && entry.Alternate.Effort == "" {
 		entry.Alternate = &Alternate{ID: entry.Alternate.ID, Effort: entry.Effort}
 	}
-	if err := checkEffort(t, flavor, entry.Effort); err != nil {
+	if err := checkEffort(t, harness, entry.Effort); err != nil {
 		return Entry{}, false, fmt.Errorf("%s: %w", key, err)
 	}
 	if entry.Alternate != nil {
-		if err := checkEffort(t, flavor, entry.Alternate.Effort); err != nil {
+		if err := checkEffort(t, harness, entry.Alternate.Effort); err != nil {
 			return Entry{}, false, fmt.Errorf("%s alternate: %w", key, err)
 		}
 	}
 	return entry, found, nil
 }
 
-func selectedLaunchValue(snap launchSnapshot, flavor, tier string) (string, bool, error) {
-	dotted := flavor + "." + tier
+func selectedLaunchValue(snap launchSnapshot, harness, tier string) (string, bool, error) {
+	dotted := harness + "." + tier
 	for _, malformed := range snap.malformedRows {
 		if malformedLaunchRowMatches(malformed, dotted) {
 			return "", false, fmt.Errorf("malformed model_routing row %q for key %q", malformed, dotted)
@@ -1057,7 +1109,7 @@ func selectedLaunchValue(snap launchSnapshot, flavor, tier string) (string, bool
 	if len(snap.rows[dotted]) == 1 {
 		return snap.rows[dotted][0], true, nil
 	}
-	if flavor == "claude" {
+	if harness == "claude" {
 		for _, malformed := range snap.malformedRows {
 			if malformedLaunchRowMatches(malformed, tier) {
 				return "", false, fmt.Errorf("malformed legacy model_routing row %q for key %q", malformed, tier)
@@ -1067,7 +1119,7 @@ func selectedLaunchValue(snap launchSnapshot, flavor, tier string) (string, bool
 			return "", false, fmt.Errorf("duplicate legacy model_routing key %q", tier)
 		}
 	}
-	if flavor == "claude" && len(snap.rows[tier]) == 1 {
+	if harness == "claude" && len(snap.rows[tier]) == 1 {
 		return snap.rows[tier][0], true, nil
 	}
 	return "", false, nil
@@ -1081,18 +1133,18 @@ func malformedLaunchRowMatches(raw, key string) bool {
 	return trimmed == key || strings.HasPrefix(trimmed, key+" ") || strings.HasPrefix(trimmed, key+"\t")
 }
 
-func flavorHasCurrentID(t table, flavor, id string) bool {
+func harnessHasCurrentID(t table, harness, id string) bool {
 	for _, tier := range Tiers {
-		if t.Flavors[flavor][tier].ID == id {
+		if t.Harnesses[harness][tier].ID == id {
 			return true
 		}
 	}
 	return false
 }
 
-func flavorHasHistoricalID(t table, flavor, id string) bool {
+func harnessHasHistoricalID(t table, harness, id string) bool {
 	for _, tier := range Tiers {
-		for _, historical := range t.Flavors[flavor][tier].History {
+		for _, historical := range t.Harnesses[harness][tier].History {
 			if historical.ID == id {
 				return true
 			}
@@ -1115,28 +1167,28 @@ func modelPolicyRefusal(policy *modelValidationPolicy, key, value string) *Launc
 // loaded defaults, so tests can exercise a deliberately partial table (task
 // review Important #2) without touching the real, always-complete
 // models/defaults.json.
-func resolveFrom(t table, repoDir, flavor, tier string) (Entry, error) {
-	tiers, ok := t.Flavors[flavor]
+func resolveFrom(t table, repoDir, harness, tier string) (Entry, error) {
+	tiers, ok := t.Harnesses[harness]
 	if !ok {
-		return Entry{}, fmt.Errorf("unknown flavor %q (known: %s)", flavor, strings.Join(flavorsOf(t), ", "))
+		return Entry{}, fmt.Errorf("unknown harness %q (known: %s)", harness, strings.Join(harnessesOf(t), ", "))
 	}
 	if !isKnownTier(tier) {
 		return Entry{}, fmt.Errorf("unknown tier %q (known: %s)", tier, strings.Join(Tiers, ", "))
 	}
 	def := tiers[tier]
 	if def.ID == "" {
-		return Entry{}, fmt.Errorf("flavor %q has no %s entry", flavor, tier)
+		return Entry{}, fmt.Errorf("harness %q has no %s entry", harness, tier)
 	}
-	tierDefaultEffort := tierDefaultEffortOf(t, flavor, tier)
+	tierDefaultEffort := tierDefaultEffortOf(t, harness, tier)
 
 	entry := Entry{
-		Flavor: flavor, Tier: tier,
+		Harness: harness, Tier: tier,
 		ID: def.ID, Effort: def.Effort, Aliases: def.Aliases,
 		Alternate:  def.Alternate,
 		Provenance: Default,
 	}
 
-	if ov, found := readOverride(repoDir, flavor, tier); found {
+	if ov, found := readOverride(repoDir, harness, tier); found {
 		entry.ID = ov.id
 		entry.Effort = ov.effort
 		entry.Alternate = ov.alternate
@@ -1170,13 +1222,13 @@ func resolveFrom(t table, repoDir, flavor, tier string) (Entry, error) {
 	}
 	// The vocabulary check runs on the resolved pair, so a per-repo override
 	// asking pi for "high" fails here — the only place an effort outside a
-	// flavor's vocabulary can still enter after load-time validation.
-	if err := checkEffort(t, flavor, entry.Effort); err != nil {
-		return Entry{}, fmt.Errorf("%s.%s: %w", flavor, tier, err)
+	// harness's vocabulary can still enter after load-time validation.
+	if err := checkEffort(t, harness, entry.Effort); err != nil {
+		return Entry{}, fmt.Errorf("%s.%s: %w", harness, tier, err)
 	}
 	if entry.Alternate != nil {
-		if err := checkEffort(t, flavor, entry.Alternate.Effort); err != nil {
-			return Entry{}, fmt.Errorf("%s.%s alternate: %w", flavor, tier, err)
+		if err := checkEffort(t, harness, entry.Alternate.Effort); err != nil {
+			return Entry{}, fmt.Errorf("%s.%s alternate: %w", harness, tier, err)
 		}
 	}
 	return entry, nil
@@ -1229,14 +1281,14 @@ func everShipped(def tableEntry, tierDefaultEffort string, ov override) bool {
 	return false
 }
 
-// tierDefaultEffortOf is the effort (flavor, tier) resolves to when a cell
-// or a mirror row omits one (design D3): the flavor's own override first,
+// tierDefaultEffortOf is the effort (harness, tier) resolves to when a cell
+// or a mirror row omits one (design D3): the harness's own override first,
 // the global map second (I079 fix round 1). Every effort comparison —
 // resolution, everShipped, the update path's refresh check — goes through
 // here, so a harness with its own vocabulary never inherits a word it
 // cannot speak.
-func tierDefaultEffortOf(t table, flavor, tier string) string {
-	if e := t.TierDefaultEffortByFlavor[flavor][tier]; e != "" {
+func tierDefaultEffortOf(t table, harness, tier string) string {
+	if e := t.TierDefaultEffortByHarness[harness][tier]; e != "" {
 		return e
 	}
 	return t.TierDefaultEffort[tier]
@@ -1248,11 +1300,11 @@ func tierDefaultEffortOf(t table, flavor, tier string) string {
 // to the tier default is omitted so the common case stays a bare id and the
 // suffix always signals a real deviation.
 // The threshold here is deliberately the GLOBAL tier default, not a
-// flavor's own override (I079 fix round 1): the mirror is read by humans who
+// harness's own override (I079 fix round 1): the mirror is read by humans who
 // cannot see a per-harness default table, so a pi row rendered bare would
 // leave "what effort does this actually run at" unanswerable on the page.
 // Rendering is an economy, not a comparison — resolution, everShipped, and
-// the refresh check all consult the flavor-scoped default, and both
+// the refresh check all consult the harness-scoped default, and both
 // spellings of a pi row (bare id and "@ xhigh") resolve to the same pair.
 // A cell with an alternate appends " alt: <id> @ <effort>" on the same line
 // (I079). The alternate's effort is always spelled out — it is a deliberate
@@ -1274,8 +1326,8 @@ func MirrorValue(e Entry) string {
 }
 
 // MirrorRows renders the embedded defaults as the gen-10 WORKFLOW.md mirror
-// rows (design D8): one two-space-indented "<flavor>.<tier>: <value>" line
-// per entry, flavors sorted, tiers in Tiers order, values column-aligned.
+// rows (design D8): one two-space-indented "<harness>.<tier>: <value>" line
+// per entry, harnesses sorted, tiers in Tiers order, values column-aligned.
 // Rendered from the table — never from literals in a template — so a
 // defaults change propagates to init/update with no template edit. Embedded
 // defaults only: no repo is consulted.
@@ -1283,14 +1335,14 @@ func MirrorRows() []string {
 	type row struct{ key, val string }
 	var rows []row
 	width := 0
-	for _, flavor := range flavorsOf(defaults) {
+	for _, harness := range harnessesOf(defaults) {
 		for _, tier := range Tiers {
-			def := defaults.Flavors[flavor][tier]
-			e := Entry{Flavor: flavor, Tier: tier, ID: def.ID, Effort: def.Effort, Alternate: def.Alternate}
+			def := defaults.Harnesses[harness][tier]
+			e := Entry{Harness: harness, Tier: tier, ID: def.ID, Effort: def.Effort, Alternate: def.Alternate}
 			if e.Effort == "" {
-				e.Effort = tierDefaultEffortOf(defaults, flavor, tier)
+				e.Effort = tierDefaultEffortOf(defaults, harness, tier)
 			}
-			k := flavor + "." + tier + ":"
+			k := harness + "." + tier + ":"
 			if len(k) > width {
 				width = len(k)
 			}
@@ -1304,24 +1356,24 @@ func MirrorRows() []string {
 	return lines
 }
 
-func flavorsOf(t table) []string {
-	out := make([]string, 0, len(t.Flavors))
-	for f := range t.Flavors {
+func harnessesOf(t table) []string {
+	out := make([]string, 0, len(t.Harnesses))
+	for f := range t.Harnesses {
 		out = append(out, f)
 	}
 	sort.Strings(out)
 	return out
 }
 
-// HistoricalIDs returns every model id the embedded (flavor, tier) entry
+// HistoricalIDs returns every model id the embedded (harness, tier) entry
 // shipped as a default before the current one, in shipped order. The routing
 // audit maps transcript tokens from pre-refresh dispatches through these by
 // exact id — historical ids carry no aliases (I033), so an alias token in an
-// old transcript deliberately does not match them. Unknown flavor or tier
+// old transcript deliberately does not match them. Unknown harness or tier
 // returns nil.
-func HistoricalIDs(flavor, tier string) []string {
+func HistoricalIDs(harness, tier string) []string {
 	var ids []string
-	for _, h := range defaults.Flavors[flavor][tier].History {
+	for _, h := range defaults.Harnesses[harness][tier].History {
 		ids = append(ids, h.ID)
 	}
 	return ids
@@ -1344,7 +1396,7 @@ func HistoricalIDs(flavor, tier string) []string {
 // routing entries).
 //
 // Keys: bare known-tier keys ("fallback" — the gen ≤9 format the un-swept
-// fleet runs until I039) and dotted "<flavor>.<tier>" gen-10 mirror keys
+// fleet runs until I039) and dotted "<harness>.<tier>" gen-10 mirror keys
 // (design D8). Unknown keys are ignored by contract; the last occurrence of
 // a duplicated key wins (map semantics — duplicates never occur in a
 // machine-rendered mirror). Values come back with any trailing comment
@@ -1384,8 +1436,8 @@ func RoutingKeys(content string) map[string]string {
 }
 
 // DottedRoutingKey reports whether trimmed begins with a gen-10
-// "<flavor>.<tier>:" mirror key (design D8) and returns the dotted key. The
-// flavor half is open-ended data, so any dot-free non-empty token counts;
+// "<harness>.<tier>:" mirror key (design D8) and returns the dotted key. The
+// harness half is open-ended data, so any dot-free non-empty token counts;
 // the tier half must be a known tier. (Moved from internal/update in the
 // I037 parser consolidation; update's line-signature scan still uses it.)
 func DottedRoutingKey(trimmed string) (string, bool) {
@@ -1393,8 +1445,8 @@ func DottedRoutingKey(trimmed string) (string, bool) {
 	if !found {
 		return "", false
 	}
-	flavor, tier, dotted := strings.Cut(head, ".")
-	if !dotted || flavor == "" || strings.ContainsAny(flavor, " \t.") || !isKnownTier(tier) {
+	harness, tier, dotted := strings.Cut(head, ".")
+	if !dotted || harness == "" || strings.ContainsAny(harness, " \t.") || !isKnownTier(tier) {
 		return "", false
 	}
 	return head, true
@@ -1419,7 +1471,7 @@ func CommentIndex(s string) int {
 	return -1
 }
 
-// override is one on-disk "<flavor>.<tier>" mirror value.
+// override is one on-disk "<harness>.<tier>" mirror value.
 type override struct {
 	id        string
 	effort    string
@@ -1427,17 +1479,17 @@ type override struct {
 }
 
 // readOverride looks up repoDir's WORKFLOW.md model_routing block for the
-// dotted "<flavor>.<tier>" key design D8 defines for the gen-10 mirror,
-// falling back to the bare "<tier>" key for the claude flavor — the
+// dotted "<harness>.<tier>" key design D8 defines for the gen-10 mirror,
+// falling back to the bare "<tier>" key for the claude harness — the
 // TRANSITIONAL gen ≤9 affordance described in the package comment (I035):
-// claude is the only flavor any gen ≤9 mirror ever rendered, and bare keys
-// stay invisible to every other flavor. The EMITTED format is retired in
+// claude is the only harness any gen ≤9 mirror ever rendered, and bare keys
+// stay invisible to every other harness. The EMITTED format is retired in
 // gen-10 mirrors (I036), but the READ affordance stays live for gen-9
 // worktrees until they merge/rebase. A dotted key wins over a bare one.
 // Absence of repoDir, the file, the block, or the key all report not-found,
 // never an error — that is the "no override" and "outside a spine repo"
 // cases, not failures.
-func readOverride(repoDir, flavor, tier string) (override, bool) {
+func readOverride(repoDir, harness, tier string) (override, bool) {
 	if repoDir == "" {
 		return override{}, false
 	}
@@ -1446,10 +1498,10 @@ func readOverride(repoDir, flavor, tier string) (override, bool) {
 		return override{}, false
 	}
 	keys := RoutingKeys(string(raw))
-	if v, ok := keys[flavor+"."+tier]; ok {
+	if v, ok := keys[harness+"."+tier]; ok {
 		return parseValue(v), true
 	}
-	if flavor == "claude" {
+	if harness == "claude" {
 		if v, ok := keys[tier]; ok {
 			return parseValue(v), true
 		}

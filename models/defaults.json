@@ -5,7 +5,7 @@
     "mechanical": "low",
     "fallback": "high"
   },
-  "tierDefaultEffortByFlavor": {
+  "tierDefaultEffortByHarness": {
     "openweights": {
       "primary": "high",
       "routine": "high",
@@ -37,7 +37,7 @@
       {"name": "vendor-auto", "re": "(?i)(^|[-._/:])auto($|[-._/:])"}
     ]
   },
-  "flavors": {
+  "harnesses": {
     "claude": {
       "primary": {
         "id": "claude-fable-5",
