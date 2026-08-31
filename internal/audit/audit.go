@@ -1638,7 +1638,7 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 				if !ok || meta.AgentType != "workflow-subagent" || meta.SpawnDepth != 1 {
 					continue
 				}
-				openingLine := workflowOpeningUserLine(sub)
+				openingLine, more, models, cwd := scanWorkflowJSONL(sub, warnings)
 				referenceCount := ticketref.ReferenceCount(openingLine, ticketTokens)
 				if referenceCount == 0 {
 					continue
@@ -1648,7 +1648,6 @@ func readTranscripts(dir, source string, since time.Time, sessionID string, tick
 					continue
 				}
 				a := subagent{source: source, description: openingLine}
-				more, models, cwd := scanJSONL(sub, warnings)
 				if len(models) == 0 {
 					if agentID == "" {
 						*warnings = append(*warnings, sub+": workflow agent filename has no agent id — model fallback skipped")
@@ -1997,51 +1996,175 @@ func jsonHasDuplicateMembers(decoder *json.Decoder, path []string, invalidMember
 	return false, nil
 }
 
-func workflowOpeningUserLine(path string) string {
+// scanWorkflowJSONL applies the workflow event contract before letting the
+// common scanner read models or dispatches. A top-level event type and its
+// nested message role are one carrier, not alternate aliases: a mixed event
+// must not open worker attribution or leak an assistant model into it.
+func scanWorkflowJSONL(path string, warnings *[]string) (string, []dispatch, []string, string) {
 	f, err := os.Open(path)
 	if err != nil {
-		return ""
+		*warnings = append(*warnings, path+": unreadable: "+err.Error())
+		return "", nil, nil, ""
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		if err := f.Close(); err != nil {
+			*warnings = append(*warnings, path+": close: "+err.Error())
+		}
+	}()
+
+	var opening string
+	haveOpening := false
+	var dispatches []dispatch
+	var models []string
+	var cwd string
+	briefs := newBriefTable()
+	position := 0
+	seen := map[string]bool{}
+	malformed := 0
 	r := bufio.NewReader(f)
 	for {
 		line, readErr := r.ReadBytes('\n')
 		if len(strings.TrimSpace(string(line))) > 0 {
-			var event struct {
-				Type    string `json:"type"`
-				Message struct {
-					Role    string          `json:"role"`
-					Content json.RawMessage `json:"content"`
-				} `json:"message"`
+			event, ok := parseWorkflowEvent(line)
+			if !ok {
+				malformed++
+			} else {
+				if event.Type == "user" && !haveOpening {
+					text, _ := workflowUserMessageText(event.Message.Content)
+					opening = firstLine(text)
+					haveOpening = true
+				}
+				d, prompts, model, lineCwd, parsed := parseLine(line, briefs, &position)
+				if !parsed {
+					malformed++
+				} else {
+					dispatches = append(dispatches, d...)
+					for _, prompt := range prompts {
+						attributeTeamPromptWithBriefs(dispatches, prompt, briefs)
+					}
+					if model != "" && !seen[model] {
+						seen[model] = true
+						models = append(models, model)
+					}
+					if cwd == "" && lineCwd != "" {
+						cwd = lineCwd
+					}
+				}
 			}
-			if json.Unmarshal(line, &event) == nil && (event.Type == "user" || event.Message.Role == "user") {
-				return firstLine(workflowMessageText(event.Message.Content))
-			}
+		}
+		if readErr == io.EOF {
+			break
 		}
 		if readErr != nil {
-			return ""
+			*warnings = append(*warnings, path+": read error: "+readErr.Error())
+			break
 		}
+	}
+	if malformed > 0 {
+		*warnings = append(*warnings, fmt.Sprintf("%s: %d malformed line(s) skipped", path, malformed))
+	}
+	return opening, dispatches, models, cwd
+}
+
+type workflowEvent struct {
+	Type    string                `json:"type"`
+	Cwd     string                `json:"cwd"`
+	Message *workflowEventMessage `json:"message"`
+}
+
+type workflowEventMessage struct {
+	Role    string          `json:"role"`
+	Model   string          `json:"model"`
+	Content json.RawMessage `json:"content"`
+}
+
+// parseWorkflowEvent accepts only the two observed carrier shapes. Exact
+// JSON member spellings matter because encoding/json otherwise accepts
+// case-insensitive aliases, which would let a drifted or ambiguous event
+// manufacture routing evidence.
+func parseWorkflowEvent(line []byte) (workflowEvent, bool) {
+	var event workflowEvent
+	duplicate, err := unmarshalWorkflowEvent(line, &event)
+	if duplicate || err != nil || event.Message == nil || event.Type == "" || event.Message.Role == "" || event.Type != event.Message.Role {
+		return workflowEvent{}, false
+	}
+	switch event.Type {
+	case "user":
+		_, ok := workflowUserMessageText(event.Message.Content)
+		return event, ok
+	case "assistant":
+		return event, workflowAssistantMessageContent(event.Message.Content)
+	default:
+		return workflowEvent{}, false
 	}
 }
 
-func workflowMessageText(raw json.RawMessage) string {
+func unmarshalWorkflowEvent(data []byte, dst any) (bool, error) {
+	return unmarshalUniqueJSONWithMemberValidator(data, dst, func(path []string, name string) bool {
+		switch {
+		case len(path) == 0:
+			return caseVariantJSONMember(name, "type", "cwd", "message")
+		case len(path) == 1 && path[0] == "message":
+			return caseVariantJSONMember(name, "role", "model", "content")
+		case len(path) == 3 && path[0] == "message" && path[1] == "content" && strings.HasPrefix(path[2], "["):
+			return caseVariantJSONMember(name, "type", "text")
+		default:
+			return false
+		}
+	})
+}
+
+// workflowUserMessageText preserves the string and text-block forms observed
+// in user messages. A structurally malformed content value does not consume
+// the opening-user latch, so a later valid user event can still be the brief.
+func workflowUserMessageText(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false
+	}
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
-		return text
+		return text, true
 	}
 	var blocks []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	}
-	if json.Unmarshal(raw, &blocks) != nil {
-		return ""
+	if json.Unmarshal(raw, &blocks) != nil || len(blocks) == 0 {
+		return "", false
 	}
 	for _, block := range blocks {
-		if block.Type == "text" && block.Text != "" {
-			return block.Text
+		if block.Type != "text" {
+			return "", false
+		}
+		if block.Text != "" {
+			return block.Text, true
 		}
 	}
-	return ""
+	return "", true
+}
+
+// workflowAssistantMessageContent keeps the broader assistant block shape
+// that parseLine needs for tool-use dispatches while rejecting scalar, null,
+// and malformed nested containers before their model can become evidence.
+func workflowAssistantMessageContent(raw json.RawMessage) bool {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return true
+	}
+	var blocks []json.RawMessage
+	if json.Unmarshal(raw, &blocks) != nil || len(blocks) == 0 {
+		return false
+	}
+	for _, block := range blocks {
+		var object map[string]json.RawMessage
+		if json.Unmarshal(block, &object) != nil || object == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // fileMTime is sessionInScope's --since probe (D28, ticket I047): a file or
