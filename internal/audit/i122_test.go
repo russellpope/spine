@@ -188,6 +188,155 @@ func TestWorkflowTranscriptRejectsAtomicReplacement(t *testing.T) {
 	}
 }
 
+// Replacing any named path component after the pre-open hook must invalidate
+// workflow evidence. A retained descriptor into the renamed-away tree is safe
+// to read, but it is no longer the evidence named by the transcript root.
+func TestWorkflowEvidenceRejectsAncestorReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		evidence   string
+		components []string
+		warning    string
+	}{
+		{name: "transcript session", evidence: "transcript", components: []string{"session-1"}, warning: "workflow transcript unsafe — transcript skipped"},
+		{name: "transcript subagents", evidence: "transcript", components: []string{"session-1", "subagents"}, warning: "workflow transcript unsafe — transcript skipped"},
+		{name: "transcript workflows", evidence: "transcript", components: []string{"session-1", "subagents", "workflows"}, warning: "workflow transcript unsafe — transcript skipped"},
+		{name: "transcript workflow directory", evidence: "transcript", components: []string{"session-1", "subagents", "workflows", "wf_1"}, warning: "workflow transcript unsafe — transcript skipped"},
+		{name: "transcript file", evidence: "transcript", components: []string{"session-1", "subagents", "workflows", "wf_1", "agent-worker.jsonl"}, warning: "workflow transcript unsafe — transcript skipped"},
+		{name: "sidecar session", evidence: "sidecar", components: []string{"session-1"}, warning: "workflow metadata unsafe — transcript skipped"},
+		{name: "sidecar subagents", evidence: "sidecar", components: []string{"session-1", "subagents"}, warning: "workflow metadata unsafe — transcript skipped"},
+		{name: "sidecar workflows", evidence: "sidecar", components: []string{"session-1", "subagents", "workflows"}, warning: "workflow metadata unsafe — transcript skipped"},
+		{name: "sidecar workflow directory", evidence: "sidecar", components: []string{"session-1", "subagents", "workflows", "wf_1"}, warning: "workflow metadata unsafe — transcript skipped"},
+		{name: "sidecar file", evidence: "sidecar", components: []string{"session-1", "subagents", "workflows", "wf_1", "agent-worker.meta.json"}, warning: "workflow metadata unsafe — transcript skipped"},
+		{name: "run session", evidence: "run", components: []string{"session-1"}, warning: "workflow run metadata unsafe — model fallback skipped"},
+		{name: "run workflows", evidence: "run", components: []string{"session-1", "workflows"}, warning: "workflow run metadata unsafe — model fallback skipped"},
+		{name: "run file", evidence: "run", components: []string{"session-1", "workflows", "wf_1.json"}, warning: "workflow run metadata unsafe — model fallback skipped"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for attempt := 0; attempt < 3; attempt++ {
+				repo := t.TempDir()
+				writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I915": "routine"})
+				transcripts := t.TempDir()
+				model := "claude-sonnet-5"
+				if tc.evidence == "run" {
+					model = ""
+				}
+				writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I915", model, "workflow-subagent")
+				if tc.evidence == "run" {
+					writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-sonnet-5")
+				}
+
+				target := filepath.Join(append([]string{transcripts}, tc.components...)...)
+				replaceWorkflowPathDuringOpen(t, tc.evidence, transcripts, repo, workflowEvidencePath(transcripts, tc.evidence), target)
+
+				rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if row := rowsByID(t, rep)["I915"]; row.Verdict != VerdictNoTranscript {
+					t.Fatalf("attempt %d: I915 = %+v, want no-transcript after replacing %s", attempt, row, tc.name)
+				}
+				if !warningContains(rep.Warnings, tc.warning) {
+					t.Fatalf("attempt %d: warnings = %q, want %q", attempt, rep.Warnings, tc.warning)
+				}
+			}
+		})
+	}
+}
+
+func replaceWorkflowPathDuringOpen(t *testing.T, evidence, transcripts, repo, evidencePath, target string) {
+	t.Helper()
+	replaced := false
+	hook := func(path string) {
+		if replaced || path != evidencePath {
+			return
+		}
+		replaced = true
+		stale := target + ".stale"
+		if err := os.Rename(target, stale); err != nil {
+			t.Fatal(err)
+		}
+		switch evidence {
+		case "transcript":
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I916", "claude-sonnet-5", "workflow-subagent")
+		case "sidecar":
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I915", "claude-sonnet-5", "code-reviewer")
+		case "run":
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I915", "", "workflow-subagent")
+			writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-haiku-4-5")
+		default:
+			t.Fatalf("unknown workflow evidence %q", evidence)
+		}
+	}
+	switch evidence {
+	case "transcript":
+		setWorkflowTranscriptBeforeOpen(t, hook)
+	case "sidecar", "run":
+		setWorkflowMetadataBeforeOpen(t, hook)
+	default:
+		t.Fatalf("unknown workflow evidence %q", evidence)
+	}
+}
+
+func workflowEvidencePath(transcripts, evidence string) string {
+	switch evidence {
+	case "transcript", "sidecar":
+		return filepath.Join(transcripts, "session-1", "subagents", "workflows", "wf_1", "agent-worker."+map[string]string{"transcript": "jsonl", "sidecar": "meta.json"}[evidence])
+	case "run":
+		return filepath.Join(transcripts, "session-1", "workflows", "wf_1.json")
+	default:
+		return ""
+	}
+}
+
+// A temporary rename that restores the same object at the same named path is
+// legitimate. The revalidation must reject changed identities, not directory
+// activity by itself.
+func TestWorkflowEvidenceAcceptsRestoredSameObject(t *testing.T) {
+	for _, evidence := range []string{"transcript", "sidecar", "run"} {
+		t.Run(evidence, func(t *testing.T) {
+			repo := t.TempDir()
+			writeAuditRepo(t, repo, gen9DefaultWorkflow, map[string]string{"I916": "routine"})
+			transcripts := t.TempDir()
+			model := "claude-sonnet-5"
+			if evidence == "run" {
+				model = ""
+			}
+			writeWorkflowAgent(t, transcripts, "session-1", "wf_1", "worker", repo, "Implement I916", model, "workflow-subagent")
+			if evidence == "run" {
+				writeWorkflowRun(t, transcripts, "session-1", "wf_1", "worker", "claude-sonnet-5")
+			}
+			target := workflowEvidencePath(transcripts, evidence)
+			hook := func(path string) {
+				if path != target {
+					return
+				}
+				staged := target + ".staged"
+				if err := os.Rename(target, staged); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(staged, target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch evidence {
+			case "transcript":
+				setWorkflowTranscriptBeforeOpen(t, hook)
+			case "sidecar", "run":
+				setWorkflowMetadataBeforeOpen(t, hook)
+			}
+
+			rep, err := Run(Options{RepoDir: repo, ClaudeTranscriptsDir: transcripts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row := rowsByID(t, rep)["I916"]; row.Verdict != VerdictMatch {
+				t.Fatalf("I916 = %+v, want match when the named path restores the same object", row)
+			}
+		})
+	}
+}
+
 func TestWorkflowRunMetadataFallbackFailsClosed(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
