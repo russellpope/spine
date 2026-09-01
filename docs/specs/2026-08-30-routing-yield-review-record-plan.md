@@ -39,8 +39,9 @@ repository-local fixtures.
   scratch files.
 - The owner-directed ship sequence is: finish I076's gated tail and close it
   as `fixed, pending batch ship`; complete final whole-branch review, routing
-  audit, and fresh handoff; then, once every included ticket is fixed, blocked,
-  or surfaced, run one batch-final `maipipe run full --wait` at the exact final
+  audit, and fresh handoff; then, once every included ticket is fixed, or is
+  recorded blocked by a concrete owner decision or dependency, run one
+  batch-final `maipipe run full --wait` at the exact final
   main SHA. Do not claim or run a standalone I073 or I076 lane. A later commit
   invalidates that batch-final lane and requires a rerun at the new exact SHA.
 
@@ -49,6 +50,7 @@ repository-local fixtures.
 | Files | Responsibility |
 | --- | --- |
 | `internal/yield/yield.go` | Exact REVIEW and existing escalation/fallback parsing, identity handling, scope discovery, aggregation, and typed diagnostics. |
+| `internal/yield/fleet.go` | Immediate-child fleet discovery and isolated descriptor-root repository inspection. |
 | `internal/yield/yield_test.go` | Parser, duplicate/conflict, thresholds, ordering, no-inference, and isolated-fleet test matrix. |
 | `cmd/spine/main.go` | `yield` dispatch, flags-first command boundary, text/JSON presentation, and exit selection. |
 | `cmd/spine/main_test.go` | Public CLI grammar, output, JSON, exit-code, privacy, and fleet-isolation coverage. |
@@ -114,25 +116,27 @@ ignored identities, bounded diagnostics, and report confidence state.
   Reject `ticket:-` task records, an unattributable accepted record, a
   partial-unattributable form, a missing condition, and `condition:` on a
   task or attributable-final record.
-- [ ] Add failing aggregation tests: exact duplicate counts once; a conflicting
-  `(scope, ticket, round)` excludes the whole task sequence; a conflicting
-  `(scope, condition, round)` excludes an unattributable final condition;
+- [ ] Add failing aggregation tests: exact duplicate counts once with a visible
+  warning; a conflicting `(scope, ticket, round)` excludes the whole task
+  sequence; a conflicting attributable-final identity is excluded. The bounded
+  unattributable-final grammar fixes every field, so its only reachable repeat
+  is an exact duplicate and must deduplicate to one final outcome;
   first-round task accepted and needs-fixes partition `n`; a valid
   needs-fixes round one followed by accepted round two contributes one
   `rework_round`; and a complete three-round sequence contributes two.
 - [ ] Add failing invalid-sequence tests for round two without round one, a
-  round-one/round-three gap, and a review after accepted. Assert each excludes
-  the ticket from all task denominators, increments ignored task sequences
-  once, and produces exit 1. Include a sequence whose later round uses another
-  model/tier; assert all `max(round)-1` rework rounds stay attributed to its
-  round-one task cell.
+  round-one/round-three gap, a review after accepted, and 20 distinct sequences
+  that end in `needs-fixes`. Assert each excludes the ticket from all task
+  denominators, increments ignored task sequences once, and produces exit 1.
+  Include a sequence whose later round uses another model/tier; assert all
+  `max(round)-1` rework rounds stay attributed to its round-one task cell.
 - [ ] Add tests that final attributable accepted/needs-fixes and unattributable
   needs-fixes stay separate; model IDs remain opaque keys; and no defaults,
   ticket, transcript, or filename input is accepted by the package API.
-- [ ] Add failing threshold tests for `n=19`, `n=20`, `n=39`, and `n=40`.
-  Assert `refused/insufficient`, `low-confidence`, `low-confidence`, and
-  `stated` respectively, with a one-decimal first-pass percentage only when
-  the PRD permits it.
+- [ ] Add failing threshold tests for `n=0`, `n=19`, `n=20`, `n=39`, and
+  `n=40`. Assert `refused/insufficient`, `refused/insufficient`,
+  `low-confidence`, `low-confidence`, and `stated` respectively, with a
+  one-decimal first-pass percentage only when the PRD permits it.
 - [ ] Run `go test ./internal/yield -run 'Test(ParseReview|Aggregate|Threshold)' -count=1`.
   Expected: FAIL because the package and parser do not exist.
 - [ ] Implement a column-zero ordered-token parser. Keep model IDs opaque.
@@ -160,8 +164,8 @@ ignored identities, bounded diagnostics, and report confidence state.
 - Modify: `internal/yield/yield.go`
 - Modify: `internal/yield/yield_test.go`
 
-**Produces:** lexical child statuses and aggregate cells whose identity includes
-repository name.
+**Produces:** lexical child statuses, repository-qualified record and sequence
+identity, and fleetwide aggregate cells keyed by `(harness, model, tier)`.
 
 - [ ] Write failing filesystem tests with immediate children for a primary
   repository (`.git` directory), linked worktree (`.git` file), hidden
@@ -171,15 +175,21 @@ repository name.
   nested entries are not read; a missing ledger contributes explicit zero
   counts; one broken child leaves other aggregates intact; and same-number
   tickets do not collide.
-- [ ] Assert fleet statuses and aggregate cells sort lexically by repository
-  then harness/model/tier. Assert the package does not follow symlinks or read
-  the fleet parent itself as a repository.
+- [ ] Assert fleet statuses sort lexically by repository and aggregate cells
+  sort by harness/model/tier. Assert the package does not follow symlinks or
+  read the fleet parent itself as a repository.
 - [ ] Run `go test ./internal/yield -run 'TestFleet' -count=1`.
   Expected: FAIL because fleet discovery is absent.
 - [ ] Implement immediate-child directory discovery, a `.git` directory
-  check, safe no-follow inspection, per-child error capture, and aggregation
-  after repository-qualified identity checks. Keep parent errors distinct from
-  child errors.
+  check, and descriptor-rooted no-follow ledger reads. Reject a symlinked
+  selected root. Lstat `.superpowers`, `sdd`, and `progress.md`; open each
+  directory relative to a retained `os.Root`; match observed, opened, and
+  current identities; require directories or a regular final ledger as
+  appropriate; read only through the retained descriptor; and handle close
+  errors. Treat a missing final ledger as `missing-ledger`; treat a symlink,
+  replacement, malformed component, or read/close error as an isolated child
+  error. Keep parent errors distinct from child errors and do not use
+  check-then-`os.ReadFile`.
 - [ ] Run `gofmt -w internal/yield` and `go test ./internal/yield -count=1`.
   Expected: PASS.
 - [ ] Request task review that attempts double counting through a linked
@@ -188,7 +198,7 @@ repository name.
 - [ ] Commit only these paths:
 
   ```bash
-  git add internal/yield/yield.go internal/yield/yield_test.go
+  git add internal/yield/yield.go internal/yield/fleet.go internal/yield/yield_test.go
   git commit -m "feat(I076): isolate fleet yield reads"
   ```
 
@@ -205,14 +215,23 @@ repository name.
 - [ ] Add failing `runCmd` tests for default `--dir`, an explicit dir,
   `--fleet`, mutually supplied `--dir` and `--fleet`, a flag after a
   positional, an invalid root, and a missing ledger.
-- [ ] Add failing text/JSON assertions for zero totals, `n=19`, `n=20`, and
-  `n=40`. Assert counts always print, rates are refused below 20, confidence
-  labels match the PRD, and exits are 1, 0, and 0 respectively. Add a final
+- [ ] Add failing text/JSON assertions for missing-ledger zero totals and
+  `n=0`, `n=19`, `n=20`, `n=39`, and `n=40`. Assert text/JSON parity for the
+  typed report-level `rate=refused` and `confidence=insufficient` state when
+  no task cell exists, without a synthetic cell or inferred rate. Assert
+  counts always print, confidence labels match the PRD, and exits are 1, 0,
+  and 0 at the rate boundaries. Add a final
   accepted, attributable needs-fixes, and unattributable needs-fixes fixture;
   assert their separate totals have no percentage and do not alter task `n`.
 - [ ] Add failing tests for a malformed REVIEW identity and a broken fleet child
   that still print valid peer counts and return exit 1. Assert root and usage
   errors return 2 before a report.
+- [ ] Add failing hostile ledger tests for per-repository and fleet modes:
+  final-ledger symlinks outside and to the same object, intermediate
+  `.superpowers`/`sdd` symlinks, and component or file replacement between
+  observation and open. Include positive regular and missing-ledger controls,
+  a retained fleet peer with a bounded repository-only diagnostic and exit 1,
+  and assertions that no outside path, model, or content leaks.
 - [ ] Add failing privacy tests that place distinctive text in a malformed
   ledger line, an unattributable `condition:` token, and a transcript-like
   file. Assert none appears in stdout/stderr and changing the transcript-like
@@ -287,8 +306,9 @@ I076. Modify the I076 ticket only after all gates pass.
   SHA. After the focused and full reviews, requirements attack, and independent
   verification pass, close I076 as `fixed, pending batch ship`. Do not run or
   claim a standalone I076 lane. The owner-directed batch-final lane runs only
-  after every included ticket has a fixed, blocked, or surfaced disposition,
-  and after final whole-branch review, routing audit, and fresh handoff. Any
+  after every included ticket is fixed, or is recorded blocked by a concrete
+  owner decision or dependency, and after final whole-branch review, routing
+  audit, and fresh handoff. Any
   post-lane commit requires a rerun at the new exact SHA.
 - [ ] Re-read the PRD line by line for the final spec review. Record the
   requirements attack and all evidence in I076; leave it open if any focused

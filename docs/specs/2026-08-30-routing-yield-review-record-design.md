@@ -42,9 +42,9 @@ the fresh primary post-fleet PASS. I076 may therefore consume I073's canonical
 The owner-directed open-ledger sequence is: finish I073 post-fleet acceptance,
 finish I076's gated tail and close it as `fixed, pending batch ship`, then
 complete the final whole-branch review, run the routing audit, and create a
-fresh handoff. Once every included ticket has a fixed, blocked, or surfaced
-disposition, run one `maipipe run full --wait` at the resulting exact final
-main SHA. No standalone I073 lane and no standalone I076 lane is required or
+fresh handoff. Once every included ticket is fixed, or is recorded blocked by a
+concrete owner decision or dependency, run one `maipipe run full --wait` at the
+resulting exact final main SHA. No standalone I073 lane and no standalone I076 lane is required or
 claimed. The single batch-final lane is the ship verdict. Any commit after that
 lane invalidates its result and requires the lane to be rerun at the new exact
 SHA.
@@ -113,21 +113,24 @@ ticket's final-review verdict, but no final record contributes to a
 harness/model/tier task denominator. The unattributable form reports only a
 condition that requires fixes, without manufacturing a ticket or route.
 
-For each repository, task and attributable-final identities are
+Within a repository, task and attributable-final identities are
 `(scope, ticket-id, round)`; an unattributable-final identity is
-`(scope, condition-id, round)`. Each identity must have exactly one valid
-REVIEW line. An exact duplicate counts once and emits a duplicate warning. Two
-non-identical valid lines for an identity, or a malformed candidate line, are
-not repaired by choosing the last line. The conflicted identity is excluded
-from its series and appears in ignored-record counts.
+`(scope, condition-id, round)`. Each identity has one logical outcome. An
+exact duplicate is visible, emits a duplicate warning, and deduplicates to that
+one logical outcome. A malformed candidate and a conflicting task or
+attributable-final record are excluded, never repaired by choosing the last
+line, and appear in ignored-record counts. The bounded unattributable-final
+grammar fixes every remaining field, so its reachable repetition is an exact
+duplicate rather than a non-identical conflict.
 
 A task ticket's valid review sequence is contiguous: it has exactly one
 unambiguous task record for every round from 1 through its maximum round. Every
 round after 1 must follow a `needs-fixes` verdict, and an `accepted` verdict
-ends the sequence. A missing predecessor, a gap, a round after acceptance, or
-a conflicting round invalidates the whole task sequence. Yield excludes that
-ticket's task records from all task cells, counts one ignored task sequence,
-and returns exit 1 rather than inventing a rework count.
+ends the sequence. Its final record must be `accepted`. A missing predecessor,
+a gap, a round after acceptance, a conflicting round, or a sequence ending in
+`needs-fixes` invalidates the whole task sequence. Yield excludes that ticket's
+task records from all task cells, counts one ignored task sequence, and returns
+exit 1 rather than inventing a rework count.
 
 ## Parser ownership and compatibility
 
@@ -173,6 +176,17 @@ All flags precede positionals. There are no positionals. `--dir` defaults to
 ledgers, handoffs, ticket files, transcripts, git history, host configuration,
 or user-home data.
 
+Yield binds this selected path to the repository before reading it. It rejects a
+symlinked selected root, then opens a retained descriptor root and examines
+`.superpowers`, `sdd`, and `progress.md` one component at a time with `Lstat`,
+without following links. Each directory is opened relative to its retained
+parent descriptor and matched to both the observed and current object identity.
+The final ledger must be a regular file, is opened relative to the retained
+descriptor, and is matched to its observed and current identity before reading.
+Close errors are handled as read errors. A missing final ledger remains
+`missing-ledger`; a symlink, replacement, malformed component, or read/close
+failure is an error. This prevents a check-then-`os.ReadFile` race.
+
 `--fleet P` is mutually exclusive with `--dir`. It follows the existing
 fleet reader convention of scanning only immediate, non-hidden children of
 `P`, in lexical repository-name order. A child contributes only when its
@@ -186,12 +200,14 @@ repository-scoped diagnostic and leaves that child out of aggregate counts;
 other repositories still report. An unreadable `--fleet` parent, an invalid
 explicit `--dir`, or invalid flags are command errors and stop before a report.
 
-Within fleet aggregation, task and attributable-final identity is
+Within fleet aggregation, repository-qualified task and attributable-final
+record and sequence identity is
 `(repo, scope, ticket-id, round)`; unattributable-final identity is
 `(repo, scope, condition-id, round)`. That keeps same-number tickets in
-different repositories and separate final conditions from colliding. Fleet
-output sorts aggregate cells by harness, model ID, then tier, and repository
-status rows by repository name. Sorting and conflict-exclusion happen before
+different repositories and separate final conditions from colliding. Aggregate
+cell identity remains `(harness, model, tier)` across the fleet. Fleet output
+sorts aggregate cells by harness, model ID, then tier, and repository status
+rows by repository name. Sorting and conflict-exclusion happen before
 formatting in both text and JSON.
 
 ## Counts, confidence, output, and exits
@@ -215,7 +231,10 @@ Text output always begins with a scope summary and a totals line, even when no
 cell is countable. It then prints one deterministic cell row per key and, in
 fleet mode, one deterministic repository status row per eligible child. JSON
 contains the same task and final totals, cell rows, repository statuses, and
-confidence state. Neither format prints a ledger line, review reason,
+confidence state. When no task cell exists, the typed report-level state is
+`rate: "refused"` and `confidence: "insufficient"`; text and JSON both render
+that state and JSON does not synthesize a cell or percentage. Neither format
+prints a ledger line, review reason,
 condition-ID-derived description, transcript content,
 filesystem path below the repository name, or a guessed model family.
 
@@ -244,9 +263,10 @@ they never echo a malformed line or its free text. The model ID itself is shown
 only because it is the requested aggregation key.
 
 One bad REVIEW record cannot change a valid neighbor's cell, and one bad fleet
-child cannot erase counts from other children. A malformed or duplicated record
-is visible and excluded. A missing ledger is ordinary zero evidence, never an
-invented accepted outcome.
+child cannot erase counts from other children. A malformed or conflicting
+record is visible and excluded. An exact duplicate is visible, warns, and
+deduplicates to one logical outcome. A missing ledger is ordinary zero evidence,
+never an invented accepted outcome.
 
 ## Requirements attack
 
@@ -255,11 +275,11 @@ invented accepted outcome.
 | Review filenames, transcripts, or current ticket state seem easier to mine. | Do not mine them. Only explicit REVIEW records create outcome evidence. |
 | A new line says `flavor` while I073 is still in flight. | Use only `harness`; block code on I073's independently verified exact SHA. |
 | A model lookup can "correct" a mistyped actual ID. | Treat the recorded model ID as opaque and reject malformed syntax only. |
-| Replayed or contradictory lines can inflate a denominator. | Deduplicate exact repeats, exclude conflicting identities, count exclusions, and return exit 1. |
-| A round-two line appears without a complete review history. | Require a contiguous task sequence, stop after accepted, and count rework as max round minus one. |
+| Replayed or contradictory lines can inflate a denominator. | Deduplicate exact repeats, exclude malformed or conflicting task and attributable-final identities, count exclusions, and return exit 1. |
+| A round-two line appears without a complete review history. | Require a contiguous task sequence that ends in accepted, stop after accepted, and count rework as max round minus one. |
 | Final review failures make task-gate acceptance look better than it is. | Report attributable and unattributable final outcomes separately beside task rates; never fold them into a task denominator. |
 | Existing ESCALATION/FALLBACK lines manufacture model-cell rates. | Count them only as report-wide totals. Do not assign them to cells. |
-| Fleet scans double-count linked worktrees or hide a bad repository. | Scan immediate primary `.git` directories only; print every eligible child's status and isolate failures. |
+| Fleet scans double-count linked worktrees, follow a selected ledger symlink, or hide a bad repository. | Scan immediate primary `.git` directories only; bind no-follow descriptor-root ledger reads, print every eligible child's status, and isolate failures. |
 | A low-sample percentage becomes a routing instruction. | Refuse below 20, label 20-39 low confidence, and add no recommendation or rating rule. |
 | Diagnostics leak reviewer notes or prompt data. | Print aggregate counts and bounded line diagnostics only; never print line text or read transcripts. |
 
@@ -274,10 +294,13 @@ invented accepted outcome.
    `--fleet` reads only immediate primary child repositories with isolated
    failures and no linked-worktree double count.
 3. Counts, sorting, text output, JSON output, confidence labels, and exit codes
-   are deterministic. Counts print even when every rate is refused.
+   are deterministic. Counts print even when every rate is refused. Zero
+   evidence exposes report-level JSON `rate: "refused"` and
+   `confidence: "insufficient"` without a fake cell.
 4. Task rates are absent below 20, low-confidence at 20-39, and stated at 40
-   or more. Final outcomes print separately with no rate. The command adds no
-   rating, recommendation, or model inference.
+   or more. Permanent coverage includes n=0, 19, 20, 39, and 40. Final outcomes
+   print separately with no rate. The command adds no rating, recommendation,
+   or model inference.
 5. Existing model-tier ESCALATION/FALLBACK records are counted without a new
    record type and without unsupported per-model attribution.
 6. The implementation reads no filenames or transcripts to derive outcomes and
@@ -290,7 +313,7 @@ invented accepted outcome.
 8. Focused red-green tests, task review, independent verification, and a final
    requirements attack pass before I076 closes as `fixed, pending batch ship`.
    The ship verdict is delegated to the owner-directed batch-final `maipipe run
-   full --wait` after every included ticket has a fixed, blocked, or surfaced
-   disposition, and after final whole-branch review, routing audit, and a fresh
+   full --wait` after every included ticket is fixed, or is recorded blocked by
+   a concrete owner decision or dependency, and after final whole-branch review, routing audit, and a fresh
    handoff, at that batch's exact final SHA. No standalone I076 lane is required
    or claimed; a post-lane commit invalidates the lane and requires a rerun.

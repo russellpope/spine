@@ -49,7 +49,8 @@ I076 Task 1 may pass on that durable evidence. This ticket remains open for its
 gated tail. After focused and full review, an independent verification, and the
 final requirements attack pass, I076 closes as `fixed, pending batch ship`.
 The owner-directed batch-final exact-SHA `maipipe run full --wait` runs only
-after every included ticket has that fixed, blocked, or surfaced disposition,
+after every included ticket is fixed, or is recorded blocked by a concrete
+owner decision or dependency,
 following the final whole-branch review, routing audit, and fresh handoff. No
 standalone I073 or I076 lane is required or claimed. The batch-final lane is
 the ship verdict; any post-lane commit invalidates it and requires a rerun at
