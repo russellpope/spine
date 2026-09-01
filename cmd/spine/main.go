@@ -115,10 +115,19 @@ func cmdYield(args []string, stdout, stderr io.Writer) int {
 	if _, ok := parseArgs(fs, args, "yield", yieldUsage, 0, stderr); !ok {
 		return 2
 	}
-	dirSet := false
+	dirSet, fleetSet := false, false
 	fs.Visit(func(f *flag.Flag) {
-		dirSet = dirSet || f.Name == "dir"
+		switch f.Name {
+		case "dir":
+			dirSet = true
+		case "fleet":
+			fleetSet = true
+		}
 	})
+	if (dirSet && *dir == "") || (fleetSet && *fleet == "") {
+		fmt.Fprintf(stderr, "yield: --dir or --fleet needs a directory value\n%s\n", yieldUsage)
+		return 2
+	}
 	if *fleet != "" && dirSet {
 		fmt.Fprintf(stderr, "yield: --dir and --fleet are mutually exclusive\n%s\n", yieldUsage)
 		return 2

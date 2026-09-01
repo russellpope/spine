@@ -192,6 +192,34 @@ func TestYieldFlagsFirstScopesAndUsage(t *testing.T) {
 	}
 }
 
+func TestYieldRejectsExplicitEmptyRootsBeforeReadingDefaultDirectory(t *testing.T) {
+	repo := t.TempDir()
+	writeYieldLedger(t, repo, yieldRecords(20, "codex", "current-directory-model", "routine"))
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	for _, args := range [][]string{
+		{"yield", "--dir="},
+		{"yield", "--fleet="},
+		{"yield", "--dir", ""},
+		{"yield", "--fleet", ""},
+	} {
+		code, out, errs := runCmd(t, args...)
+		if code != 2 || out != "" || !strings.Contains(errs, "needs a directory value") {
+			t.Fatalf("args=%v code=%d out=%q stderr=%q", args, code, out, errs)
+		}
+		if strings.Contains(out, "current-directory-model") || strings.Contains(errs, "current-directory-model") {
+			t.Fatalf("args=%v read the current repository: out=%q stderr=%q", args, out, errs)
+		}
+	}
+}
+
 func TestYieldRootMissingLedgerThresholdsAndDeterministicOrdering(t *testing.T) {
 	if code, out, errs := runCmd(t, "yield", "--dir", filepath.Join(t.TempDir(), "missing")); code != 2 || out != "" || !strings.Contains(errs, "yield:") {
 		t.Fatalf("invalid root: code=%d out=%q stderr=%q", code, out, errs)
