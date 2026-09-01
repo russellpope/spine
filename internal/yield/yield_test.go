@@ -58,6 +58,35 @@ func TestParseReviewRejectsMalformedCandidatesWithoutEchoingInput(t *testing.T) 
 	}
 }
 
+func TestRunSurfacesMalformedReviewWhitespaceCandidates(t *testing.T) {
+	dir := t.TempDir()
+	malformed := []string{
+		"REVIEW\tI076 harness:codex model:tab-secret tier:routine round:1 verdict:accepted scope:task",
+		" REVIEW I076 harness:codex model:leading-secret tier:routine round:1 verdict:accepted scope:task",
+		"REVIEW",
+	}
+	writeLedger(t, dir, strings.Join(append(malformed, "REVIEWED unrelated-secret"), "\n"))
+
+	report, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Totals.IgnoredIdentities != len(malformed) || report.ExitCode() != 1 {
+		t.Fatalf("totals=%+v exit=%d", report.Totals, report.ExitCode())
+	}
+	if len(report.Diagnostics) != len(malformed) {
+		t.Fatalf("diagnostics=%+v", report.Diagnostics)
+	}
+	for i, diagnostic := range report.Diagnostics {
+		if diagnostic.Line != i+1 || diagnostic.Message != fmt.Sprintf("REVIEW line %d malformed", i+1) {
+			t.Fatalf("diagnostic=%+v", diagnostic)
+		}
+		if strings.Contains(diagnostic.Message, "secret") || strings.Contains(diagnostic.Message, "REVIEWED") {
+			t.Fatalf("diagnostic leaked ledger content: %+v", diagnostic)
+		}
+	}
+}
+
 func TestParseReviewSeparatesFinalForms(t *testing.T) {
 	cases := []struct {
 		line       string

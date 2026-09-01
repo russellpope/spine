@@ -199,7 +199,10 @@ func parseLedger(raw, repository string) localResult {
 
 func looksLikeReview(line string) bool {
 	trimmed := strings.TrimLeft(line, " \t")
-	return strings.HasPrefix(trimmed, "REVIEW") && (len(trimmed) == len("REVIEW") || trimmed[len("REVIEW")] == ' ')
+	if !strings.HasPrefix(trimmed, "REVIEW") {
+		return false
+	}
+	return len(trimmed) == len("REVIEW") || trimmed[len("REVIEW")] == ' ' || trimmed[len("REVIEW")] == '\t'
 }
 
 func parseReview(lineNo int, line string) (Record, string, bool) {
