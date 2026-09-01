@@ -1,6 +1,7 @@
 package yield
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -35,6 +36,9 @@ func runFleetWithLstat(parent string, lstat func(string) (fs.FileInfo, error)) (
 		child := filepath.Join(parent, entry.Name())
 		gitInfo, gitErr := lstat(filepath.Join(child, ".git"))
 		if gitErr != nil {
+			if errors.Is(gitErr, fs.ErrNotExist) {
+				continue
+			}
 			statuses = append(statuses, RepositoryStatus{Name: entry.Name(), Status: "error"})
 			inspectionFailures[entry.Name()] = true
 			continue

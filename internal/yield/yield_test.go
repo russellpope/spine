@@ -323,6 +323,33 @@ func TestFleetReportsChildGitInspectionFailures(t *testing.T) {
 	}
 }
 
+func TestFleetExcludesOrdinaryDirectoriesWithoutGit(t *testing.T) {
+	fleet := t.TempDir()
+	var records []string
+	for i := 0; i < 20; i++ {
+		records = append(records, fmt.Sprintf("REVIEW I%03d harness:codex model:peer tier:routine round:1 verdict:accepted scope:task", i+100))
+	}
+	makeFleetRepository(t, fleet, "alpha", strings.Join(records, "\n"))
+	if err := os.Mkdir(filepath.Join(fleet, "ordinary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Run(Options{Fleet: fleet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Cells) != 1 || report.Cells[0].N != 20 || report.ExitCode() != 0 {
+		t.Fatalf("report=%+v", report)
+	}
+	wantStatuses := []RepositoryStatus{{Name: "alpha", Status: "ok"}}
+	if len(report.Repositories) != len(wantStatuses) || report.Repositories[0] != wantStatuses[0] {
+		t.Fatalf("repositories=%+v", report.Repositories)
+	}
+	if len(report.Diagnostics) != 0 {
+		t.Fatalf("diagnostics=%+v", report.Diagnostics)
+	}
+}
+
 func TestFleetRejectsInvalidParentAndDoesNotFollowGitSymlinks(t *testing.T) {
 	parentFile := filepath.Join(t.TempDir(), "not-a-directory")
 	if err := os.WriteFile(parentFile, []byte("x"), 0o644); err != nil {
