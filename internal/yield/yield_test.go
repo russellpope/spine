@@ -984,3 +984,160 @@ func TestFleetBindsChildObjectsBeforeMerging(t *testing.T) {
 		})
 	}
 }
+
+func TestRunRevalidatesEveryLedgerPathAfterRead(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		component string
+		replace   string
+		wantOK    bool
+	}{
+		{name: "progress-replacement", component: "progress.md", replace: "replacement"},
+		{name: "sdd-directory-replacement", component: "sdd", replace: "replacement"},
+		{name: "sdd-symlink-replacement", component: "sdd", replace: "symlink"},
+		{name: "superpowers-directory-replacement", component: ".superpowers", replace: "replacement"},
+		{name: "superpowers-symlink-replacement", component: ".superpowers", replace: "symlink"},
+		{name: "progress-same-object-rename-control", component: "progress.md", replace: "same-object", wantOK: true},
+		{name: "sdd-same-object-rename-control", component: "sdd", replace: "same-object", wantOK: true},
+		{name: "superpowers-same-object-rename-control", component: ".superpowers", replace: "same-object", wantOK: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeLedger(t, dir, fleetRecords("observed-post-read"))
+			ledger := filepath.Join(dir, ".superpowers", "sdd", "progress.md")
+
+			report, err := runRepositoryWithLedgerOps(dir, ledgerOps{afterRead: func(path string) {
+				if path == ledger {
+					mutateLedgerPathAfterRead(t, ledger, tc.component, tc.replace)
+				}
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantOK {
+				if len(report.Cells) != 1 || report.Cells[0].ModelID != "observed-post-read" || report.Cells[0].N != 20 || report.ExitCode() != 0 {
+					t.Fatalf("same-object control report=%+v", report)
+				}
+				return
+			}
+			if len(report.Cells) != 0 || report.ExitCode() != 1 || len(report.Diagnostics) != 1 || report.Diagnostics[0].Message != "progress ledger unreadable" {
+				t.Fatalf("report=%+v", report)
+			}
+			if rendered := fmt.Sprint(report); strings.Contains(rendered, "post-read-replacement-secret") || strings.Contains(rendered, ".observed") {
+				t.Fatalf("post-read replacement leaked path or content: %s", rendered)
+			}
+		})
+	}
+}
+
+func TestFleetRevalidatesEveryLedgerPathAfterReadAndRetainsPeer(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		component string
+		replace   string
+		wantOK    bool
+	}{
+		{name: "progress-replacement", component: "progress.md", replace: "replacement"},
+		{name: "sdd-directory-replacement", component: "sdd", replace: "replacement"},
+		{name: "sdd-symlink-replacement", component: "sdd", replace: "symlink"},
+		{name: "superpowers-directory-replacement", component: ".superpowers", replace: "replacement"},
+		{name: "superpowers-symlink-replacement", component: ".superpowers", replace: "symlink"},
+		{name: "progress-same-object-rename-control", component: "progress.md", replace: "same-object", wantOK: true},
+		{name: "sdd-same-object-rename-control", component: "sdd", replace: "same-object", wantOK: true},
+		{name: "superpowers-same-object-rename-control", component: ".superpowers", replace: "same-object", wantOK: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fleet := t.TempDir()
+			bad := makeFleetRepository(t, fleet, "bad", fleetRecords("bad-observed-post-read"))
+			makeFleetRepository(t, fleet, "peer", fleetRecords("peer-post-read"))
+			badLedger := filepath.Join(bad, ".superpowers", "sdd", "progress.md")
+			badLedgerPath := filepath.Join("bad", ".superpowers", "sdd", "progress.md")
+
+			report, err := runFleetWithOps(fleet, fleetOps{ledgerOps: ledgerOps{afterRead: func(path string) {
+				if path == badLedgerPath {
+					mutateLedgerPathAfterRead(t, badLedger, tc.component, tc.replace)
+				}
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantOK {
+				if len(report.Cells) != 2 || report.ExitCode() != 0 {
+					t.Fatalf("same-object control report=%+v", report)
+				}
+				return
+			}
+			if len(report.Cells) != 1 || report.Cells[0].ModelID != "peer-post-read" || report.Cells[0].N != 20 || report.ExitCode() != 1 {
+				t.Fatalf("report=%+v", report)
+			}
+			if got := report.Repositories; len(got) != 2 || got[0] != (RepositoryStatus{Name: "bad", Status: "error"}) || got[1] != (RepositoryStatus{Name: "peer", Status: "ok"}) {
+				t.Fatalf("repositories=%+v", got)
+			}
+			if len(report.Diagnostics) != 1 || report.Diagnostics[0] != (Diagnostic{Repository: "bad", Message: "progress ledger unreadable"}) {
+				t.Fatalf("diagnostics=%+v", report.Diagnostics)
+			}
+			if rendered := fmt.Sprint(report); strings.Contains(rendered, "post-read-replacement-secret") || strings.Contains(rendered, ".observed") {
+				t.Fatalf("post-read replacement leaked path or content: %s", rendered)
+			}
+		})
+	}
+}
+
+func mutateLedgerPathAfterRead(t *testing.T, ledger, component, replacement string) {
+	t.Helper()
+	path := ledger
+	if component == "sdd" {
+		path = filepath.Dir(ledger)
+	}
+	if component == ".superpowers" {
+		path = filepath.Dir(filepath.Dir(ledger))
+	}
+	observed := path + ".observed"
+	if err := os.Rename(path, observed); err != nil {
+		t.Fatal(err)
+	}
+	if replacement == "same-object" {
+		if err := os.Rename(observed, path); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if replacement == "symlink" {
+		target := t.TempDir()
+		if component == ".superpowers" {
+			if err := os.MkdirAll(filepath.Join(target, "sdd"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(target, "sdd", "progress.md"), []byte("REVIEW I999 harness:codex model:post-read-replacement-secret tier:routine round:1 verdict:accepted scope:task"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := os.WriteFile(filepath.Join(target, "progress.md"), []byte("REVIEW I999 harness:codex model:post-read-replacement-secret tier:routine round:1 verdict:accepted scope:task"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if component == "progress.md" {
+		if err := os.WriteFile(path, []byte("REVIEW I999 harness:codex model:post-read-replacement-secret tier:routine round:1 verdict:accepted scope:task"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if component == ".superpowers" {
+		if err := os.MkdirAll(filepath.Join(path, "sdd"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if component == ".superpowers" {
+		path = filepath.Join(path, "sdd")
+	}
+	if err := os.WriteFile(filepath.Join(path, "progress.md"), []byte("REVIEW I999 harness:codex model:post-read-replacement-secret tier:routine round:1 verdict:accepted scope:task"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

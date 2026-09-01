@@ -23,6 +23,7 @@ type fleetOps struct {
 	parentLstat            func(string) (fs.FileInfo, error)
 	openRoot               func(string) (*os.Root, error)
 	childGitLstat          func(*os.Root, string, string) (fs.FileInfo, error)
+	ledgerOps              ledgerOps
 	afterParentObserved    func()
 	afterChildGitObserved  func(string)
 	beforeParentRevalidate func()
@@ -143,7 +144,13 @@ func inspectFleetChild(parent *os.Root, name string, ops fleetOps) (localResult,
 	if ops.afterChildGitObserved != nil {
 		ops.afterChildGitObserved(name)
 	}
-	local, status := readRepositoryRoot(child, name)
+	var local localResult
+	var status RepositoryStatus
+	if ops.ledgerOps.beforeOpen == nil && ops.ledgerOps.afterRead == nil {
+		local, status = readRepositoryRoot(child, name)
+	} else {
+		local, status = readRepositoryRootWithLedgerOps(child, name, ops.ledgerOps)
+	}
 	childMatches := fleetChildMatches(parent, child, name, observed)
 	currentGit, currentGitErr := child.Lstat(".git")
 	gitMatches := currentGitErr == nil && currentGit.Mode()&fs.ModeSymlink == 0 && currentGit.IsDir() && os.SameFile(git, currentGit)

@@ -132,11 +132,15 @@ func Run(opts Options) (Report, error) {
 		}
 		return runFleet(opts.Fleet)
 	}
-	info, err := os.Lstat(opts.Dir)
+	return runRepositoryWithLedgerOps(opts.Dir, ledgerOps{})
+}
+
+func runRepositoryWithLedgerOps(dir string, ops ledgerOps) (Report, error) {
+	info, err := os.Lstat(dir)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return Report{}, fmt.Errorf("%w: --dir", ErrInvalidRoot)
 	}
-	local, status := readRepository(opts.Dir, "")
+	local, status := readRepositoryWithLedgerOps(dir, "", ops)
 	report := finalize(local, "repository")
 	if status.Status == "error" {
 		report.childError = true
@@ -165,7 +169,11 @@ func (r *localResult) merge(other localResult) {
 }
 
 func readRepository(dir, repository string) (localResult, RepositoryStatus) {
-	raw, missing, err := readBoundLedger(dir, nil)
+	return readRepositoryWithLedgerOps(dir, repository, ledgerOps{})
+}
+
+func readRepositoryWithLedgerOps(dir, repository string, ops ledgerOps) (localResult, RepositoryStatus) {
+	raw, missing, err := readBoundLedgerWithOps(dir, ops)
 	if missing {
 		return localResult{}, RepositoryStatus{Name: repository, Status: "missing-ledger"}
 	}
@@ -177,7 +185,18 @@ func readRepository(dir, repository string) (localResult, RepositoryStatus) {
 }
 
 func readRepositoryRoot(root *os.Root, repository string) (localResult, RepositoryStatus) {
-	raw, missing, err := readBoundLedgerRoot(root, "", nil)
+	return readRepositoryRootWithLedgerOps(root, repository, ledgerOps{})
+}
+
+func readRepositoryRootWithLedgerOps(root *os.Root, repository string, ops ledgerOps) (localResult, RepositoryStatus) {
+	var raw []byte
+	var missing bool
+	var err error
+	if ops.beforeOpen == nil && ops.afterRead == nil {
+		raw, missing, err = readBoundLedgerRoot(root, repository, nil)
+	} else {
+		raw, missing, err = readBoundLedgerRootWithOps(root, repository, ops)
+	}
 	if missing {
 		return localResult{}, RepositoryStatus{Name: repository, Status: "missing-ledger"}
 	}
@@ -188,10 +207,19 @@ func readRepositoryRoot(root *os.Root, repository string) (localResult, Reposito
 	return result, RepositoryStatus{Name: repository, Status: "ok"}
 }
 
+type ledgerOps struct {
+	beforeOpen func(string)
+	afterRead  func(string)
+}
+
 // readBoundLedger reads only the selected repository's ledger. It retains each
 // directory descriptor and checks object identity before accepting bytes, so a
 // symlink or pathname replacement cannot redirect the read.
 func readBoundLedger(dir string, beforeOpen func(string)) (content []byte, missing bool, err error) {
+	return readBoundLedgerWithOps(dir, ledgerOps{beforeOpen: beforeOpen})
+}
+
+func readBoundLedgerWithOps(dir string, ops ledgerOps) (content []byte, missing bool, err error) {
 	observedRoot, err := os.Lstat(dir)
 	if err != nil {
 		return nil, false, err
@@ -213,7 +241,7 @@ func readBoundLedger(dir string, beforeOpen func(string)) (content []byte, missi
 	if statErr != nil || currentErr != nil || currentRoot.Mode()&os.ModeSymlink != 0 || !openedRoot.IsDir() || !os.SameFile(observedRoot, openedRoot) || !os.SameFile(observedRoot, currentRoot) {
 		return nil, false, errors.New("unsafe repository root")
 	}
-	content, missing, err = readBoundLedgerRoot(root, dir, beforeOpen)
+	content, missing, err = readBoundLedgerRootWithOps(root, dir, ops)
 	if err != nil {
 		return content, missing, err
 	}
@@ -228,10 +256,40 @@ func readBoundLedger(dir string, beforeOpen func(string)) (content []byte, missi
 // readBoundLedgerRoot reads through an already-bound repository root. Its
 // caller owns the root and must revalidate that root before using the result.
 func readBoundLedgerRoot(root *os.Root, path string, beforeOpen func(string)) (content []byte, missing bool, err error) {
-	roots := []*os.Root{}
+	return readBoundLedgerRootWithOps(root, path, ledgerOps{beforeOpen: beforeOpen})
+}
+
+type boundLedgerDirectory struct {
+	parent   *os.Root
+	child    *os.Root
+	name     string
+	observed fs.FileInfo
+	opened   fs.FileInfo
+}
+
+func (binding boundLedgerDirectory) matches() bool {
+	opened, openedErr := binding.child.Stat(".")
+	current, currentErr := binding.parent.Lstat(binding.name)
+	return openedErr == nil && currentErr == nil && binding.observed.Mode()&os.ModeSymlink == 0 && binding.observed.IsDir() && binding.opened.IsDir() && opened.IsDir() && current.Mode()&os.ModeSymlink == 0 && current.IsDir() && os.SameFile(binding.observed, binding.opened) && os.SameFile(binding.observed, opened) && os.SameFile(binding.observed, current)
+}
+
+type boundLedgerFile struct {
+	parent   *os.Root
+	name     string
+	observed fs.FileInfo
+	opened   fs.FileInfo
+}
+
+func (binding boundLedgerFile) matches() bool {
+	current, currentErr := binding.parent.Lstat(binding.name)
+	return currentErr == nil && binding.observed.Mode()&os.ModeSymlink == 0 && binding.observed.Mode().IsRegular() && binding.opened.Mode().IsRegular() && current.Mode()&os.ModeSymlink == 0 && current.Mode().IsRegular() && os.SameFile(binding.observed, binding.opened) && os.SameFile(binding.observed, current)
+}
+
+func readBoundLedgerRootWithOps(root *os.Root, path string, ops ledgerOps) (content []byte, missing bool, err error) {
+	bindings := []boundLedgerDirectory{}
 	defer func() {
-		for index := len(roots) - 1; index >= 0; index-- {
-			if closeErr := roots[index].Close(); err == nil && closeErr != nil {
+		for index := len(bindings) - 1; index >= 0; index-- {
+			if closeErr := bindings[index].child.Close(); err == nil && closeErr != nil {
 				content, missing, err = nil, false, closeErr
 			}
 		}
@@ -246,8 +304,8 @@ func readBoundLedgerRoot(root *os.Root, path string, beforeOpen func(string)) (c
 			return nil, false, errors.New("unsafe ledger component")
 		}
 		path = filepath.Join(path, name)
-		if beforeOpen != nil {
-			beforeOpen(path)
+		if ops.beforeOpen != nil {
+			ops.beforeOpen(path)
 		}
 		child, openErr := root.OpenRoot(name)
 		if openErr != nil {
@@ -259,7 +317,7 @@ func readBoundLedgerRoot(root *os.Root, path string, beforeOpen func(string)) (c
 			_ = child.Close()
 			return nil, false, errors.New("unsafe ledger component")
 		}
-		roots = append(roots, child)
+		bindings = append(bindings, boundLedgerDirectory{parent: root, child: child, name: name, observed: info, opened: opened})
 		root = child
 	}
 
@@ -271,8 +329,8 @@ func readBoundLedgerRoot(root *os.Root, path string, beforeOpen func(string)) (c
 		return nil, false, errors.New("unsafe progress ledger")
 	}
 	path = filepath.Join(path, "progress.md")
-	if beforeOpen != nil {
-		beforeOpen(path)
+	if ops.beforeOpen != nil {
+		ops.beforeOpen(path)
 	}
 	file, openErr := root.Open("progress.md")
 	if openErr != nil {
@@ -285,12 +343,24 @@ func readBoundLedgerRoot(root *os.Root, path string, beforeOpen func(string)) (c
 		return nil, false, errors.New("unsafe progress ledger")
 	}
 	content, readErr := io.ReadAll(file)
+	if readErr == nil && ops.afterRead != nil {
+		ops.afterRead(path)
+	}
 	closeErr := file.Close()
 	if readErr != nil {
 		return nil, false, readErr
 	}
 	if closeErr != nil {
 		return nil, false, closeErr
+	}
+	fileBinding := boundLedgerFile{parent: root, name: "progress.md", observed: info, opened: opened}
+	if !fileBinding.matches() {
+		return nil, false, errors.New("unsafe progress ledger")
+	}
+	for index := len(bindings) - 1; index >= 0; index-- {
+		if !bindings[index].matches() {
+			return nil, false, errors.New("unsafe ledger component")
+		}
 	}
 	return content, false, nil
 }
