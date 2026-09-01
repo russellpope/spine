@@ -3,6 +3,7 @@ package yield
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -284,6 +285,41 @@ func TestFleetReadsImmediatePrimaryRepositoriesOnceAndKeepsChildrenIsolated(t *t
 		if strings.Contains(diagnostic.Message, fleet) || strings.Contains(diagnostic.Message, "parent-only") {
 			t.Fatalf("diagnostic leaked path or ledger content: %+v", diagnostic)
 		}
+	}
+}
+
+func TestFleetReportsChildGitInspectionFailures(t *testing.T) {
+	fleet := t.TempDir()
+	var records []string
+	for i := 0; i < 20; i++ {
+		records = append(records, fmt.Sprintf("REVIEW I%03d harness:codex model:peer tier:routine round:1 verdict:accepted scope:task", i+100))
+	}
+	makeFleetRepository(t, fleet, "alpha", strings.Join(records, "\n"))
+	broken := makeFleetRepository(t, fleet, "broken", "")
+	brokenGit := filepath.Join(broken, ".git")
+
+	report, err := runFleetWithLstat(fleet, func(path string) (fs.FileInfo, error) {
+		if path == brokenGit {
+			return nil, errors.New("inspection-secret")
+		}
+		return os.Lstat(path)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Cells) != 1 || report.Cells[0].N != 20 || report.ExitCode() != 1 {
+		t.Fatalf("report=%+v", report)
+	}
+	wantStatuses := []RepositoryStatus{{Name: "alpha", Status: "ok"}, {Name: "broken", Status: "error"}}
+	if len(report.Repositories) != len(wantStatuses) || report.Repositories[0] != wantStatuses[0] || report.Repositories[1] != wantStatuses[1] {
+		t.Fatalf("repositories=%+v", report.Repositories)
+	}
+	wantDiagnostic := Diagnostic{Repository: "broken", Message: "repository inspection failed"}
+	if len(report.Diagnostics) != 1 || report.Diagnostics[0] != wantDiagnostic {
+		t.Fatalf("diagnostics=%+v", report.Diagnostics)
+	}
+	if strings.Contains(report.Diagnostics[0].Message, "inspection-secret") || strings.Contains(report.Diagnostics[0].Message, broken) {
+		t.Fatalf("diagnostic leaked child inspection detail: %+v", report.Diagnostics[0])
 	}
 }
 

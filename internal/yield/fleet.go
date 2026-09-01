@@ -12,6 +12,10 @@ import (
 // runFleet scans only immediate non-hidden primary repositories. A `.git`
 // file identifies a linked worktree and is deliberately not a fleet member.
 func runFleet(parent string) (Report, error) {
+	return runFleetWithLstat(parent, os.Lstat)
+}
+
+func runFleetWithLstat(parent string, lstat func(string) (fs.FileInfo, error)) (Report, error) {
 	info, err := os.Stat(parent)
 	if err != nil || !info.IsDir() {
 		return Report{}, fmt.Errorf("%w: --fleet", ErrInvalidRoot)
@@ -23,13 +27,19 @@ func runFleet(parent string) (Report, error) {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	combined := localResult{}
 	statuses := make([]RepositoryStatus, 0)
+	inspectionFailures := map[string]bool{}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), ".") || !entry.IsDir() || entry.Type()&fs.ModeSymlink != 0 {
 			continue
 		}
 		child := filepath.Join(parent, entry.Name())
-		gitInfo, gitErr := os.Lstat(filepath.Join(child, ".git"))
-		if gitErr != nil || !gitInfo.IsDir() || gitInfo.Mode()&fs.ModeSymlink != 0 {
+		gitInfo, gitErr := lstat(filepath.Join(child, ".git"))
+		if gitErr != nil {
+			statuses = append(statuses, RepositoryStatus{Name: entry.Name(), Status: "error"})
+			inspectionFailures[entry.Name()] = true
+			continue
+		}
+		if !gitInfo.IsDir() || gitInfo.Mode()&fs.ModeSymlink != 0 {
 			continue
 		}
 		local, status := readRepository(child, entry.Name())
@@ -41,7 +51,11 @@ func runFleet(parent string) (Report, error) {
 	for _, status := range statuses {
 		if status.Status == "error" {
 			report.childError = true
-			report.Diagnostics = append(report.Diagnostics, Diagnostic{Repository: status.Name, Message: "progress ledger unreadable"})
+			message := "progress ledger unreadable"
+			if inspectionFailures[status.Name] {
+				message = "repository inspection failed"
+			}
+			report.Diagnostics = append(report.Diagnostics, Diagnostic{Repository: status.Name, Message: message})
 		}
 	}
 	return report, nil
