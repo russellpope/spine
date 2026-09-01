@@ -3,7 +3,7 @@ id: I032
 title: Scope the all-missing tickets-typo hint to the issues row; decouple truncation test from cap
 severity: low
 status: fixed
-commits: [2e75d5e, 910e421, 9e386ac]
+commits: [2e75d5e, 910e421, 9e386ac, 9c7dc40]
 affects: [I029]
 blocked-by: []
 execution-mode:
@@ -48,3 +48,8 @@ now lives in a package-internal test and derives its range directly from
 than the cap without a test-only export. Focused stage tests and the full Go
 suite pass; the deferred-cleanup gate still reports the pre-existing I050
 finding at `internal/acceptance/acceptance.go:84`.
+
+Final batch review found that the earlier closure had force-added an ignored
+worker report under `.superpowers/sdd/`. Commit `9c7dc40` removes that scratch
+artifact from tracking; the durable implementation and test evidence remains
+in this Resolution, and no tracked `.superpowers` path remains.

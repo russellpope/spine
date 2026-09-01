@@ -3,7 +3,7 @@ id: I076
 title: Routing-yield forward build — REVIEW record line + spine yield verb
 severity: low
 status: fixed
-commits: [de0c935, 6ba2092, e7d96f5, a7ef427, 6b3d5f4, ca2245b, 9aa6c2f, baaea09, b73d344, 0b49e72, a50bcc2, a9b9394, 2560c64, b6839c0, c1c8ab8, e21019b, 0fb43a5, 70801d1, 6cb9822]
+commits: [de0c935, 6ba2092, e7d96f5, a7ef427, 6b3d5f4, ca2245b, 9aa6c2f, baaea09, b73d344, 0b49e72, a50bcc2, a9b9394, 2560c64, b6839c0, c1c8ab8, e21019b, 0fb43a5, 70801d1, 6cb9822, 754060a, 01691f9]
 affects: [audit, cli, workflow]
 blocked-by: []
 labels: [wayfinder:task]
@@ -104,3 +104,11 @@ Per the owner-directed open-ledger sequence, I076 is now fixed pending batch
 ship; no standalone I076 lane is claimed. The sole exact-SHA
 `maipipe run full --wait` remains the later batch-final ship verdict after the
 whole-branch review, routing audit, and fresh handoff.
+
+A later batch-wide review tightened the same contract: `754060a` revalidates
+the final ledger file and both retained directory components after `io.ReadAll`
+before accepting bytes, with late different-object failures, same-object
+restore controls, fleet peer retention, and load-bearing guard mutations.
+`01691f9` removes the obsolete unreachable fleet wrapper; the source-built
+dead-code and deferred-cleanup gates are clean. These corrections do not change
+the command grammar, aggregation, read scope, or ship sequencing above.
