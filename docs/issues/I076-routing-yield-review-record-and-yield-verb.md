@@ -46,10 +46,11 @@ terminology and its bounded compatibility surface are therefore available to
 I076; the product contract still has no `flavor` alias.
 
 I076 Task 1 may pass on that durable evidence. This ticket remains open for its
-gated tail. Task 6 still requires focused and full review, an independent
-verification, and the final requirements attack before closure. The owner has
-directed one batch-final exact-SHA `maipipe run full --wait` only after I076,
-the final whole-branch review, routing audit, and fresh handoff. No standalone
-I073 or I076 lane is required or claimed. The batch-final lane is the ship
-verdict; any post-lane commit invalidates it and requires a rerun at the new
-exact SHA.
+gated tail. After focused and full review, an independent verification, and the
+final requirements attack pass, I076 closes as `fixed, pending batch ship`.
+The owner-directed batch-final exact-SHA `maipipe run full --wait` runs only
+after every included ticket has that fixed, blocked, or surfaced disposition,
+following the final whole-branch review, routing audit, and fresh handoff. No
+standalone I073 or I076 lane is required or claimed. The batch-final lane is
+the ship verdict; any post-lane commit invalidates it and requires a rerun at
+the new exact SHA.

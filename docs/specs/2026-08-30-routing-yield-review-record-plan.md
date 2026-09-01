@@ -37,11 +37,12 @@ repository-local fixtures.
 - Stage only the paths named by each commit. Do not stage `.cache/`, unrelated
   source edits, the untracked research stray, local transcripts, or worker
   scratch files.
-- The owner-directed ship sequence is: finish I076's gated tail, final
-  whole-branch review, routing audit, fresh handoff, then one batch-final
-  `maipipe run full --wait` at the exact final main SHA. Do not claim or run a
-  standalone I073 or I076 lane. A later commit invalidates that batch-final
-  lane and requires a rerun at the new exact SHA.
+- The owner-directed ship sequence is: finish I076's gated tail and close it
+  as `fixed, pending batch ship`; complete final whole-branch review, routing
+  audit, and fresh handoff; then, once every included ticket is fixed, blocked,
+  or surfaced, run one batch-final `maipipe run full --wait` at the exact final
+  main SHA. Do not claim or run a standalone I073 or I076 lane. A later commit
+  invalidates that batch-final lane and requires a rerun at the new exact SHA.
 
 ## File map
 
@@ -262,7 +263,7 @@ handoffs, closed tickets, or fleet repositories.
 - [ ] Commit only the approved task paths, naming every path explicitly after
   the active surface is chosen.
 
-### Task 6: Review, independently verify, and prepare the batch-final SHA
+### Task 6: Review, independently verify, and close pending batch ship
 
 **Files:** read final diff, this plan, the PRD, I073 verification evidence, and
 I076. Modify the I076 ticket only after all gates pass.
@@ -283,14 +284,15 @@ I076. Modify the I076 ticket only after all gates pass.
 - [ ] Obtain independent fresh verification with command transcripts and the
   exact candidate SHA. Resolve every blocker before closure.
 - [ ] Commit final ticket evidence with explicit paths and record the commit
-  SHA. Do not run or claim a standalone I076 lane. Delegate ship verdict to the
-  owner-directed batch-final lane, which runs only after I076's gated tail,
-  final whole-branch review, routing audit, and fresh handoff. Any post-lane
-  commit requires a rerun at the new exact SHA.
+  SHA. After the focused and full reviews, requirements attack, and independent
+  verification pass, close I076 as `fixed, pending batch ship`. Do not run or
+  claim a standalone I076 lane. The owner-directed batch-final lane runs only
+  after every included ticket has a fixed, blocked, or surfaced disposition,
+  and after final whole-branch review, routing audit, and fresh handoff. Any
+  post-lane commit requires a rerun at the new exact SHA.
 - [ ] Re-read the PRD line by line for the final spec review. Record the
   requirements attack and all evidence in I076; leave it open if any focused
-  review, independent verification, or the required batch-final exact-SHA lane
-  remains absent.
+  review, independent verification, or requirements attack remains absent.
 
 ## Plan self-review
 
@@ -300,5 +302,6 @@ I076. Modify the I076 ticket only after all gates pass.
 - [x] The plan preserves I073 as a durably verified prerequisite rather than
   treating its current documentation or merge state as completion, while the
   owner-directed batch amendment replaces only its standalone-lane condition.
-- [x] The final task requires an independent verifier, a requirements attack,
-  and the batch-final maipipe lane at the exact final SHA.
+- [x] The final task closes I076 after its independent verification and
+  requirements attack, and reserves the batch-final maipipe lane for the
+  exact final SHA only after every included ticket has a disposition.

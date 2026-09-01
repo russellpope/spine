@@ -40,12 +40,14 @@ the fresh primary post-fleet PASS. I076 may therefore consume I073's canonical
 `harness` terminology and its bounded compatibility surface now.
 
 The owner-directed open-ledger sequence is: finish I073 post-fleet acceptance,
-finish I076's gated tail, complete the final whole-branch review, run the
-routing audit, create a fresh handoff, then run one `maipipe run full --wait`
-at the resulting exact final main SHA. No standalone I073 lane and no
-standalone I076 lane is required or claimed. The single batch-final lane is
-the ship verdict. Any commit after that lane invalidates its result and requires
-the lane to be rerun at the new exact SHA.
+finish I076's gated tail and close it as `fixed, pending batch ship`, then
+complete the final whole-branch review, run the routing audit, and create a
+fresh handoff. Once every included ticket has a fixed, blocked, or surfaced
+disposition, run one `maipipe run full --wait` at the resulting exact final
+main SHA. No standalone I073 lane and no standalone I076 lane is required or
+claimed. The single batch-final lane is the ship verdict. Any commit after that
+lane invalidates its result and requires the lane to be rerun at the new exact
+SHA.
 
 This sequencing amendment does not relax the grammar, the no-inference and
 privacy boundary, confidence thresholds, fleet isolation, task/final-series
@@ -286,8 +288,9 @@ invented accepted outcome.
    its bounded compatibility surface available to I076; it does not authorize a
    `flavor` alias.
 8. Focused red-green tests, task review, independent verification, and a final
-   requirements attack pass before I076 closes. Ship verdict is delegated to
-   the owner-directed batch-final `maipipe run full --wait`, after I076, final
-   whole-branch review, routing audit, and fresh handoff, at that batch's exact
-   final SHA. No standalone I076 lane is required or claimed; a post-lane
-   commit invalidates the lane and requires a rerun.
+   requirements attack pass before I076 closes as `fixed, pending batch ship`.
+   The ship verdict is delegated to the owner-directed batch-final `maipipe run
+   full --wait` after every included ticket has a fixed, blocked, or surfaced
+   disposition, and after final whole-branch review, routing audit, and a fresh
+   handoff, at that batch's exact final SHA. No standalone I076 lane is required
+   or claimed; a post-lane commit invalidates the lane and requires a rerun.
