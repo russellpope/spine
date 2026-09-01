@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 const acceptedTask = "REVIEW I076 harness:codex model:gpt-5.6-terra tier:routine round:1 verdict:accepted scope:task"
@@ -59,32 +60,62 @@ func TestParseReviewRejectsMalformedCandidatesWithoutEchoingInput(t *testing.T) 
 	}
 }
 
-func TestRunSurfacesMalformedReviewWhitespaceCandidates(t *testing.T) {
-	dir := t.TempDir()
-	malformed := []string{
-		"REVIEW\tI076 harness:codex model:tab-secret tier:routine round:1 verdict:accepted scope:task",
-		" REVIEW I076 harness:codex model:leading-secret tier:routine round:1 verdict:accepted scope:task",
-		"REVIEW",
-	}
-	writeLedger(t, dir, strings.Join(append(malformed, "REVIEWED unrelated-secret"), "\n"))
+func TestRunSurfacesEveryUnicodeReviewWhitespaceCandidate(t *testing.T) {
+	for _, position := range []string{"leading", "separator"} {
+		for r := rune(0); r <= unicode.MaxRune; r++ {
+			if !unicode.IsSpace(r) || r == '\n' {
+				continue // A newline cannot be represented within one parsed ledger line.
+			}
+			t.Run(fmt.Sprintf("%s_%U", position, r), func(t *testing.T) {
+				secret := fmt.Sprintf("unicode-%U-secret", r)
+				candidate := "REVIEW" + string(r) + "I076 harness:codex model:" + secret + " tier:routine round:1 verdict:accepted scope:task"
+				if position == "leading" {
+					candidate = string(r) + "REVIEW I076 harness:codex model:" + secret + " tier:routine round:1 verdict:accepted scope:task"
+				}
+				if position == "separator" && r == ' ' {
+					candidate = "REVIEW I076 harness:codex model:peer tier:routine round:1 verdict:accepted scope:task"
+				}
+				lines := make([]string, 0, 21)
+				for i := 0; i < 20; i++ {
+					lines = append(lines, fmt.Sprintf("REVIEW I%03d harness:codex model:peer tier:routine round:1 verdict:accepted scope:task", i+100))
+				}
+				lines = append(lines, candidate)
+				dir := t.TempDir()
+				writeLedger(t, dir, strings.Join(lines, "\n"))
 
+				report, err := Run(Options{Dir: dir})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if position == "separator" && r == ' ' {
+					if report.Totals.ValidReviewLines != 21 || report.Totals.IgnoredIdentities != 0 || report.ExitCode() != 0 {
+						t.Fatalf("literal-space control report=%+v", report)
+					}
+					return
+				}
+				if report.Totals.ValidReviewLines != 20 || report.Totals.IgnoredIdentities != 1 || report.ExitCode() != 1 {
+					t.Fatalf("report=%+v", report)
+				}
+				if len(report.Diagnostics) != 1 || report.Diagnostics[0] != (Diagnostic{Line: 21, Message: "REVIEW line 21 malformed"}) {
+					t.Fatalf("diagnostics=%+v", report.Diagnostics)
+				}
+				if rendered := fmt.Sprint(report); strings.Contains(rendered, secret) || strings.Contains(rendered, candidate) {
+					t.Fatalf("report leaked hostile candidate: %s", rendered)
+				}
+			})
+		}
+	}
+}
+
+func TestRunIgnoresNonWhitespaceReviewPrefixes(t *testing.T) {
+	dir := t.TempDir()
+	writeLedger(t, dir, "REVIEWED unrelated-secret\nNOTREVIEW unrelated-secret")
 	report, err := Run(Options{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Totals.IgnoredIdentities != len(malformed) || report.ExitCode() != 1 {
-		t.Fatalf("totals=%+v exit=%d", report.Totals, report.ExitCode())
-	}
-	if len(report.Diagnostics) != len(malformed) {
-		t.Fatalf("diagnostics=%+v", report.Diagnostics)
-	}
-	for i, diagnostic := range report.Diagnostics {
-		if diagnostic.Line != i+1 || diagnostic.Message != fmt.Sprintf("REVIEW line %d malformed", i+1) {
-			t.Fatalf("diagnostic=%+v", diagnostic)
-		}
-		if strings.Contains(diagnostic.Message, "secret") || strings.Contains(diagnostic.Message, "REVIEWED") {
-			t.Fatalf("diagnostic leaked ledger content: %+v", diagnostic)
-		}
+	if report.Totals.IgnoredIdentities != 0 || len(report.Diagnostics) != 0 {
+		t.Fatalf("report=%+v", report)
 	}
 }
 

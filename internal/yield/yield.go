@@ -290,11 +290,18 @@ func parseLedger(raw, repository string) localResult {
 }
 
 func looksLikeReview(line string) bool {
-	trimmed := strings.TrimLeft(line, " \t")
+	trimmed := strings.TrimLeftFunc(line, unicode.IsSpace)
 	if !strings.HasPrefix(trimmed, "REVIEW") {
 		return false
 	}
-	return len(trimmed) == len("REVIEW") || trimmed[len("REVIEW")] == ' ' || trimmed[len("REVIEW")] == '\t'
+	remainder := trimmed[len("REVIEW"):]
+	if remainder == "" {
+		return true
+	}
+	for _, r := range remainder {
+		return unicode.IsSpace(r)
+	}
+	return false
 }
 
 func parseReview(lineNo int, line string) (Record, string, bool) {
