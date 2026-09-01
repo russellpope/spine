@@ -138,6 +138,7 @@ func Run(opts Options) (Report, error) {
 		report.childError = true
 		report.Diagnostics = append(report.Diagnostics, Diagnostic{Message: "progress ledger unreadable"})
 	}
+	report.sortDiagnostics()
 	return report, nil
 }
 
@@ -346,6 +347,19 @@ type identity struct {
 	round      int
 }
 
+func (r *Report) sortDiagnostics() {
+	sort.Slice(r.Diagnostics, func(i, j int) bool {
+		left, right := r.Diagnostics[i], r.Diagnostics[j]
+		if left.Repository != right.Repository {
+			return left.Repository < right.Repository
+		}
+		if left.Line != right.Line {
+			return left.Line < right.Line
+		}
+		return left.Message < right.Message
+	})
+}
+
 func finalize(local localResult, scope string) Report {
 	report := Report{Scope: scope, Totals: local.totals, Diagnostics: local.diagnostics, Cells: []Cell{}}
 	grouped := make(map[identity][]Record)
@@ -354,7 +368,7 @@ func finalize(local localResult, scope string) Report {
 		grouped[key] = append(grouped[key], record)
 	}
 	valid := make([]Record, 0, len(local.records))
-	conflictedTasks := map[string]int{}
+	conflictedTasks := map[string]Record{}
 	for key, records := range grouped {
 		if allEqual(records) {
 			valid = append(valid, records[0])
@@ -364,7 +378,7 @@ func finalize(local localResult, scope string) Report {
 			continue
 		}
 		if key.scope == ScopeTask {
-			conflictedTasks[key.repository+"\x00"+key.ticket] = records[0].Line
+			conflictedTasks[key.repository+"\x00"+key.ticket] = records[0]
 			continue
 		}
 		report.Totals.IgnoredIdentities++
@@ -386,15 +400,15 @@ func finalize(local localResult, scope string) Report {
 		}
 	}
 	cellMap := map[string]*Cell{}
-	for key, line := range conflictedTasks {
+	for key, record := range conflictedTasks {
 		report.Totals.IgnoredIdentities++
-		report.Diagnostics = append(report.Diagnostics, Diagnostic{Line: line, Message: "REVIEW task sequence excluded"})
+		report.Diagnostics = append(report.Diagnostics, Diagnostic{Repository: record.repository, Line: record.Line, Message: "REVIEW task sequence excluded"})
 		delete(taskSequences, key)
 	}
 	for _, records := range taskSequences {
 		if !validSequence(records) {
 			report.Totals.IgnoredIdentities++
-			report.Diagnostics = append(report.Diagnostics, Diagnostic{Line: firstLine(records), Message: "REVIEW task sequence excluded"})
+			report.Diagnostics = append(report.Diagnostics, Diagnostic{Repository: records[0].repository, Line: firstLine(records), Message: "REVIEW task sequence excluded"})
 			continue
 		}
 		sort.Slice(records, func(i, j int) bool { return records[i].Round < records[j].Round })

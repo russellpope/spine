@@ -173,6 +173,49 @@ func TestAggregateRejectsConflictMalformedAndNonContiguousTaskSequences(t *testi
 	}
 }
 
+func TestReportDiagnosticsSortByRepositoryLineAndMessage(t *testing.T) {
+	fleet := t.TempDir()
+	makeFleetRepository(t, fleet, "alpha", strings.Join([]string{
+		"REVIEW I090 flavor:codex model:alpha-malformed tier:routine round:1 verdict:accepted scope:task",
+		"REVIEW I076 harness:codex model:alpha tier:routine round:1 verdict:accepted scope:task",
+		"REVIEW I076 harness:codex model:alpha tier:routine round:1 verdict:needs-fixes scope:task",
+		"REVIEW I077 harness:codex model:alpha tier:routine round:2 verdict:accepted scope:task",
+		"REVIEW I078 harness:codex model:alpha tier:routine round:1 verdict:accepted scope:final",
+		"REVIEW I078 harness:codex model:alpha tier:routine round:1 verdict:needs-fixes scope:final",
+	}, "\n"))
+	makeFleetRepository(t, fleet, "beta", strings.Join([]string{
+		"REVIEW I190 flavor:codex model:beta-malformed tier:routine round:1 verdict:accepted scope:task",
+		"REVIEW I176 harness:codex model:beta tier:routine round:2 verdict:accepted scope:task",
+		"REVIEW I177 harness:codex model:beta tier:routine round:1 verdict:accepted scope:task",
+		"REVIEW I177 harness:codex model:beta tier:routine round:1 verdict:needs-fixes scope:task",
+		"REVIEW I178 harness:codex model:beta tier:routine round:1 verdict:accepted scope:final",
+		"REVIEW I178 harness:codex model:beta tier:routine round:1 verdict:needs-fixes scope:final",
+	}, "\n"))
+
+	report, err := Run(Options{Fleet: fleet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Diagnostic{
+		{Repository: "alpha", Line: 1, Message: "REVIEW line 1 malformed"},
+		{Repository: "alpha", Line: 2, Message: "REVIEW task sequence excluded"},
+		{Repository: "alpha", Line: 4, Message: "REVIEW task sequence excluded"},
+		{Repository: "alpha", Line: 5, Message: "REVIEW conflicting identity excluded"},
+		{Repository: "beta", Line: 1, Message: "REVIEW line 1 malformed"},
+		{Repository: "beta", Line: 2, Message: "REVIEW task sequence excluded"},
+		{Repository: "beta", Line: 3, Message: "REVIEW task sequence excluded"},
+		{Repository: "beta", Line: 5, Message: "REVIEW conflicting identity excluded"},
+	}
+	if len(report.Diagnostics) != len(want) {
+		t.Fatalf("diagnostics=%+v, want=%+v", report.Diagnostics, want)
+	}
+	for i := range want {
+		if report.Diagnostics[i] != want[i] {
+			t.Fatalf("diagnostics[%d]=%+v, want=%+v; all=%+v", i, report.Diagnostics[i], want[i], report.Diagnostics)
+		}
+	}
+}
+
 func TestAggregateDeduplicatesExactRecordsAndUsesAllThresholds(t *testing.T) {
 	for _, count := range []int{0, 19, 20, 40} {
 		t.Run(fmt.Sprintf("n=%d", count), func(t *testing.T) {

@@ -62,5 +62,6 @@ func runFleetWithLstat(parent string, lstat func(string) (fs.FileInfo, error)) (
 			report.Diagnostics = append(report.Diagnostics, Diagnostic{Repository: status.Name, Message: message})
 		}
 	}
+	report.sortDiagnostics()
 	return report, nil
 }
