@@ -173,6 +173,55 @@ func TestAggregateRejectsConflictMalformedAndNonContiguousTaskSequences(t *testi
 	}
 }
 
+func TestAggregateRejectsTwentyTaskSequencesEndingInNeedsFixes(t *testing.T) {
+	dir := t.TempDir()
+	lines := make([]string, 0, 20)
+	for i := 0; i < 20; i++ {
+		lines = append(lines, fmt.Sprintf("REVIEW I%03d harness:codex model:opaque tier:routine round:1 verdict:needs-fixes scope:task", i+100))
+	}
+	writeLedger(t, dir, strings.Join(lines, "\n"))
+
+	report, err := Run(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Cells) != 0 || report.Totals.IgnoredIdentities != 20 || report.ExitCode() != 1 {
+		t.Fatalf("report=%+v exit=%d", report, report.ExitCode())
+	}
+	if len(report.Diagnostics) != 20 {
+		t.Fatalf("diagnostics=%+v", report.Diagnostics)
+	}
+}
+
+func TestParseReviewRejectsAllWhitespaceAndQuotesInTokens(t *testing.T) {
+	for _, whitespace := range []string{"\v", "\f", "\u00a0", "\u2003"} {
+		t.Run(fmt.Sprintf("model_%U", []rune(whitespace)[0]), func(t *testing.T) {
+			line := "REVIEW I076 harness:codex model:opaque" + whitespace + "secret tier:routine round:1 verdict:accepted scope:task"
+			if _, _, ok := parseReview(1, line); ok {
+				t.Fatalf("parseReview accepted model whitespace %q", whitespace)
+			}
+		})
+		t.Run(fmt.Sprintf("condition_%U", []rune(whitespace)[0]), func(t *testing.T) {
+			line := "REVIEW - harness:- model:- tier:- round:1 verdict:needs-fixes scope:final condition:opaque" + whitespace + "secret"
+			if _, _, ok := parseReview(1, line); ok {
+				t.Fatalf("parseReview accepted condition whitespace %q", whitespace)
+			}
+		})
+	}
+	for _, line := range []string{
+		"REVIEW I076 harness:codex model:opaque\"secret tier:routine round:1 verdict:accepted scope:task",
+		"REVIEW - harness:- model:- tier:- round:1 verdict:needs-fixes scope:final condition:opaque\"secret",
+	} {
+		if _, _, ok := parseReview(1, line); ok {
+			t.Fatalf("parseReview accepted quoted token %q", line)
+		}
+	}
+	line := "REVIEW I076 harness:codex model:opaque/日本語+v1.2@edge tier:routine round:1 verdict:accepted scope:task"
+	if _, _, ok := parseReview(1, line); !ok {
+		t.Fatalf("parseReview rejected valid opaque punctuation/non-ASCII token %q", line)
+	}
+}
+
 func TestReportDiagnosticsSortByRepositoryLineAndMessage(t *testing.T) {
 	fleet := t.TempDir()
 	makeFleetRepository(t, fleet, "alpha", strings.Join([]string{

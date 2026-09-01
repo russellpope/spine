@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 const progressLedger = ".superpowers/sdd/progress.md"
@@ -232,7 +233,7 @@ func parseReview(lineNo int, line string) (Record, string, bool) {
 	values := make([]string, len(expected))
 	for i, prefix := range expected {
 		value, ok := strings.CutPrefix(fields[i+2], prefix)
-		if !ok || value == "" || strings.ContainsAny(value, "\t\r\n\"") {
+		if !ok || !validToken(value) {
 			return invalid()
 		}
 		values[i] = value
@@ -267,12 +268,24 @@ func parseReview(lineNo int, line string) (Record, string, bool) {
 		return invalid()
 	}
 	condition, ok := strings.CutPrefix(fields[8], "condition:")
-	if !ok || condition == "" || strings.ContainsAny(condition, "\t\r\n\"") {
+	if !ok || !validToken(condition) {
 		return invalid()
 	}
 	rec.Ticket = ""
 	rec.Condition = condition
 	return rec, "", true
+}
+
+func validToken(value string) bool {
+	if value == "" || strings.ContainsRune(value, '"') {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsSpace(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func validTicket(value string) bool {
@@ -474,7 +487,7 @@ func validSequence(records []Record) bool {
 			return false
 		}
 	}
-	return true
+	return records[len(records)-1].Verdict == VerdictAccepted
 }
 
 func firstLine(records []Record) int {
