@@ -24,6 +24,34 @@ func writeLedger(t *testing.T, dir, body string) {
 	}
 }
 
+func TestAggregateMultiRoundTaskConflictAlwaysUsesMinimumPhysicalLine(t *testing.T) {
+	dir := t.TempDir()
+	lines := make([]string, 0, 24)
+	for i := 0; i < 20; i++ {
+		lines = append(lines, fmt.Sprintf("REVIEW I%03d harness:codex model:peer tier:routine round:1 verdict:accepted scope:task", i+100))
+	}
+	lines = append(lines,
+		"REVIEW I999 harness:codex model:bad tier:routine round:1 verdict:accepted scope:task",
+		"REVIEW I999 harness:codex model:bad tier:routine round:1 verdict:needs-fixes scope:task",
+		"REVIEW I999 harness:codex model:bad tier:routine round:2 verdict:accepted scope:task",
+		"REVIEW I999 harness:codex model:bad tier:routine round:2 verdict:needs-fixes scope:task",
+	)
+	writeLedger(t, dir, strings.Join(lines, "\n"))
+
+	for i := 0; i < 100; i++ {
+		report, err := Run(Options{Dir: dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(report.Cells) != 1 || report.Cells[0].N != 20 || report.Totals.IgnoredIdentities != 1 || report.ExitCode() != 1 {
+			t.Fatalf("run %d report=%+v", i, report)
+		}
+		if len(report.Diagnostics) != 1 || report.Diagnostics[0] != (Diagnostic{Line: 21, Message: "REVIEW task sequence excluded"}) {
+			t.Fatalf("run %d diagnostics=%+v", i, report.Diagnostics)
+		}
+	}
+}
+
 func TestParseReviewAcceptsExactTaskRecord(t *testing.T) {
 	rec, diag, ok := parseReview(7, acceptedTask)
 	if !ok || diag != "" {

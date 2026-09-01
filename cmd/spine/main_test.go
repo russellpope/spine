@@ -134,6 +134,10 @@ type yieldJSON struct {
 		Name   string `json:"name"`
 		Status string `json:"status"`
 	} `json:"repositories"`
+	Diagnostics []struct {
+		Line    int    `json:"line"`
+		Message string `json:"message"`
+	} `json:"diagnostics"`
 }
 
 func decodeYieldJSON(t *testing.T, out string) yieldJSON {
@@ -289,6 +293,33 @@ func TestYieldZeroEvidenceTextJSONParityForMissingAndEmptyLedger(t *testing.T) {
 		payload := decodeYieldJSON(t, jsonOut)
 		if len(payload.Cells) != 0 || payload.Rate != "refused" || payload.Confidence != "insufficient" {
 			t.Fatalf("JSON contents=%q payload=%+v", contents, payload)
+		}
+	}
+}
+
+func TestYieldMultiRoundTaskConflictTextAndJSONAlwaysUseMinimumPhysicalLine(t *testing.T) {
+	repo := t.TempDir()
+	lines := make([]string, 0, 24)
+	for i := 0; i < 20; i++ {
+		lines = append(lines, fmt.Sprintf("REVIEW I%03d harness:codex model:peer tier:routine round:1 verdict:accepted scope:task", i+100))
+	}
+	lines = append(lines,
+		"REVIEW I999 harness:codex model:bad tier:routine round:1 verdict:accepted scope:task",
+		"REVIEW I999 harness:codex model:bad tier:routine round:1 verdict:needs-fixes scope:task",
+		"REVIEW I999 harness:codex model:bad tier:routine round:2 verdict:accepted scope:task",
+		"REVIEW I999 harness:codex model:bad tier:routine round:2 verdict:needs-fixes scope:task",
+	)
+	writeYieldLedger(t, repo, strings.Join(lines, "\n"))
+
+	for i := 0; i < 100; i++ {
+		code, out, errs := runCmd(t, "yield", "--dir", repo)
+		if code != 1 || errs != "" || !strings.Contains(out, "n=20") || strings.Count(out, "diagnostic: line=21 message=REVIEW task sequence excluded\n") != 1 {
+			t.Fatalf("text run %d: code=%d out=%q stderr=%q", i, code, out, errs)
+		}
+		jsonCode, jsonOut, jsonErr := runCmd(t, "yield", "--dir", repo, "--json")
+		payload := decodeYieldJSON(t, jsonOut)
+		if jsonCode != 1 || jsonErr != "" || len(payload.Cells) != 1 || payload.Cells[0].N != 20 || payload.Totals.IgnoredIdentities != 1 || len(payload.Diagnostics) != 1 || payload.Diagnostics[0].Line != 21 || payload.Diagnostics[0].Message != "REVIEW task sequence excluded" {
+			t.Fatalf("JSON run %d: code=%d payload=%+v stderr=%q", i, jsonCode, payload, jsonErr)
 		}
 	}
 }

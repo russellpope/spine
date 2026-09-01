@@ -519,7 +519,16 @@ func finalize(local localResult, scope string) Report {
 			continue
 		}
 		if key.scope == ScopeTask {
-			conflictedTasks[key.repository+"\x00"+key.ticket] = records[0]
+			taskKey := key.repository + "\x00" + key.ticket
+			representative := records[0]
+			for _, record := range records[1:] {
+				if record.Line < representative.Line {
+					representative = record
+				}
+			}
+			if current, exists := conflictedTasks[taskKey]; !exists || representative.Line < current.Line {
+				conflictedTasks[taskKey] = representative
+			}
 			continue
 		}
 		report.Totals.IgnoredIdentities++
