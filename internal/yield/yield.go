@@ -79,6 +79,8 @@ type RepositoryStatus struct {
 
 type Report struct {
 	Scope        string             `json:"scope"`
+	Rate         string             `json:"rate,omitempty"`
+	Confidence   string             `json:"confidence,omitempty"`
 	Totals       Totals             `json:"totals"`
 	Cells        []Cell             `json:"cells"`
 	Repositories []RepositoryStatus `json:"repositories,omitempty"`
@@ -541,6 +543,10 @@ func finalize(local localResult, scope string) Report {
 		}
 		return report.Cells[i].Tier < report.Cells[j].Tier
 	})
+	if len(report.Cells) == 0 {
+		report.Rate = "refused"
+		report.Confidence = "insufficient"
+	}
 	return report
 }
 

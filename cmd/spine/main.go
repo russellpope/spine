@@ -156,7 +156,7 @@ func cmdYield(args []string, stdout, stderr io.Writer) int {
 
 func printYieldReport(stdout io.Writer, report yield.Report) {
 	if len(report.Cells) == 0 {
-		fmt.Fprintf(stdout, "scope: %s rate=refused confidence=insufficient\n", report.Scope)
+		fmt.Fprintf(stdout, "scope: %s rate=%s confidence=%s\n", report.Scope, report.Rate, report.Confidence)
 	} else {
 		fmt.Fprintf(stdout, "scope: %s\n", report.Scope)
 	}

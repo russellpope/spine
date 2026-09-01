@@ -110,8 +110,10 @@ func yieldRecordsFrom(n, start int, harness, model, tier string) string {
 }
 
 type yieldJSON struct {
-	Scope  string `json:"scope"`
-	Totals struct {
+	Scope      string `json:"scope"`
+	Rate       string `json:"rate"`
+	Confidence string `json:"confidence"`
+	Totals     struct {
 		ValidReviewLines              int `json:"valid_review_lines"`
 		IgnoredIdentities             int `json:"ignored_identities"`
 		Escalations                   int `json:"escalations"`
@@ -233,6 +235,7 @@ func TestYieldRootMissingLedgerThresholdsAndDeterministicOrdering(t *testing.T) 
 		{0, 1, "refused", "insufficient"},
 		{19, 1, "refused", "insufficient"},
 		{20, 0, "100.0%", "low-confidence"},
+		{39, 0, "100.0%", "low-confidence"},
 		{40, 0, "100.0%", "stated"},
 	} {
 		t.Run(fmt.Sprintf("n=%d", tc.n), func(t *testing.T) {
@@ -248,9 +251,7 @@ func TestYieldRootMissingLedgerThresholdsAndDeterministicOrdering(t *testing.T) 
 				if !strings.Contains(out, "rate=refused") || !strings.Contains(out, "confidence=insufficient") {
 					t.Fatalf("zero output=%q", out)
 				}
-				return
-			}
-			if !strings.Contains(out, "rate="+tc.wantRate) || !strings.Contains(out, "confidence="+tc.confidence) || strings.Index(out, "harness=claude") > strings.Index(out, "harness=codex") {
+			} else if !strings.Contains(out, "rate="+tc.wantRate) || !strings.Contains(out, "confidence="+tc.confidence) || strings.Index(out, "harness=claude") > strings.Index(out, "harness=codex") {
 				t.Fatalf("text n=%d out=%q", tc.n, out)
 			}
 			jsonCode, jsonOut, jsonErr := runCmd(t, "yield", "--dir", repo, "--json")
@@ -258,10 +259,37 @@ func TestYieldRootMissingLedgerThresholdsAndDeterministicOrdering(t *testing.T) 
 				t.Fatalf("json n=%d code=%d out=%q stderr=%q", tc.n, jsonCode, jsonOut, jsonErr)
 			}
 			payload := decodeYieldJSON(t, jsonOut)
+			if tc.n == 0 {
+				if len(payload.Cells) != 0 || payload.Rate != "refused" || payload.Confidence != "insufficient" {
+					t.Fatalf("zero JSON payload=%+v", payload)
+				}
+				return
+			}
 			if len(payload.Cells) != 2 || payload.Cells[0].Harness != "claude" || payload.Cells[1].Harness != "codex" || payload.Cells[0].N != tc.n || payload.Cells[0].Rate != tc.wantRate || payload.Cells[0].Confidence != tc.confidence {
 				t.Fatalf("json n=%d payload=%+v", tc.n, payload)
 			}
 		})
+	}
+}
+
+func TestYieldZeroEvidenceTextJSONParityForMissingAndEmptyLedger(t *testing.T) {
+	for _, contents := range []string{"", "ordinary prose without REVIEW"} {
+		repo := t.TempDir()
+		if contents != "" {
+			writeYieldLedger(t, repo, contents)
+		}
+		code, text, textErr := runCmd(t, "yield", "--dir", repo)
+		if code != 1 || textErr != "" || !strings.Contains(text, "rate=refused confidence=insufficient") {
+			t.Fatalf("text contents=%q code=%d out=%q stderr=%q", contents, code, text, textErr)
+		}
+		jsonCode, jsonOut, jsonErr := runCmd(t, "yield", "--dir", repo, "--json")
+		if jsonCode != code || jsonErr != "" {
+			t.Fatalf("json contents=%q code=%d out=%q stderr=%q", contents, jsonCode, jsonOut, jsonErr)
+		}
+		payload := decodeYieldJSON(t, jsonOut)
+		if len(payload.Cells) != 0 || payload.Rate != "refused" || payload.Confidence != "insufficient" {
+			t.Fatalf("JSON contents=%q payload=%+v", contents, payload)
+		}
 	}
 }
 
