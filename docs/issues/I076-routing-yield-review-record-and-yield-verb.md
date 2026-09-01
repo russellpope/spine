@@ -2,7 +2,8 @@
 id: I076
 title: Routing-yield forward build — REVIEW record line + spine yield verb
 severity: low
-status: open
+status: fixed
+commits: [de0c935, 6ba2092, e7d96f5, a7ef427, 6b3d5f4, ca2245b, 9aa6c2f, baaea09, b73d344, 0b49e72, a50bcc2, a9b9394, 2560c64, b6839c0, c1c8ab8, e21019b, 0fb43a5, 70801d1, 6cb9822]
 affects: [audit, cli, workflow]
 blocked-by: []
 labels: [wayfinder:task]
@@ -55,3 +56,51 @@ following the final whole-branch review, routing audit, and fresh handoff. No
 standalone I073 or I076 lane is required or claimed. The batch-final lane is
 the ship verdict; any post-lane commit invalidates it and requires a rerun at
 the new exact SHA.
+
+## Resolution
+
+Fixed 2026-09-01 at exact product SHA `6cb9822`. I076 adds the strict,
+column-zero REVIEW grammar and read-only `spine yield` command for one selected
+repository or an immediate-primary fleet. Task outcomes aggregate only by
+canonical harness, opaque actual model ID, and effective implementer tier;
+final outcomes remain a separate rate-free series. Exact duplicates warn and
+deduplicate, conflicts and malformed evidence are excluded, task rounds must
+be contiguous and terminate in acceptance, and rework remains attributed to
+the round-one route.
+
+The report implements permanent `n=0,19,20,39,40` boundaries: rate refused /
+insufficient below 20, percentage / low-confidence at 20–39, and percentage /
+stated at 40 or more. Text and JSON share typed zero-evidence state, sorted
+cells/repositories/diagnostics, counts on refusal, isolated peer retention,
+and the documented exit-0/1/2 contract. Existing exact model-tier ESCALATION
+and FALLBACK records contribute report-wide counts only; effort and malformed
+forms do not create cell attribution.
+
+Selected progress ledgers and fleet discovery are descriptor-rooted,
+no-follow, identity-revalidated reads. The implementation binds the fleet
+parent, each child, `.git` eligibility, `.superpowers`, `sdd`, and
+`progress.md` through observation, open, read, and final revalidation; symlink
+and different-object replacements fail closed, same-object controls pass, and
+child failures retain valid peers with bounded diagnostics. The command reads
+no transcript, ticket, model table, Git history, host configuration, sibling
+ledger, or user-home evidence and writes no file. Raw malformed text,
+conditions, reviewer reasons, outside paths, and ambient secrets are never
+printed or inferred.
+
+Three primary requirements-review rounds drove hostile corrections for
+incomplete sequences, all Unicode whitespace and quotation classes,
+zero-evidence JSON parity, selected-ledger and fleet TOCTOU binding, and
+multi-round conflict determinism. The final fresh primary review and separate
+independent primary verifier both passed exact SHA `6cb9822`. Evidence included
+focused/full/full-race/vet/format/diff gates, native/Linux/Windows builds,
+guard mutations, exhaustive quote/whitespace matrices, 200 fresh conflict
+processes with byte-identical text/JSON, 2,309 hostile assertions across 495
+fresh CLI processes, and unchanged fixture hashes. All eight acceptance
+criteria passed.
+
+I073's canonical harness prerequisite is satisfied by product SHA `46b2324`,
+the all-20 fleet PASS, closure `dcb1c3e`, and fresh post-fleet primary PASS.
+Per the owner-directed open-ledger sequence, I076 is now fixed pending batch
+ship; no standalone I076 lane is claimed. The sole exact-SHA
+`maipipe run full --wait` remains the later batch-final ship verdict after the
+whole-branch review, routing audit, and fresh handoff.
