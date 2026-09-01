@@ -450,6 +450,13 @@ func TestFleetRejectsInvalidParentAndDoesNotFollowGitSymlinks(t *testing.T) {
 	if _, err := Run(Options{Fleet: parentFile}); !errors.Is(err, ErrInvalidRoot) {
 		t.Fatalf("Run invalid fleet error=%v", err)
 	}
+	linkedParent := filepath.Join(t.TempDir(), "fleet-link")
+	if err := os.Symlink(t.TempDir(), linkedParent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(Options{Fleet: linkedParent}); !errors.Is(err, ErrInvalidRoot) {
+		t.Fatalf("Run symlink fleet error=%v, want ErrInvalidRoot", err)
+	}
 	fleet := t.TempDir()
 	child := filepath.Join(fleet, "symlinked-git")
 	if err := os.MkdirAll(child, 0o755); err != nil {
@@ -461,5 +468,199 @@ func TestFleetRejectsInvalidParentAndDoesNotFollowGitSymlinks(t *testing.T) {
 	report, err := Run(Options{Fleet: fleet})
 	if err != nil || len(report.Repositories) != 0 || report.Totals.ValidReviewLines != 0 {
 		t.Fatalf("report=%+v err=%v", report, err)
+	}
+}
+
+func TestRunRejectsSymlinkedLedgerComponentsWithoutLeakingTargets(t *testing.T) {
+	outside := t.TempDir()
+	secretRecords := make([]string, 0, 20)
+	for i := 0; i < 20; i++ {
+		secretRecords = append(secretRecords, fmt.Sprintf("REVIEW I%03d harness:codex model:outside-model-secret tier:routine round:1 verdict:accepted scope:task", i+100))
+	}
+	secret := strings.Join(secretRecords, "\n")
+	outsideLedger := filepath.Join(outside, "outside-progress.md")
+	if err := os.WriteFile(outsideLedger, []byte(secret), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outsideSuper := filepath.Join(outside, "outside-superpowers")
+	if err := os.MkdirAll(filepath.Join(outsideSuper, "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideSuper, "sdd", "progress.md"), []byte(secret), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, component := range []string{"progress.md", "sdd", ".superpowers"} {
+		t.Run(component, func(t *testing.T) {
+			dir := t.TempDir()
+			writeLedger(t, dir, acceptedTask)
+			base := filepath.Join(dir, ".superpowers", "sdd")
+			var link string
+			switch component {
+			case "progress.md":
+				link = filepath.Join(base, component)
+			case "sdd":
+				link = filepath.Join(dir, ".superpowers", component)
+			case ".superpowers":
+				link = filepath.Join(dir, component)
+			}
+			if err := os.RemoveAll(link); err != nil {
+				t.Fatal(err)
+			}
+			target := outsideLedger
+			if component == "sdd" {
+				target = filepath.Join(outsideSuper, "sdd")
+			}
+			if component == ".superpowers" {
+				target = outsideSuper
+			}
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+
+			report, err := Run(Options{Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(report.Cells) != 0 || report.ExitCode() != 1 || len(report.Diagnostics) != 1 || report.Diagnostics[0].Message != "progress ledger unreadable" {
+				t.Fatalf("report=%+v", report)
+			}
+			if got := fmt.Sprint(report); strings.Contains(got, outside) || strings.Contains(got, "outside-model-secret") {
+				t.Fatalf("report leaked target: %s", got)
+			}
+		})
+	}
+}
+
+func TestFleetRejectsSymlinkedLedgerAndRetainsPeer(t *testing.T) {
+	fleet := t.TempDir()
+	peerRecords := make([]string, 0, 20)
+	for i := 0; i < 20; i++ {
+		peerRecords = append(peerRecords, fmt.Sprintf("REVIEW I%03d harness:codex model:peer tier:routine round:1 verdict:accepted scope:task", i+100))
+	}
+	makeFleetRepository(t, fleet, "peer", strings.Join(peerRecords, "\n"))
+	bad := makeFleetRepository(t, fleet, "bad", "")
+	outside := filepath.Join(t.TempDir(), "outside-progress.md")
+	if err := os.WriteFile(outside, []byte("REVIEW I999 harness:codex model:outside-model-secret tier:routine round:1 verdict:accepted scope:task"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(bad, ".superpowers", "sdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(bad, ".superpowers", "sdd", "progress.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Run(Options{Fleet: fleet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Cells) != 1 || report.Cells[0].ModelID != "peer" || report.Cells[0].N != 20 || report.ExitCode() != 1 {
+		t.Fatalf("report=%+v", report)
+	}
+	if got := report.Repositories; len(got) != 2 || got[0] != (RepositoryStatus{Name: "bad", Status: "error"}) || got[1] != (RepositoryStatus{Name: "peer", Status: "ok"}) {
+		t.Fatalf("repositories=%+v", got)
+	}
+	if len(report.Diagnostics) != 1 || report.Diagnostics[0] != (Diagnostic{Repository: "bad", Message: "progress ledger unreadable"}) {
+		t.Fatalf("diagnostics=%+v", report.Diagnostics)
+	}
+	if got := fmt.Sprint(report); strings.Contains(got, outside) || strings.Contains(got, "outside-model-secret") {
+		t.Fatalf("report leaked target: %s", got)
+	}
+}
+
+func TestReadBoundLedgerRejectsReplacementAndAcceptsSameObjectRename(t *testing.T) {
+	t.Run("replacement", func(t *testing.T) {
+		dir := t.TempDir()
+		writeLedger(t, dir, acceptedTask)
+		ledger := filepath.Join(dir, ".superpowers", "sdd", "progress.md")
+		backup := ledger + ".observed"
+		_, _, err := readBoundLedger(dir, func(path string) {
+			if path != ledger {
+				return
+			}
+			if err := os.Rename(ledger, backup); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(ledger, []byte("REVIEW I999 harness:codex model:replacement-secret tier:routine round:1 verdict:accepted scope:task"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if err == nil {
+			t.Fatal("readBoundLedger accepted a replaced ledger")
+		}
+	})
+
+	t.Run("same-object-rename", func(t *testing.T) {
+		dir := t.TempDir()
+		writeLedger(t, dir, acceptedTask)
+		ledger := filepath.Join(dir, ".superpowers", "sdd", "progress.md")
+		alias := ledger + ".alias"
+		if err := os.Link(ledger, alias); err != nil {
+			t.Fatal(err)
+		}
+		content, missing, err := readBoundLedger(dir, func(path string) {
+			if path != ledger {
+				return
+			}
+			if err := os.Remove(ledger); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Link(alias, ledger); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if err != nil || missing || string(content) != acceptedTask {
+			t.Fatalf("content=%q missing=%v err=%v", content, missing, err)
+		}
+	})
+
+	for _, component := range []string{".superpowers", "sdd"} {
+		t.Run(component+"-replacement", func(t *testing.T) {
+			dir := t.TempDir()
+			writeLedger(t, dir, acceptedTask)
+			componentPath := filepath.Join(dir, component)
+			if component == "sdd" {
+				componentPath = filepath.Join(dir, ".superpowers", component)
+			}
+			backup := componentPath + ".observed"
+			_, _, err := readBoundLedger(dir, func(path string) {
+				if path != componentPath {
+					return
+				}
+				if err := os.Rename(componentPath, backup); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(componentPath, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if component == ".superpowers" {
+					if err := os.MkdirAll(filepath.Join(componentPath, "sdd"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+			})
+			if err == nil {
+				t.Fatalf("readBoundLedger accepted replaced %s", component)
+			}
+		})
+	}
+}
+
+func TestRunRejectsSymlinkedSelectedRootAndKeepsMissingLedgerOrdinary(t *testing.T) {
+	missing := t.TempDir()
+	local, status := readRepository(missing, "repository")
+	if status != (RepositoryStatus{Name: "repository", Status: "missing-ledger"}) || len(local.records) != 0 {
+		t.Fatalf("local=%+v status=%+v", local, status)
+	}
+
+	target := t.TempDir()
+	writeLedger(t, target, acceptedTask)
+	selected := filepath.Join(t.TempDir(), "selected")
+	if err := os.Symlink(target, selected); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(Options{Dir: selected}); !errors.Is(err, ErrInvalidRoot) {
+		t.Fatalf("Run symlink root error=%v, want ErrInvalidRoot", err)
 	}
 }

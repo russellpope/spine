@@ -5,6 +5,7 @@ package yield
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -129,8 +130,8 @@ func Run(opts Options) (Report, error) {
 		}
 		return runFleet(opts.Fleet)
 	}
-	info, err := os.Stat(opts.Dir)
-	if err != nil || !info.IsDir() {
+	info, err := os.Lstat(opts.Dir)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return Report{}, fmt.Errorf("%w: --dir", ErrInvalidRoot)
 	}
 	local, status := readRepository(opts.Dir, "")
@@ -162,9 +163,8 @@ func (r *localResult) merge(other localResult) {
 }
 
 func readRepository(dir, repository string) (localResult, RepositoryStatus) {
-	path := filepath.Join(dir, filepath.FromSlash(progressLedger))
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
+	raw, missing, err := readBoundLedger(dir, nil)
+	if missing {
 		return localResult{}, RepositoryStatus{Name: repository, Status: "missing-ledger"}
 	}
 	if err != nil {
@@ -172,6 +172,94 @@ func readRepository(dir, repository string) (localResult, RepositoryStatus) {
 	}
 	result := parseLedger(string(raw), repository)
 	return result, RepositoryStatus{Name: repository, Status: "ok"}
+}
+
+// readBoundLedger reads only the selected repository's ledger. It retains each
+// directory descriptor and checks object identity before accepting bytes, so a
+// symlink or pathname replacement cannot redirect the read.
+func readBoundLedger(dir string, beforeOpen func(string)) (content []byte, missing bool, err error) {
+	observedRoot, err := os.Lstat(dir)
+	if err != nil {
+		return nil, false, err
+	}
+	if observedRoot.Mode()&os.ModeSymlink != 0 || !observedRoot.IsDir() {
+		return nil, false, errors.New("unsafe repository root")
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, false, err
+	}
+	roots := []*os.Root{root}
+	defer func() {
+		for index := len(roots) - 1; index >= 0; index-- {
+			if closeErr := roots[index].Close(); err == nil && closeErr != nil {
+				content, missing, err = nil, false, closeErr
+			}
+		}
+	}()
+	openedRoot, statErr := root.Stat(".")
+	currentRoot, currentErr := os.Lstat(dir)
+	if statErr != nil || currentErr != nil || currentRoot.Mode()&os.ModeSymlink != 0 || !openedRoot.IsDir() || !os.SameFile(observedRoot, openedRoot) || !os.SameFile(observedRoot, currentRoot) {
+		return nil, false, errors.New("unsafe repository root")
+	}
+
+	path := dir
+	for _, name := range []string{".superpowers", "sdd"} {
+		info, lstatErr := root.Lstat(name)
+		if errors.Is(lstatErr, fs.ErrNotExist) {
+			return nil, true, nil
+		}
+		if lstatErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return nil, false, errors.New("unsafe ledger component")
+		}
+		path = filepath.Join(path, name)
+		if beforeOpen != nil {
+			beforeOpen(path)
+		}
+		child, openErr := root.OpenRoot(name)
+		if openErr != nil {
+			return nil, false, openErr
+		}
+		opened, openedErr := child.Stat(".")
+		current, currentErr := root.Lstat(name)
+		if openedErr != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !opened.IsDir() || !os.SameFile(info, opened) || !os.SameFile(info, current) {
+			_ = child.Close()
+			return nil, false, errors.New("unsafe ledger component")
+		}
+		roots = append(roots, child)
+		root = child
+	}
+
+	info, lstatErr := root.Lstat("progress.md")
+	if errors.Is(lstatErr, fs.ErrNotExist) {
+		return nil, true, nil
+	}
+	if lstatErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, false, errors.New("unsafe progress ledger")
+	}
+	path = filepath.Join(path, "progress.md")
+	if beforeOpen != nil {
+		beforeOpen(path)
+	}
+	file, openErr := root.Open("progress.md")
+	if openErr != nil {
+		return nil, false, openErr
+	}
+	opened, openedErr := file.Stat()
+	current, currentErr := root.Lstat("progress.md")
+	if openedErr != nil || currentErr != nil || current.Mode()&os.ModeSymlink != 0 || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || !os.SameFile(info, current) {
+		_ = file.Close()
+		return nil, false, errors.New("unsafe progress ledger")
+	}
+	content, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, false, readErr
+	}
+	if closeErr != nil {
+		return nil, false, closeErr
+	}
+	return content, false, nil
 }
 
 func parseLedger(raw, repository string) localResult {

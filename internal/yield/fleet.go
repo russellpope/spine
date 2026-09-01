@@ -17,8 +17,8 @@ func runFleet(parent string) (Report, error) {
 }
 
 func runFleetWithLstat(parent string, lstat func(string) (fs.FileInfo, error)) (Report, error) {
-	info, err := os.Stat(parent)
-	if err != nil || !info.IsDir() {
+	info, err := lstat(parent)
+	if err != nil || info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
 		return Report{}, fmt.Errorf("%w: --fleet", ErrInvalidRoot)
 	}
 	entries, err := os.ReadDir(parent)
