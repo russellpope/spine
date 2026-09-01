@@ -30,6 +30,7 @@ import (
 	"github.com/russellpope/spine/internal/stages"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
+	"github.com/russellpope/spine/internal/yield"
 )
 
 const usage = `usage: spine <command> [flags]
@@ -47,7 +48,8 @@ commands:
   gate       run a gate-pack check class (gate [--dir D] <pack>[@<v>] <check>)
   checkpoint write or replay a session checkpoint (new, latest, list)
   cursor     print or update the stage cursor (start | tick | here | set; --quiet for read hooks)
-	model      resolve or validate the model table for a (harness, tier) pair (read-only)
+  model      resolve or validate the model table for a (harness, tier) pair (read-only)
+  yield      report recorded routing yield (yield [--dir D] [--json] | yield --fleet P [--json])
   version    print the compiled template generation
 `
 
@@ -83,6 +85,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdCursor(args[1:], stdout, stderr)
 	case "model":
 		return cmdModel(args[1:], stdout, stderr)
+	case "yield":
+		return cmdYield(args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintf(stdout, "spine template generation %d\n", tmpl.Version())
 		bi, ok := debug.ReadBuildInfo()
@@ -97,6 +101,78 @@ func run(args []string, stdout, stderr io.Writer) int {
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n%s", args[0], usage)
 		return 2
+	}
+}
+
+const yieldUsage = `usage: spine yield [--dir D] [--json]
+       spine yield --fleet P [--json]`
+
+func cmdYield(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("yield", flag.ContinueOnError)
+	dir := fs.String("dir", ".", "repository root")
+	fleet := fs.String("fleet", "", "scan immediate primary child repositories")
+	asJSON := fs.Bool("json", false, "machine-readable output")
+	if _, ok := parseArgs(fs, args, "yield", yieldUsage, 0, stderr); !ok {
+		return 2
+	}
+	dirSet := false
+	fs.Visit(func(f *flag.Flag) {
+		dirSet = dirSet || f.Name == "dir"
+	})
+	if *fleet != "" && dirSet {
+		fmt.Fprintf(stderr, "yield: --dir and --fleet are mutually exclusive\n%s\n", yieldUsage)
+		return 2
+	}
+	for _, f := range []struct{ name, value string }{{"dir", *dir}, {"fleet", *fleet}} {
+		if strings.HasPrefix(f.value, "-") {
+			fmt.Fprintf(stderr, "yield: --%s needs a directory value (did a following flag get consumed?)\n%s\n", f.name, yieldUsage)
+			return 2
+		}
+	}
+	report, err := yield.Run(yield.Options{Dir: *dir, Fleet: *fleet})
+	if err != nil {
+		fmt.Fprintln(stderr, "yield:", err)
+		return 2
+	}
+	if *asJSON {
+		if err := json.NewEncoder(stdout).Encode(report); err != nil {
+			fmt.Fprintln(stderr, "yield:", err)
+			return 2
+		}
+	} else {
+		printYieldReport(stdout, report)
+	}
+	return report.ExitCode()
+}
+
+func printYieldReport(stdout io.Writer, report yield.Report) {
+	if len(report.Cells) == 0 {
+		fmt.Fprintf(stdout, "scope: %s rate=refused confidence=insufficient\n", report.Scope)
+	} else {
+		fmt.Fprintf(stdout, "scope: %s\n", report.Scope)
+	}
+	totals := report.Totals
+	fmt.Fprintf(stdout, "totals: valid_review_lines=%d ignored_identities=%d escalations=%d fallbacks=%d final_accepted=%d final_needs_fixes=%d final_unattributable_needs_fixes=%d\n",
+		totals.ValidReviewLines, totals.IgnoredIdentities, totals.Escalations, totals.Fallbacks,
+		totals.FinalAccepted, totals.FinalNeedsFixes, totals.FinalUnattributableNeedsFixes)
+	for _, cell := range report.Cells {
+		fmt.Fprintf(stdout, "cell: harness=%s model_id=%s tier=%s n=%d accepted_first_pass=%d needs_fixes_first_pass=%d rework_rounds=%d rate=%s confidence=%s\n",
+			cell.Harness, cell.ModelID, cell.Tier, cell.N, cell.AcceptedFirstPass, cell.NeedsFixesFirstPass,
+			cell.ReworkRounds, cell.Rate, cell.Confidence)
+	}
+	for _, repository := range report.Repositories {
+		fmt.Fprintf(stdout, "repository: %s status=%s\n", repository.Name, repository.Status)
+	}
+	for _, diagnostic := range report.Diagnostics {
+		if diagnostic.Repository != "" {
+			fmt.Fprintf(stdout, "diagnostic: repository=%s", diagnostic.Repository)
+		} else {
+			fmt.Fprint(stdout, "diagnostic:")
+		}
+		if diagnostic.Line != 0 {
+			fmt.Fprintf(stdout, " line=%d", diagnostic.Line)
+		}
+		fmt.Fprintf(stdout, " message=%s\n", diagnostic.Message)
 	}
 }
 

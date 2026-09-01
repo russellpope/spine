@@ -86,6 +86,230 @@ func runCmd(t *testing.T, args ...string) (int, string, string) {
 	return code, out.String(), errb.String()
 }
 
+func writeYieldLedger(t *testing.T, repo, contents string) {
+	t.Helper()
+	ledger := filepath.Join(repo, ".superpowers", "sdd", "progress.md")
+	if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ledger, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func yieldRecords(n int, harness, model, tier string) string {
+	return yieldRecordsFrom(n, 100, harness, model, tier)
+}
+
+func yieldRecordsFrom(n, start int, harness, model, tier string) string {
+	lines := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		lines = append(lines, fmt.Sprintf("REVIEW I%03d harness:%s model:%s tier:%s round:1 verdict:accepted scope:task", start+i, harness, model, tier))
+	}
+	return strings.Join(lines, "\n")
+}
+
+type yieldJSON struct {
+	Scope  string `json:"scope"`
+	Totals struct {
+		ValidReviewLines              int `json:"valid_review_lines"`
+		IgnoredIdentities             int `json:"ignored_identities"`
+		Escalations                   int `json:"escalations"`
+		Fallbacks                     int `json:"fallbacks"`
+		FinalAccepted                 int `json:"final_accepted"`
+		FinalNeedsFixes               int `json:"final_needs_fixes"`
+		FinalUnattributableNeedsFixes int `json:"final_unattributable_needs_fixes"`
+	} `json:"totals"`
+	Cells []struct {
+		Harness    string `json:"harness"`
+		ModelID    string `json:"model_id"`
+		Tier       string `json:"tier"`
+		N          int    `json:"n"`
+		Rate       string `json:"accepted_first_pass_rate"`
+		Confidence string `json:"confidence"`
+	} `json:"cells"`
+	Repositories []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	} `json:"repositories"`
+}
+
+func decodeYieldJSON(t *testing.T, out string) yieldJSON {
+	t.Helper()
+	var payload yieldJSON
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("yield JSON: %v; out=%q", err, out)
+	}
+	return payload
+}
+
+func TestYieldFlagsFirstScopesAndUsage(t *testing.T) {
+	repo := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	if code, out, errs := runCmd(t, "yield"); code != 1 || !strings.Contains(out, "scope: repository") || errs != "" {
+		t.Fatalf("default --dir: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	if code, out, errs := runCmd(t, "yield", "--json"); code != 1 || errs != "" {
+		t.Fatalf("default --dir JSON: code=%d out=%q stderr=%q", code, out, errs)
+	} else if payload := decodeYieldJSON(t, out); payload.Scope != "repository" || payload.Totals.ValidReviewLines != 0 || payload.Totals.IgnoredIdentities != 0 || len(payload.Cells) != 0 {
+		t.Fatalf("default --dir JSON payload=%+v", payload)
+	}
+	writeYieldLedger(t, repo, yieldRecords(20, "codex", "default-model", "routine"))
+	if code, out, errs := runCmd(t, "yield", "--dir", repo, "--json"); code != 0 || errs != "" {
+		t.Fatalf("explicit --dir: code=%d out=%q stderr=%q", code, out, errs)
+	} else if payload := decodeYieldJSON(t, out); payload.Scope != "repository" || len(payload.Cells) != 1 || payload.Cells[0].N != 20 {
+		t.Fatalf("explicit --dir payload=%+v", payload)
+	}
+
+	fleet := t.TempDir()
+	for _, name := range []string{"zeta", "alpha"} {
+		child := filepath.Join(fleet, name)
+		if err := os.MkdirAll(filepath.Join(child, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeYieldLedger(t, child, yieldRecords(10, "codex", "fleet-model", "routine"))
+	}
+	if code, out, errs := runCmd(t, "yield", "--fleet", fleet); code != 0 || errs != "" || !strings.Contains(out, "scope: fleet") || strings.Index(out, "repository: alpha") > strings.Index(out, "repository: zeta") {
+		t.Fatalf("fleet: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	for _, args := range [][]string{
+		{"yield", "--dir", repo, "--fleet", fleet},
+		{"yield", "--dir", repo, "unexpected"},
+		{"yield", "unexpected", "--json"},
+	} {
+		code, out, errs := runCmd(t, args...)
+		if code != 2 || out != "" || !strings.Contains(errs, "usage: spine yield") {
+			t.Fatalf("args=%v code=%d out=%q stderr=%q", args, code, out, errs)
+		}
+	}
+}
+
+func TestYieldRootMissingLedgerThresholdsAndDeterministicOrdering(t *testing.T) {
+	if code, out, errs := runCmd(t, "yield", "--dir", filepath.Join(t.TempDir(), "missing")); code != 2 || out != "" || !strings.Contains(errs, "yield:") {
+		t.Fatalf("invalid root: code=%d out=%q stderr=%q", code, out, errs)
+	}
+	for _, tc := range []struct {
+		n          int
+		wantCode   int
+		wantRate   string
+		confidence string
+	}{
+		{0, 1, "refused", "insufficient"},
+		{19, 1, "refused", "insufficient"},
+		{20, 0, "100.0%", "low-confidence"},
+		{40, 0, "100.0%", "stated"},
+	} {
+		t.Run(fmt.Sprintf("n=%d", tc.n), func(t *testing.T) {
+			repo := t.TempDir()
+			if tc.n != 0 {
+				writeYieldLedger(t, repo, yieldRecords(tc.n, "codex", "model-b", "routine")+"\n"+yieldRecordsFrom(tc.n, 200, "claude", "model-a", "primary"))
+			}
+			code, out, errs := runCmd(t, "yield", "--dir", repo)
+			if code != tc.wantCode || errs != "" || !strings.Contains(out, "totals:") || !strings.Contains(out, "valid_review_lines=") || !strings.Contains(out, "ignored_identities=") {
+				t.Fatalf("text n=%d code=%d out=%q stderr=%q", tc.n, code, out, errs)
+			}
+			if tc.n == 0 {
+				if !strings.Contains(out, "rate=refused") || !strings.Contains(out, "confidence=insufficient") {
+					t.Fatalf("zero output=%q", out)
+				}
+				return
+			}
+			if !strings.Contains(out, "rate="+tc.wantRate) || !strings.Contains(out, "confidence="+tc.confidence) || strings.Index(out, "harness=claude") > strings.Index(out, "harness=codex") {
+				t.Fatalf("text n=%d out=%q", tc.n, out)
+			}
+			jsonCode, jsonOut, jsonErr := runCmd(t, "yield", "--dir", repo, "--json")
+			if jsonCode != tc.wantCode || jsonErr != "" {
+				t.Fatalf("json n=%d code=%d out=%q stderr=%q", tc.n, jsonCode, jsonOut, jsonErr)
+			}
+			payload := decodeYieldJSON(t, jsonOut)
+			if len(payload.Cells) != 2 || payload.Cells[0].Harness != "claude" || payload.Cells[1].Harness != "codex" || payload.Cells[0].N != tc.n || payload.Cells[0].Rate != tc.wantRate || payload.Cells[0].Confidence != tc.confidence {
+				t.Fatalf("json n=%d payload=%+v", tc.n, payload)
+			}
+		})
+	}
+}
+
+func TestYieldFinalTotalsFailuresAndPrivacy(t *testing.T) {
+	repo := t.TempDir()
+	condition := "CONDITION-SECRET-DO-NOT-PRINT"
+	malformed := "RAW-MALFORMED-SECRET-DO-NOT-PRINT/below-repository-path"
+	writeYieldLedger(t, repo, strings.Join([]string{
+		yieldRecords(20, "codex", "model", "routine"),
+		"REVIEW I076 harness:codex model:model tier:routine round:1 verdict:accepted scope:final",
+		"REVIEW I077 harness:codex model:model tier:routine round:1 verdict:needs-fixes scope:final",
+		"REVIEW - harness:- model:- tier:- round:1 verdict:needs-fixes scope:final condition:" + condition,
+		"REVIEW I078 flavor:codex model:" + malformed + " tier:routine round:1 verdict:accepted scope:task",
+	}, "\n"))
+	transcript := filepath.Join(repo, "transcripts", "below-repository-path", "transcript-like.jsonl")
+	if err := os.MkdirAll(filepath.Dir(transcript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(transcript, []byte("TRANSCRIPT-SECRET-DO-NOT-PRINT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCmd(t, "yield", "--dir", repo)
+	if code != 1 || errs != "" || !strings.Contains(out, "final_accepted=1") || !strings.Contains(out, "final_needs_fixes=1") || !strings.Contains(out, "final_unattributable_needs_fixes=1") || !strings.Contains(out, "n=20") {
+		t.Fatalf("text code=%d out=%q stderr=%q", code, out, errs)
+	}
+	for _, secret := range []string{condition, malformed, "TRANSCRIPT-SECRET-DO-NOT-PRINT"} {
+		if strings.Contains(out, secret) || strings.Contains(errs, secret) {
+			t.Fatalf("secret %q leaked: out=%q stderr=%q", secret, out, errs)
+		}
+	}
+	if strings.Contains(out, "final_accepted=1.0%") || strings.Contains(out, "final_needs_fixes=1.0%") {
+		t.Fatalf("final series has a rate: out=%q", out)
+	}
+	if err := os.WriteFile(transcript, []byte("CHANGED-TRANSCRIPT-SECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if nextCode, nextOut, nextErr := runCmd(t, "yield", "--dir", repo); nextCode != code || nextOut != out || nextErr != errs {
+		t.Fatalf("transcript affected output: code=%d/%d out=%q/%q stderr=%q/%q", code, nextCode, out, nextOut, errs, nextErr)
+	}
+	jsonCode, jsonOut, jsonErr := runCmd(t, "yield", "--dir", repo, "--json")
+	if jsonCode != 1 || jsonErr != "" {
+		t.Fatalf("json code=%d out=%q stderr=%q", jsonCode, jsonOut, jsonErr)
+	}
+	payload := decodeYieldJSON(t, jsonOut)
+	if payload.Totals.FinalAccepted != 1 || payload.Totals.FinalNeedsFixes != 1 || payload.Totals.FinalUnattributableNeedsFixes != 1 || len(payload.Cells) != 1 || payload.Cells[0].N != 20 {
+		t.Fatalf("final JSON payload=%+v", payload)
+	}
+}
+
+func TestYieldFleetFailureRetainsPeerCounts(t *testing.T) {
+	fleet := t.TempDir()
+	peer := filepath.Join(fleet, "alpha")
+	broken := filepath.Join(fleet, "broken")
+	for _, repo := range []string{peer, broken} {
+		if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeYieldLedger(t, peer, yieldRecords(20, "codex", "peer-model", "routine"))
+	if err := os.MkdirAll(filepath.Join(broken, ".superpowers", "sdd", "progress.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runCmd(t, "yield", "--fleet", fleet)
+	if code != 1 || errs != "" || !strings.Contains(out, "n=20") || !strings.Contains(out, "repository: alpha status=ok") || !strings.Contains(out, "repository: broken status=error") {
+		t.Fatalf("text code=%d out=%q stderr=%q", code, out, errs)
+	}
+	jsonCode, jsonOut, jsonErr := runCmd(t, "yield", "--fleet", fleet, "--json")
+	if jsonCode != 1 || jsonErr != "" {
+		t.Fatalf("json code=%d out=%q stderr=%q", jsonCode, jsonOut, jsonErr)
+	}
+	payload := decodeYieldJSON(t, jsonOut)
+	if len(payload.Cells) != 1 || payload.Cells[0].N != 20 || len(payload.Repositories) != 2 || payload.Repositories[0].Name != "alpha" || payload.Repositories[1].Name != "broken" || payload.Repositories[1].Status != "error" {
+		t.Fatalf("fleet payload=%+v", payload)
+	}
+}
+
 func TestNoArgsShowsUsage(t *testing.T) {
 	code, _, errs := runCmd(t)
 	if code != 2 || !strings.Contains(errs, "usage: spine") {
