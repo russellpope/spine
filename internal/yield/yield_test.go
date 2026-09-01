@@ -419,14 +419,12 @@ func TestFleetReportsChildGitInspectionFailures(t *testing.T) {
 	}
 	makeFleetRepository(t, fleet, "alpha", strings.Join(records, "\n"))
 	broken := makeFleetRepository(t, fleet, "broken", "")
-	brokenGit := filepath.Join(broken, ".git")
-
-	report, err := runFleetWithLstat(fleet, func(path string) (fs.FileInfo, error) {
-		if path == brokenGit {
+	report, err := runFleetWithOps(fleet, fleetOps{childGitLstat: func(root *os.Root, child, name string) (fs.FileInfo, error) {
+		if child == "broken" && name == ".git" {
 			return nil, errors.New("inspection-secret")
 		}
-		return os.Lstat(path)
-	})
+		return root.Lstat(name)
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -693,5 +691,214 @@ func TestRunRejectsSymlinkedSelectedRootAndKeepsMissingLedgerOrdinary(t *testing
 	}
 	if _, err := Run(Options{Dir: selected}); !errors.Is(err, ErrInvalidRoot) {
 		t.Fatalf("Run symlink root error=%v, want ErrInvalidRoot", err)
+	}
+}
+
+func fleetRecords(model string) string {
+	lines := make([]string, 0, 20)
+	for i := 0; i < 20; i++ {
+		lines = append(lines, fmt.Sprintf("REVIEW I%03d harness:codex model:%s tier:routine round:1 verdict:accepted scope:task", i+100, model))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestFleetRejectsParentReplacementBeforeDiscovery(t *testing.T) {
+	container := t.TempDir()
+	fleet := filepath.Join(container, "fleet")
+	if err := os.Mkdir(fleet, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	makeFleetRepository(t, outside, "outside", fleetRecords("outside-fleet-secret"))
+	observed := filepath.Join(container, "fleet-observed")
+	report, err := runFleetWithOps(fleet, fleetOps{afterParentObserved: func() {
+		if err := os.Rename(fleet, observed); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, fleet); err != nil {
+			t.Fatal(err)
+		}
+	}})
+	if !errors.Is(err, ErrInvalidRoot) || report.Scope != "" || len(report.Cells) != 0 || len(report.Repositories) != 0 || len(report.Diagnostics) != 0 {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	if rendered := fmt.Sprint(report, err); strings.Contains(rendered, "outside-fleet-secret") || strings.Contains(rendered, outside) {
+		t.Fatalf("fleet replacement leaked target: %s", rendered)
+	}
+}
+
+func TestFleetBindsParentIdentityAcrossDiscovery(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(t *testing.T, fleet string)
+		wantOK bool
+	}{
+		{
+			name: "different-object-replacement",
+			mutate: func(t *testing.T, fleet string) {
+				if err := os.Rename(fleet, fleet+".observed"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(fleet, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				makeFleetRepository(t, fleet, "replacement", fleetRecords("parent-replacement-secret"))
+			},
+		},
+		{
+			name: "same-object-rename-control",
+			mutate: func(t *testing.T, fleet string) {
+				if err := os.Rename(fleet, fleet+".same"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(fleet+".same", fleet); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantOK: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			container := t.TempDir()
+			fleet := filepath.Join(container, "fleet")
+			if err := os.Mkdir(fleet, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			makeFleetRepository(t, fleet, "observed", fleetRecords("observed-parent"))
+			report, err := runFleetWithOps(fleet, fleetOps{afterParentObserved: func() { tc.mutate(t, fleet) }})
+			if tc.wantOK {
+				if err != nil || len(report.Cells) != 1 || report.Cells[0].ModelID != "observed-parent" || report.ExitCode() != 0 {
+					t.Fatalf("same-object parent control report=%+v err=%v", report, err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrInvalidRoot) || len(report.Cells) != 0 || strings.Contains(fmt.Sprint(report, err), "parent-replacement-secret") {
+				t.Fatalf("report=%+v err=%v", report, err)
+			}
+		})
+	}
+}
+
+func TestFleetRevalidatesParentBeforeReturning(t *testing.T) {
+	container := t.TempDir()
+	fleet := filepath.Join(container, "fleet")
+	if err := os.Mkdir(fleet, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeFleetRepository(t, fleet, "observed", fleetRecords("observed-parent"))
+	outside := t.TempDir()
+	makeFleetRepository(t, outside, "outside", fleetRecords("late-parent-secret"))
+	report, err := runFleetWithOps(fleet, fleetOps{beforeParentRevalidate: func() {
+		if err := os.Rename(fleet, fleet+".observed"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, fleet); err != nil {
+			t.Fatal(err)
+		}
+	}})
+	if !errors.Is(err, ErrInvalidRoot) || len(report.Cells) != 0 || strings.Contains(fmt.Sprint(report, err), "late-parent-secret") {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+}
+
+func TestFleetBindsChildObjectsBeforeMerging(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(t *testing.T, fleet, child string)
+		wantOK bool
+	}{
+		{
+			name: "ordinary-replacement-without-git",
+			mutate: func(t *testing.T, fleet, child string) {
+				backup := child + ".observed"
+				if err := os.Rename(child, backup); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(child, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				writeLedger(t, child, fleetRecords("ordinary-replacement-secret"))
+			},
+		},
+		{
+			name: "child-symlink-transition",
+			mutate: func(t *testing.T, fleet, child string) {
+				outside := t.TempDir()
+				makeFleetRepository(t, outside, "outside", fleetRecords("child-symlink-secret"))
+				if err := os.Rename(child, child+".observed"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(outside, "outside"), child); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "different-object-replacement",
+			mutate: func(t *testing.T, fleet, child string) {
+				if err := os.Rename(child, child+".observed"); err != nil {
+					t.Fatal(err)
+				}
+				makeFleetRepository(t, fleet, filepath.Base(child), fleetRecords("different-object-secret"))
+			},
+		},
+		{
+			name: "git-replacement-after-eligibility",
+			mutate: func(t *testing.T, fleet, child string) {
+				git := filepath.Join(child, ".git")
+				if err := os.Rename(git, git+".observed"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(git, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "same-object-rename-control",
+			mutate: func(t *testing.T, fleet, child string) {
+				if err := os.Rename(child, child+".same"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(child+".same", child); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantOK: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fleet := t.TempDir()
+			child := makeFleetRepository(t, fleet, "bad", fleetRecords("observed-child-secret"))
+			makeFleetRepository(t, fleet, "peer", fleetRecords("peer"))
+			mutated := false
+			report, err := runFleetWithOps(fleet, fleetOps{afterChildGitObserved: func(name string) {
+				if name == "bad" && !mutated {
+					mutated = true
+					tc.mutate(t, fleet, child)
+				}
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantOK {
+				if len(report.Cells) != 2 || report.Cells[0].ModelID != "observed-child-secret" || report.Cells[1].ModelID != "peer" || report.ExitCode() != 0 {
+					t.Fatalf("same-object control report=%+v", report)
+				}
+				return
+			}
+			if len(report.Cells) != 1 || report.Cells[0].ModelID != "peer" || report.Cells[0].N != 20 || report.ExitCode() != 1 {
+				t.Fatalf("report=%+v", report)
+			}
+			if got := report.Repositories; len(got) != 2 || got[0] != (RepositoryStatus{Name: "bad", Status: "error"}) || got[1] != (RepositoryStatus{Name: "peer", Status: "ok"}) {
+				t.Fatalf("repositories=%+v", got)
+			}
+			if len(report.Diagnostics) != 1 || report.Diagnostics[0] != (Diagnostic{Repository: "bad", Message: "progress ledger unreadable"}) {
+				t.Fatalf("diagnostics=%+v", report.Diagnostics)
+			}
+			if rendered := fmt.Sprint(report); strings.Contains(rendered, "secret") {
+				t.Fatalf("replacement leaked token: %s", rendered)
+			}
+		})
 	}
 }

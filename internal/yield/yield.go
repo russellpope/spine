@@ -176,6 +176,18 @@ func readRepository(dir, repository string) (localResult, RepositoryStatus) {
 	return result, RepositoryStatus{Name: repository, Status: "ok"}
 }
 
+func readRepositoryRoot(root *os.Root, repository string) (localResult, RepositoryStatus) {
+	raw, missing, err := readBoundLedgerRoot(root, "", nil)
+	if missing {
+		return localResult{}, RepositoryStatus{Name: repository, Status: "missing-ledger"}
+	}
+	if err != nil {
+		return localResult{}, RepositoryStatus{Name: repository, Status: "error"}
+	}
+	result := parseLedger(string(raw), repository)
+	return result, RepositoryStatus{Name: repository, Status: "ok"}
+}
+
 // readBoundLedger reads only the selected repository's ledger. It retains each
 // directory descriptor and checks object identity before accepting bytes, so a
 // symlink or pathname replacement cannot redirect the read.
@@ -191,12 +203,9 @@ func readBoundLedger(dir string, beforeOpen func(string)) (content []byte, missi
 	if err != nil {
 		return nil, false, err
 	}
-	roots := []*os.Root{root}
 	defer func() {
-		for index := len(roots) - 1; index >= 0; index-- {
-			if closeErr := roots[index].Close(); err == nil && closeErr != nil {
-				content, missing, err = nil, false, closeErr
-			}
+		if closeErr := root.Close(); err == nil && closeErr != nil {
+			content, missing, err = nil, false, closeErr
 		}
 	}()
 	openedRoot, statErr := root.Stat(".")
@@ -204,8 +213,30 @@ func readBoundLedger(dir string, beforeOpen func(string)) (content []byte, missi
 	if statErr != nil || currentErr != nil || currentRoot.Mode()&os.ModeSymlink != 0 || !openedRoot.IsDir() || !os.SameFile(observedRoot, openedRoot) || !os.SameFile(observedRoot, currentRoot) {
 		return nil, false, errors.New("unsafe repository root")
 	}
+	content, missing, err = readBoundLedgerRoot(root, dir, beforeOpen)
+	if err != nil {
+		return content, missing, err
+	}
+	openedRoot, statErr = root.Stat(".")
+	currentRoot, currentErr = os.Lstat(dir)
+	if statErr != nil || currentErr != nil || currentRoot.Mode()&os.ModeSymlink != 0 || !openedRoot.IsDir() || !os.SameFile(observedRoot, openedRoot) || !os.SameFile(observedRoot, currentRoot) {
+		return nil, false, errors.New("unsafe repository root")
+	}
+	return content, missing, nil
+}
 
-	path := dir
+// readBoundLedgerRoot reads through an already-bound repository root. Its
+// caller owns the root and must revalidate that root before using the result.
+func readBoundLedgerRoot(root *os.Root, path string, beforeOpen func(string)) (content []byte, missing bool, err error) {
+	roots := []*os.Root{}
+	defer func() {
+		for index := len(roots) - 1; index >= 0; index-- {
+			if closeErr := roots[index].Close(); err == nil && closeErr != nil {
+				content, missing, err = nil, false, closeErr
+			}
+		}
+	}()
+
 	for _, name := range []string{".superpowers", "sdd"} {
 		info, lstatErr := root.Lstat(name)
 		if errors.Is(lstatErr, fs.ErrNotExist) {
