@@ -18,10 +18,12 @@ repository-local fixtures.
 
 ## Global constraints
 
-- Do not begin Task 1 until I073 is `fixed` and its independent verifier has
-  recorded PASS for I073's exact final implementation SHA, including
-  `maipipe run full --wait` at that SHA. Stop and report the blocker if any
-  part is absent or names a different SHA.
+- **2026-08-31 owner-directed batch-lane amendment:** Task 1 is satisfied by
+  I073 fixed product SHA `46b2324`, the PASS all-20 primary fleet result,
+  closure `dcb1c3e`, and the fresh primary post-fleet PASS. The earlier
+  standalone-I073 exact-SHA lane prerequisite is historical rationale, not a
+  current required lane. Canonical `harness` terminology and its bounded
+  compatibility surface are now available to I076.
 - I076 is routine-tier implementation. Use the ticket-id token and an explicit
   routed model for every dispatch. Each task gets a reviewer at no lower than
   the ticket review tier. The final whole-branch review and fresh verification
@@ -35,9 +37,11 @@ repository-local fixtures.
 - Stage only the paths named by each commit. Do not stage `.cache/`, unrelated
   source edits, the untracked research stray, local transcripts, or worker
   scratch files.
-- Before ship, commit the final candidate, capture its SHA, then run
-  `maipipe run full --wait` at that exact SHA. Any later commit requires a new
-  full run and a new recorded SHA.
+- The owner-directed ship sequence is: finish I076's gated tail, final
+  whole-branch review, routing audit, fresh handoff, then one batch-final
+  `maipipe run full --wait` at the exact final main SHA. Do not claim or run a
+  standalone I073 or I076 lane. A later commit invalidates that batch-final
+  lane and requires a rerun at the new exact SHA.
 
 ## File map
 
@@ -52,22 +56,25 @@ repository-local fixtures.
 
 ### Task 1: Prove I073 and freeze the implementation contract
 
-**Files:** read I073's ticket, design, plan, independent verification report,
-and exact-SHA maipipe evidence. Create no production file if proof is missing.
+**Files:** read I073's ticket, design, plan, fleet evidence, closure, and
+fresh primary post-fleet re-review. Create no production file if the durable
+prerequisite proof is missing.
 
 **Produces:** a recorded prerequisite SHA and a task contract for the strict
 REVIEW line, fleet reader, thresholds, output, and exits.
 
-- [ ] Check that I073 says `status: fixed`, names its final implementation SHA,
-  and that a fresh independent verifier says PASS for that SHA.
-- [ ] Check the maipipe evidence names that same SHA, not an earlier candidate
-  or a later unverified commit.
-- [ ] If either check fails, stop I076 without edits. Record the exact missing
-  artifact in the task report and leave I076 open.
-- [ ] Write a contract table in the task notes containing the valid REVIEW line,
+- [x] Check I073 is `fixed` at product SHA `46b2324`, the all-20 primary fleet
+  result is PASS, closure is `dcb1c3e`, and the fresh primary post-fleet
+  re-review is PASS.
+- [x] Treat the preceding durable evidence as the owner-authorized substitute
+  for the earlier standalone-I073 maipipe prerequisite; do not claim that
+  standalone lane occurred.
+- [x] Stop I076 without production edits and report the exact missing artifact
+  if any durable prerequisite item is absent or names a different product SHA.
+- [x] Freeze the task contract in this plan and PRD: valid REVIEW line,
   malformed variants, `n` thresholds, fleet child classes, text/JSON fields,
-  and exit codes from the PRD.
-- [ ] Have the task reviewer confirm no `flavor` compatibility form, no rule
+  and exit codes remain as accepted.
+- [x] Preserve the reviewer contract: no `flavor` compatibility form, no rule
   derives an outcome from a filename or transcript, and final outcomes remain
   separate from task-rate denominators.
 
@@ -255,7 +262,7 @@ handoffs, closed tickets, or fleet repositories.
 - [ ] Commit only the approved task paths, naming every path explicitly after
   the active surface is chosen.
 
-### Task 6: Review, independently verify, and close only at the final SHA
+### Task 6: Review, independently verify, and prepare the batch-final SHA
 
 **Files:** read final diff, this plan, the PRD, I073 verification evidence, and
 I076. Modify the I076 ticket only after all gates pass.
@@ -275,20 +282,23 @@ I076. Modify the I076 ticket only after all gates pass.
   failure isolation.
 - [ ] Obtain independent fresh verification with command transcripts and the
   exact candidate SHA. Resolve every blocker before closure.
-- [ ] Commit final ticket evidence with explicit paths, record the commit SHA,
-  then run `maipipe run full --wait` at that exact SHA. Record the lane result.
-  If anything changes after the lane, commit again and rerun the lane at the
-  new SHA.
+- [ ] Commit final ticket evidence with explicit paths and record the commit
+  SHA. Do not run or claim a standalone I076 lane. Delegate ship verdict to the
+  owner-directed batch-final lane, which runs only after I076's gated tail,
+  final whole-branch review, routing audit, and fresh handoff. Any post-lane
+  commit requires a rerun at the new exact SHA.
 - [ ] Re-read the PRD line by line for the final spec review. Record the
-  requirements attack and all evidence in I076; leave it open if any gate or
-  exact-SHA lane remains absent.
+  requirements attack and all evidence in I076; leave it open if any focused
+  review, independent verification, or the required batch-final exact-SHA lane
+  remains absent.
 
 ## Plan self-review
 
 - [x] Every PRD acceptance criterion maps to Tasks 1 through 6.
 - [x] Tasks 2 through 5 require a failing focused test, a red run, the minimum
   implementation, a green run, and task review.
-- [x] The plan preserves I073 as a verified prerequisite rather than treating
-  its current documentation or merge state as completion.
+- [x] The plan preserves I073 as a durably verified prerequisite rather than
+  treating its current documentation or merge state as completion, while the
+  owner-directed batch amendment replaces only its standalone-lane condition.
 - [x] The final task requires an independent verifier, a requirements attack,
-  and maipipe at the exact final SHA.
+  and the batch-final maipipe lane at the exact final SHA.

@@ -4,7 +4,7 @@ title: Routing-yield forward build — REVIEW record line + spine yield verb
 severity: low
 status: open
 affects: [audit, cli, workflow]
-blocked-by: [I073]
+blocked-by: []
 labels: [wayfinder:task]
 parent: I066
 assignee:
@@ -35,7 +35,21 @@ model ID, and effective tier, plus a separate final-review series that never
 changes a task-rate denominator. It does not infer outcomes from filenames or
 transcripts and introduces no rating rule.
 
-Implementation is blocked by [I073](I073-flavor-to-harness-rename-migration.md):
-I073 must be fixed and independently verified at its exact final SHA, including
-the required exact-SHA maipipe result, before I076 code starts. This ticket
-remains open pending that prerequisite and implementation.
+## Owner-directed batch-lane amendment (2026-08-31)
+
+The original I073 prerequisite and its standalone exact-SHA maipipe rationale
+are preserved in the accepted design and plan as historical context. The owner
+has superseded that standalone-lane requirement only: I073 is now satisfied by
+fixed product SHA `46b2324`, the PASS all-20 primary fleet result, closure
+`dcb1c3e`, and a fresh primary post-fleet PASS. Canonical `harness`
+terminology and its bounded compatibility surface are therefore available to
+I076; the product contract still has no `flavor` alias.
+
+I076 Task 1 may pass on that durable evidence. This ticket remains open for its
+gated tail. Task 6 still requires focused and full review, an independent
+verification, and the final requirements attack before closure. The owner has
+directed one batch-final exact-SHA `maipipe run full --wait` only after I076,
+the final whole-branch review, routing audit, and fresh handoff. No standalone
+I073 or I076 lane is required or claimed. The batch-final lane is the ship
+verdict; any post-lane commit invalidates it and requires a rerun at the new
+exact SHA.

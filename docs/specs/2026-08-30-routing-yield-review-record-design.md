@@ -9,10 +9,11 @@ status: accepted-for-documentation
 
 ## Product requirement document
 
-**Status:** accepted design. This document and its plan may land now. I076
-implementation must not start until I073 is fixed and its independent
-verification records PASS for I073's exact final implementation SHA, including
-the required `maipipe run full --wait` result at that same SHA.
+**Status:** accepted design. This document and its plan may land now. The
+original I073 prerequisite required I073 to be fixed and independently
+verified at its exact final implementation SHA, including a standalone
+`maipipe run full --wait` result at that SHA. That historical requirement is
+superseded only by the owner-directed batch-lane amendment below.
 
 **Ticket:** I076, Routing-yield forward build — REVIEW record line + `spine
 yield`.
@@ -29,6 +30,26 @@ outcomes. Only the task-gate series has first-pass and rework rates. The final
 series contextualizes that rate; it is never folded into a task cell or used to
 decide routing policy, recommend a replacement model, or invent a rating
 algorithm.
+
+## Owner-directed batch-lane amendment (2026-08-31)
+
+This amendment changes gate sequencing, not product behavior or the accepted
+record contract. I073's prerequisite is durably satisfied by fixed product SHA
+`46b2324`, the PASS all-20 primary fleet result, closure commit `dcb1c3e`, and
+the fresh primary post-fleet PASS. I076 may therefore consume I073's canonical
+`harness` terminology and its bounded compatibility surface now.
+
+The owner-directed open-ledger sequence is: finish I073 post-fleet acceptance,
+finish I076's gated tail, complete the final whole-branch review, run the
+routing audit, create a fresh handoff, then run one `maipipe run full --wait`
+at the resulting exact final main SHA. No standalone I073 lane and no
+standalone I076 lane is required or claimed. The single batch-final lane is
+the ship verdict. Any commit after that lane invalidates its result and requires
+the lane to be rerun at the new exact SHA.
+
+This sequencing amendment does not relax the grammar, the no-inference and
+privacy boundary, confidence thresholds, fleet isolation, task/final-series
+separation, or the prohibition on a `flavor` alias.
 
 ## Why a forward record is necessary
 
@@ -259,8 +280,14 @@ invented accepted outcome.
    record type and without unsupported per-model attribution.
 6. The implementation reads no filenames or transcripts to derive outcomes and
    prints no raw ledger content, transcript content, or reviewer reason.
-7. I073 is fixed and independently verified at its exact final SHA, with the
-   required exact-SHA maipipe result, before I076 implementation begins.
-8. Focused red-green tests, task review, independent verification, a final
-   requirements attack, and `maipipe run full --wait` at I076's exact final
-   SHA pass before I076 closes.
+7. Before I076 proceeds, I073 has durable prerequisite evidence: fixed product
+   SHA `46b2324`, a PASS all-20 primary fleet result, closure `dcb1c3e`, and a
+   fresh primary post-fleet PASS. This makes canonical harness terminology and
+   its bounded compatibility surface available to I076; it does not authorize a
+   `flavor` alias.
+8. Focused red-green tests, task review, independent verification, and a final
+   requirements attack pass before I076 closes. Ship verdict is delegated to
+   the owner-directed batch-final `maipipe run full --wait`, after I076, final
+   whole-branch review, routing audit, and fresh handoff, at that batch's exact
+   final SHA. No standalone I076 lane is required or claimed; a post-lane
+   commit invalidates the lane and requires a rerun.
