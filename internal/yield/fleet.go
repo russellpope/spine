@@ -15,10 +15,6 @@ func runFleet(parent string) (Report, error) {
 	return runFleetWithOps(parent, fleetOps{})
 }
 
-func runFleetWithLstat(parent string, lstat func(string) (fs.FileInfo, error)) (Report, error) {
-	return runFleetWithOps(parent, fleetOps{parentLstat: lstat})
-}
-
 type fleetOps struct {
 	parentLstat            func(string) (fs.FileInfo, error)
 	openRoot               func(string) (*os.Root, error)
