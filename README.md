@@ -104,6 +104,41 @@ dispatches, but cannot authorize a new launch.
 
 `spine audit routing` closes the loop. It reads the actual agent transcripts on disk, reconstructs which model ran which ticket, including subagent dispatches, and checks the result against the declared tiers. Nothing is taken on the agent's word.
 
+## Recorded review yield
+
+`spine yield` is a read-only report of explicit REVIEW records in the selected
+progress ledger. Its forms are:
+
+```text
+spine yield [--dir D] [--json]
+spine yield --fleet P [--json]
+```
+
+Flags precede positionals. A reviewer writes the actual model ID and the
+effective implementer tier on each task review. Do not infer either from a
+filename, transcript, ticket state, or model table. The task line is:
+
+```text
+REVIEW I076 harness:codex model:gpt-5.6-terra tier:routine round:1 verdict:accepted scope:task
+```
+
+Task rounds form a separate contiguous sequence and stop after acceptance.
+Final outcomes are separate from task sequences and rounds. An unattributable
+final condition uses this bounded form:
+
+```text
+REVIEW - harness:- model:- tier:- round:1 verdict:needs-fixes scope:final condition:F-001
+```
+
+Final totals have no rate and never alter task denominators. For task cells,
+`n < 20` refuses the rate as insufficient, `n = 20-39` prints a percentage
+with low-confidence, and `n >= 40` prints a percentage with stated
+confidence. These labels make no recommendation and apply no rating rule.
+
+Malformed, conflicted, and noncontiguous evidence is visible, excluded, and
+causes a nonzero status. Output never prints raw reviewer or free-text
+evidence.
+
 ## Gate packs
 
 `spine gate` runs deterministic code checks as versioned packs (currently `go@1`). Each check class ships with a positive control pair: a known-good input it must pass and a seeded violation it must catch. A check without both is not shippable. Exit codes are fixed: 0 pass, 1 findings, 2 misconfiguration.
