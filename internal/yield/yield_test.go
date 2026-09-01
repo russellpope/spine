@@ -253,6 +253,60 @@ func TestParseReviewRejectsAllWhitespaceAndQuotesInTokens(t *testing.T) {
 	}
 }
 
+func TestRunRejectsEveryQuotationMarkAndBacktickTokenWithoutLeakingIt(t *testing.T) {
+	quotedRunes := map[rune]bool{'\'': true, '"': true, '`': true}
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if unicode.Is(unicode.Quotation_Mark, r) && r != '\n' && r != '\r' {
+			quotedRunes[r] = true
+		}
+	}
+	for r := range quotedRunes {
+		t.Run(fmt.Sprintf("%U", r), func(t *testing.T) {
+			secret := fmt.Sprintf("quote-%U-secret", r)
+			for _, tc := range []struct {
+				name      string
+				candidate string
+			}{
+				{
+					name:      "task-model",
+					candidate: "REVIEW I999 harness:codex model:" + string(r) + secret + string(r) + " tier:routine round:1 verdict:accepted scope:task",
+				},
+				{
+					name:      "bounded-final-condition",
+					candidate: "REVIEW - harness:- model:- tier:- round:1 verdict:needs-fixes scope:final condition:" + string(r) + secret + string(r),
+				},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					lines := make([]string, 0, 21)
+					for i := 0; i < 20; i++ {
+						lines = append(lines, fmt.Sprintf("REVIEW I%03d harness:codex model:peer/日本語+v1.2@edge-_ tier:routine round:1 verdict:accepted scope:task", i+100))
+					}
+					lines = append(lines, tc.candidate)
+					dir := t.TempDir()
+					writeLedger(t, dir, strings.Join(lines, "\n"))
+
+					report, err := Run(Options{Dir: dir})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if report.Totals.ValidReviewLines != 20 || report.Totals.IgnoredIdentities != 1 || report.Totals.FinalUnattributableNeedsFixes != 0 || report.ExitCode() != 1 {
+						t.Fatalf("report=%+v", report)
+					}
+					if len(report.Cells) != 1 || report.Cells[0].N != 20 {
+						t.Fatalf("valid peers were not retained: cells=%+v", report.Cells)
+					}
+					if len(report.Diagnostics) != 1 || report.Diagnostics[0] != (Diagnostic{Line: 21, Message: "REVIEW line 21 malformed"}) {
+						t.Fatalf("diagnostics=%+v", report.Diagnostics)
+					}
+					if rendered := fmt.Sprint(report); strings.Contains(rendered, secret) || strings.Contains(rendered, tc.candidate) {
+						t.Fatalf("report leaked quoted candidate: %s", rendered)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestReportDiagnosticsSortByRepositoryLineAndMessage(t *testing.T) {
 	fleet := t.TempDir()
 	makeFleetRepository(t, fleet, "alpha", strings.Join([]string{

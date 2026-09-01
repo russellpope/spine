@@ -405,11 +405,11 @@ func parseReview(lineNo int, line string) (Record, string, bool) {
 }
 
 func validToken(value string) bool {
-	if value == "" || strings.ContainsRune(value, '"') {
+	if value == "" {
 		return false
 	}
 	for _, r := range value {
-		if unicode.IsSpace(r) {
+		if unicode.IsSpace(r) || unicode.Is(unicode.Quotation_Mark, r) || r == '`' {
 			return false
 		}
 	}
