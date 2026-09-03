@@ -89,3 +89,11 @@ skills. None of it is patched into the upstream plugin cache.
   intent; a runtime that silently moves a session to another model overrides intent
   after the fact. The audit's verdict vocabulary is left open for a drift verdict
   distinct from dispatcher-caused silent descent.
+
+Note (2026-09-03, I128): "editing a value in place makes that entry an override"
+still holds for classification. One consequence was refined, not reversed: an
+override whose id is a historical id of its harness can never launch (I051
+refuses historical ids byte-exactly), so `spine update` migrates that id to its
+successor keeping the effort and alternate the repo chose, itemized as a
+retired-override refresh rather than preserved verbatim. See
+`docs/specs/2026-09-02-i128-fable-5-1-remap-rollout-design.md`.

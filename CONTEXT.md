@@ -64,7 +64,15 @@ declares exactly one.
   WORKFLOW.md, marked spine-managed. Read by humans and by Spine's resolver and
   launch validator; vendor launchers do not interpret it directly. A value
   matching a shipped default is **inherited** and refreshed automatically; any
-  other value is an **override** and is preserved.
+  other value is an **override** and is preserved — except a **retired
+  override**, below.
+- **retired override** (decided 2026-09-03, I128) — an override whose model id
+  is a historical id of its harness. Launch validation refuses every historical
+  id byte-exactly, so the value can never launch; `spine update` replaces the id
+  with its **successor** (the current id of the row whose history lists it),
+  keeps the effort and alternate the repo chose, and itemizes the change as a
+  retired-override refresh. Doctor names the row as D18.
+  _Avoid_: stuck override, stale pin.
 - **reviewer floor** (decided 2026-07-09) — a task's reviewer is never a
   lower tier than its implementer; plan-time risk triggers (cross-task
   integration, concurrency/subtle state, security surfaces, plan-flagged
