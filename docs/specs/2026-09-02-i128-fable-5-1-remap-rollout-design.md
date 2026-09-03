@@ -72,10 +72,11 @@ ticket did not settle is marked **assumption** for the owner to challenge.
   primary checkouts, commit nothing in other repos (the maipipe and
   maikanban precedent), skip worktrees. The handoff lists what was written.
 - Q2 Preflight fix location. Fact: the blocks live in deepthought
-  (`skills/claude-team`, `skills/codex-team`), guarded by
-  `skills/lib/test-model-validation-preflight.sh`. **Assumption:** one
-  deepthought commit referencing spine I128, extending that script with the
-  refusal arm; no deepthought ticket.
+  (`skills/claude-team`, `skills/codex-team`, and `skills/handoff-to-codex`,
+  whose block the guard script already checks alongside the other two),
+  guarded by `skills/lib/test-model-validation-preflight.sh`.
+  **Assumption:** one deepthought commit referencing spine I128, extending
+  that script with the refusal arm; no deepthought ticket.
 - Q3 Doctor code. Fact: D17 is taken (pin evidence). D18, severity warn
   (doctor already exits 1 on warn), one finding per retired (harness, tier),
   message naming the id, its successor, and the update remedy. D2 still
@@ -90,7 +91,9 @@ ticket did not settle is marked **assumption** for the owner to challenge.
   instead of preserving it. **Assumption** flagged for the owner.
 - Q5 Successor lookup. The successor of a historical id is the current id
   of the row whose history lists it, same tier first, else first tier in
-  `model.Tiers` order. Cross-tier only arises for hand-edited mirrors.
+  `model.Tiers` order. An id that is current in any row of the harness has
+  no successor, matching launch validation's retired predicate. Cross-tier
+  only arises for hand-edited mirrors.
 - Q6 Host config. Byte-exact stays (I051 active-ID contract, I072/I074
   design). No host config exists on this machine, so D16 is verified by
   fixture tests only. **Assumption:** a message change plus fixtures is the
@@ -129,8 +132,9 @@ ticket did not settle is marked **assumption** for the owner to challenge.
    itemizes an inherited refresh exactly as today.
 6. As a repo owner with an override on a current id (any effort) or an
    unrelated id, update preserves it verbatim exactly as today.
-7. As a repo owner with a retired id and an edited alternate (pi cells),
-   update keeps the alternate and migrates only the id.
+7. As a repo owner with a retired id and an edited alternate, update keeps
+   the alternate and migrates only the id. (No pi row has history, so the
+   case is exercised on a claude cell with a hand-written alternate.)
 8. As a host owner whose routing-host.json lists only the retired id, doctor
    D16 names the host file as the remedy and says the listed id is retired.
 9. As a maintainer reverting `models/defaults.json` primary to
@@ -171,11 +175,18 @@ AC3 = 8 plus fixtures; AC4 = 9; AC5 = 13.
 - **D16 message** for the unreachable arm appends the host-file remedy;
   when the host's model list for that harness contains a historical id of
   the requested tier's lineage, the message says that id is retired.
-- **Preflight (deepthought).** Capture validate's exit code; 127/2 or
-  command-not-found keeps today's rebuild text; exit 1 prints
-  `claude-team: launch validation refused: <stderr>. No worker spawned.`
-  The same shape for codex-team. The guard script gains a refusal arm using
-  a fake `spine` that exits 1 with a retired-model line.
+- **Preflight (deepthought).** Capture validate's exit code and stderr.
+  Three refusal arms, all printed with `printf` so validate's deliberate
+  escapes survive: exit 1 relays validate's stderr (`<skill>: launch
+  validation refused for <repo>: <stderr> — follow that remedy, then retry.
+  No worker spawned.`); exit 127 or a stderr that starts with an unknown
+  command or usage line keeps today's rebuild text with the diagnostic
+  appended; any other non-zero exit (exit 2 from a host routing
+  configuration error or a malformed mirror) relays the diagnostic as a
+  configuration failure, never as "rebuild". The same shape for all three
+  blocks: claude-team, codex-team, handoff-to-codex. The guard script gains
+  a refusal arm and a configuration-error arm, each asserting the rebuild
+  text is absent.
 - **`modelDefaultDivergence`** treats a value equal to any id
   `claude.primary` ever shipped (current or historical) as never a
   deliberate divergence.

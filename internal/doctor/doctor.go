@@ -96,17 +96,20 @@ func retiredMirrorCheck(dir string) []Finding {
 	var findings []Finding
 	for _, harness := range model.Harnesses() {
 		for _, tier := range model.Tiers {
-			live, err := model.Resolve(dir, harness, tier)
-			if err != nil || live.Provenance == model.Default {
+			// The strict launch selection, not the lenient resolver: D18
+			// must fire exactly where validate refuses. A snapshot that
+			// does not parse is D2/D4's problem and is skipped here.
+			active, err := model.ResolveStrictActive(dir, harness, tier)
+			if err != nil || active.Provenance == model.Default {
 				continue
 			}
-			successor, ok := model.SuccessorID(harness, tier, live.ID)
+			successor, ok := model.SuccessorID(harness, tier, active.ID)
 			if !ok {
 				continue
 			}
 			findings = append(findings, Finding{"D18", "warn", "WORKFLOW.md", fmt.Sprintf(
-				"model_routing %s.%s mirrors retired id %q (current %s) — launch validation refuses it; run spine update --write",
-				harness, tier, live.ID, successor)})
+				"model_routing %s.%s mirrors retired id %q (current %s) — launch validation refuses it; run spine update --dir %q --write",
+				harness, tier, active.ID, successor, dir)})
 		}
 	}
 	return findings

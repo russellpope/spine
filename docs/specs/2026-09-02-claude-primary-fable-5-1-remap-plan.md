@@ -9,11 +9,12 @@ Retroactive record of the sequence 68aa28f followed, written 2026-09-03.
 1. Change the embedded Claude primary entry to `claude-fable-5-1`, move
    `claude-fable-5` to the row's history, and replace the exact-id alias.
 2. Mirror the change into the gen-13 model-table fixture.
-3. Update model, template, update, audit, and CLI test expectations; add the
-   pair-aware history test for the primary row.
-4. Extend the generation locks so the primary mirror-row change is admitted
-   only as an itemized refresh; add the row's old and new values to the
-   sanctioned-row allowlist.
+3. Update model, update, audit, and CLI test expectations (the template test
+   was missed; see the design's Testing Decisions); add the pair-aware
+   history test for the primary row.
+4. Couple the gen-13 to 14 lock to the report's itemized refresh; add the
+   row's old and new values to the text allowlist the gen-9 to 10 and 11 to
+   12 locks consult.
 5. Refresh spine's own WORKFLOW.md through `spine update --write`.
 6. Full suite, maipipe full lane, install both binaries, push.
 

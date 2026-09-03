@@ -72,7 +72,7 @@ func TestRetiredMirrorD18NamesIDSuccessorAndRemedy(t *testing.T) {
 	if f.Severity != "warn" || f.Path != "WORKFLOW.md" {
 		t.Errorf("finding = %#v, want a warn on WORKFLOW.md", f)
 	}
-	for _, want := range []string{"claude.primary", `"claude-fable-5"`, "claude-fable-5-1", "retired", "spine update --write"} {
+	for _, want := range []string{"claude.primary", `"claude-fable-5"`, "claude-fable-5-1", "retired", "spine update --dir", "--write"} {
 		if !strings.Contains(f.Message, want) {
 			t.Errorf("message %q lacks %q", f.Message, want)
 		}

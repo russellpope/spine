@@ -41,12 +41,22 @@ history rule, unchanged).
    `fable` alias describes the new id.
 6. Launch validation refuses `claude-fable-5` as `retired-model` for a
    mirror that still carries it, and refuses `--expect claude-fable-5`.
-7. Generation locks admit the primary mirror-row change only when the
-   update report itemizes it as a refresh.
+   (Pre-existing mechanism; the commit adds no primary-row test for it.
+   Evidence: the I128 live repro on 2026-09-02, recorded in that design.)
+7. The gen-13 to 14 lock admits the primary mirror-row change only when
+   the update report itemizes it as a refresh; the gen-9 to 10 and 11 to
+   12 locks admit it through the static text allowlist, without an
+   itemization check. (I128 later coupled all ten locks to their reports.)
 8. Spine's own WORKFLOW.md is refreshed through the real update path, not
-   by hand, and is byte-stable on a second run.
+   by hand. (Evidence: the one-line WORKFLOW.md diff in the commit and the
+   session handoff; the commit adds no self-repo byte-stability test.)
 9. The gen-13 model-table fixture mirrors `models/defaults.json`.
-10. `go test ./...` and the maipipe full lane pass.
+10. The gen-9 to 10 effort migration mints `claude-fable-5-1 @ xhigh` for
+    a customized top-level effort, so a legacy repo never mints an override
+    on the retired id.
+11. `go test ./...` and the maipipe full lane pass. (Evidence: run #80 in
+    `docs/handoffs/2026-09-02-fable-5-1-remap-and-ledger-burndown.md`, not
+    the commit.)
 
 ## Implementation Decisions
 
@@ -79,13 +89,18 @@ I128 found after the fact:
 
 ## Testing Decisions
 
-- Embedded-default expectations updated in the model, template, update,
-  audit, and CLI tests.
+- Embedded-default expectations updated in the model, update, audit, and
+  CLI tests. The template test was not touched: its substring assertion on
+  `claude-fable-5` passed vacuously against the new id until I128 replaced
+  it with an exact-row check.
 - A focused pair-aware history test for the primary row (shipped pair
   inherited, unshipped low pair override).
-- Generation locks (9 to 10, 11 to 12, 13 to 14) extended so the primary
-  row change is admitted only as an itemized refresh.
-- Full suite and the maipipe full lane (run #80) at 68aa28f.
+- The gen-13 to 14 lock couples the primary row change to the report's
+  itemized refresh; the gen-9 to 10 and 11 to 12 locks were extended with a
+  text allowlist entry for the row's old and new values (I128 replaced the
+  allowlist with report-coupled checks in all ten locks).
+- Full suite and the maipipe full lane (run #80) at 68aa28f, recorded in
+  the session handoff.
 
 ## Out of Scope
 
