@@ -112,9 +112,23 @@ func TestCurrentWorkflowIsStamped(t *testing.T) {
 		t.Error("current WORKFLOW template lacks template_version stamp")
 	}
 	// I036: the mirror rows are table-rendered dotted harness keys (D8).
-	if !strings.Contains(got, "claude.primary:") || !strings.Contains(got, "claude-fable-5") {
-		t.Error("current WORKFLOW template lacks the model_routing mirror")
+	// I128: pin the exact current id as a whole row, not a substring of it
+	// — "claude-fable-5" is a prefix of "claude-fable-5-1" and passed with
+	// the table reverted.
+	if !hasMirrorRow(got, "claude.primary", "claude-fable-5-1") {
+		t.Errorf("current WORKFLOW template lacks the claude.primary mirror row for the current default:\n%s", got)
 	}
+}
+
+// hasMirrorRow reports whether content carries the model_routing mirror row
+// "<key>: <value>" exactly, with column padding collapsed.
+func hasMirrorRow(content, key, value string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.Join(strings.Fields(line), " ") == key+": "+value {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCurrentClaudeHasMarkers(t *testing.T) {

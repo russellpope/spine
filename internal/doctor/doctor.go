@@ -1,4 +1,4 @@
-// Package doctor runs read-only workflow health checks (spec D1–D15).
+// Package doctor runs read-only workflow health checks (spec D1–D18).
 package doctor
 
 import (
@@ -66,6 +66,7 @@ func runWithHostPath(dir, hostPath string, lookup func(string) (string, error)) 
 	}
 	if !missingCore {
 		findings = append(findings, updateChecks(dir)...)
+		findings = append(findings, retiredMirrorCheck(dir)...)
 	}
 	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
 		findings = append(findings, markerCheck(dir, name)...)
@@ -83,6 +84,32 @@ func runWithHostPath(dir, hostPath string, lookup func(string) (string, error)) 
 	findings = append(findings, toolchainCheck()...)
 	findings = append(findings, hostRoutingCheck(dir, hostPath, lookup)...)
 	return findings, nil
+}
+
+// retiredMirrorCheck is D18 (I128). A mirror row whose on-disk id is a
+// historical id of its harness is refused by launch validation as
+// retired-model whatever its effort, so dispatch on that tier is blocked
+// until the row is refreshed. D2 reports the pending update generically;
+// D18 names the row, the retired id, its successor, and the remedy, which
+// update's retired-override migration makes correct for overrides too.
+func retiredMirrorCheck(dir string) []Finding {
+	var findings []Finding
+	for _, harness := range model.Harnesses() {
+		for _, tier := range model.Tiers {
+			live, err := model.Resolve(dir, harness, tier)
+			if err != nil || live.Provenance == model.Default {
+				continue
+			}
+			successor, ok := model.SuccessorID(harness, tier, live.ID)
+			if !ok {
+				continue
+			}
+			findings = append(findings, Finding{"D18", "warn", "WORKFLOW.md", fmt.Sprintf(
+				"model_routing %s.%s mirrors retired id %q (current %s) — launch validation refuses it; run spine update --write",
+				harness, tier, live.ID, successor)})
+		}
+	}
+	return findings
 }
 
 // hostRoutingCheck is D16. It evaluates repository preferences against each
@@ -137,7 +164,18 @@ func hostRoutingCheck(repoDir, hostPath string, lookup func(string) (string, err
 			}
 			route, reachable := harness.Models[requested.ID]
 			if !reachable || !hostRouteContains(route.Efforts, requested.Effort) {
-				findings = append(findings, Finding{"D16", "warn", path, fmt.Sprintf("repository %s %s requested %s@%s is not reachable on available harness", normalizedRepo, key, requested.ID, requested.Effort)})
+				// Host configs match byte-exactly by design (I051/I072); the
+				// remedy is the host file, and a host still listing a
+				// historical id of this lineage says so (I128).
+				msg := fmt.Sprintf("repository %s %s requested %s@%s is not reachable on available harness — add it to %s under harnesses.%s.models",
+					normalizedRepo, key, requested.ID, requested.Effort, path, harnessName)
+				for _, historical := range model.HistoricalIDs(harnessName, tier) {
+					if _, listed := harness.Models[historical]; listed {
+						msg += fmt.Sprintf("; the host lists retired %q for this tier", historical)
+						break
+					}
+				}
+				findings = append(findings, Finding{"D16", "warn", path, msg})
 			}
 		}
 	}

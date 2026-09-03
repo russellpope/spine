@@ -72,6 +72,18 @@ func TestGen13To14PristineUpdatesAndStaysStable(t *testing.T) {
 		}
 		t.Errorf("mirror %s changed from %q to %q without an itemized refresh", key, value, afterKeys[key])
 	}
+	// The converse (I128): every itemized refresh is a real before/after
+	// change of that row, and the captured Fable 5 primary is itemized —
+	// a table reverted to Fable 5 with empty history produces no refresh
+	// and must fail here rather than pass vacuously.
+	for key, m := range refreshed {
+		if beforeKeys[key] != m.Old || afterKeys[key] != m.New {
+			t.Errorf("itemized refresh %+v does not match the on-disk change %q -> %q", m, beforeKeys[key], afterKeys[key])
+		}
+	}
+	if m, ok := refreshed["model_routing.claude.primary"]; !ok || m.Old != "claude-fable-5" || m.New != "claude-fable-5-1" {
+		t.Errorf("primary refresh = %+v, want the captured Fable 5 row itemized as claude-fable-5 -> claude-fable-5-1", m)
+	}
 	if !strings.Contains(string(after), "owns the public harness migration;") {
 		t.Error("generation-14 workflow lacks canonical harness migration wording")
 	}

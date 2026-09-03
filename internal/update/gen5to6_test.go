@@ -126,7 +126,7 @@ func TestGen5To6IsStampPlusDeclaredContent(t *testing.T) {
 				if isI114ContentDiffLine(line) { // I114's conscious current-template edit; see cursor_hygiene_test.go
 					continue
 				}
-				if isModelRefreshDiffLine(line) { // sanctioned model-table refresh (I035); see modelrouting_test.go
+				if sanctionedRefreshLine(line, r.ModelRefreshes) { // a mirror-row change this report itemizes (I035, I128); see modelrouting_test.go
 					continue
 				}
 				t.Errorf("%s: unexpected changed line %q — 5→6 must be stamp plus declared gen-6 content only", r.Path, line)

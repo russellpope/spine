@@ -18,7 +18,7 @@ func TestHostRoutingCheckCoversEveryTierOfEveryAvailableHarness(t *testing.T) {
 	}
 	path := writeDoctorHostConfig(t, `{
   "schema_version": 1, "host_id": "doctor-host", "harnesses": {
-    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:claude", "models": {"claude-fable-5": {"efforts": ["high"]}}},
+    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:claude", "models": {"claude-fable-5-1": {"efforts": ["high"]}}},
     "codex": {"available": false, "executable": "codex", "launch_contract_ref": "fleet:codex", "models": {}}
   }, "pins": {}}
 `)

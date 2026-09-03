@@ -19,6 +19,13 @@ type ModelRefresh struct {
 	Key string // dotted config key, e.g. "model_routing.claude.fallback"
 	Old string
 	New string
+	// Retired marks a retired-override migration (I128): the on-disk value
+	// was a deliberate override whose id is a historical id of its harness.
+	// Launch validation refuses historical ids byte-exactly, so the value
+	// could never launch; update replaces only the id with its successor and
+	// keeps the effort and alternate the repo chose. Reported as a refresh,
+	// never as a preserved override.
+	Retired bool
 }
 
 // ModelOverride is one deliberate per-repo model choice (D6): a value
@@ -75,11 +82,27 @@ func applyModelRouting(repoDir, content string, extracted map[string]string) (st
 				return "", nil, nil, err
 			}
 			target := model.MirrorValue(def)
+			retired := false
 			switch live.Provenance {
 			case model.Override:
 				target = model.MirrorValue(live)
 				if raw := rawOverride(extracted, harness, tier); raw != "" {
 					target = raw // the repo's own spelling, e.g. an effort suffix
+				}
+				// Retired override (I128): the id is historical for this
+				// harness, so no launch can ever use it. Replace only the
+				// id token with its successor; the rest of the repo's
+				// spelling (effort, alternate) is the deliberate half and
+				// survives. Itemized as a refresh so a sweep reviewer sees
+				// it, distinct from the inherited kind.
+				if successor, ok := model.SuccessorID(harness, tier, live.ID); ok {
+					migratedValue := model.MirrorValue(model.Entry{Harness: harness, Tier: tier, ID: successor, Effort: live.Effort, Alternate: live.Alternate})
+					if strings.HasPrefix(target, live.ID) {
+						migratedValue = successor + strings.TrimPrefix(target, live.ID)
+					}
+					refreshes = append(refreshes, ModelRefresh{Key: key, Old: target, New: migratedValue, Retired: true})
+					target = migratedValue
+					retired = true
 				}
 			case model.Inherited:
 				// Pair-aware (D11): an inherited value can be stale in id,
@@ -111,7 +134,7 @@ func applyModelRouting(repoDir, content string, extracted map[string]string) (st
 					migrated = true
 				}
 			}
-			if live.Provenance == model.Override || migrated {
+			if (live.Provenance == model.Override && !retired) || migrated {
 				overrides = append(overrides, ModelOverride{Key: key, Value: target, Migrated: migrated})
 			}
 			content = setKey(content, key, target)
@@ -154,6 +177,14 @@ func modelDefaultDivergence(repoDir, gen string, extracted map[string]string) (s
 	}
 	if md == shipped {
 		return "", nil
+	}
+	// Any id the primary row ever shipped was a default of the lineage, not
+	// a deliberate divergence from it (I128): it retires quietly whatever
+	// generation rendered it.
+	for _, historical := range model.HistoricalIDs("claude", "primary") {
+		if md == historical {
+			return "", nil
+		}
 	}
 	def, err := model.Resolve("", "claude", "primary")
 	if err != nil {

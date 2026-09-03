@@ -1400,6 +1400,28 @@ func HistoricalIDs(harness, tier string) []string {
 	return ids
 }
 
+// SuccessorID returns the current id that displaced a historical id in the
+// embedded harness table: the current id of the row whose history lists id,
+// preferring tier's own row, else the first row in Tiers order that lists
+// it (I128). A current id, an unknown id, or an unknown harness has no
+// successor. Launch validation refuses every historical id byte-exactly, so
+// the successor is what a retired mirror value migrates to.
+func SuccessorID(harness, tier, id string) (string, bool) {
+	tiers, ok := defaults.Harnesses[harness]
+	if !ok || harnessHasCurrentID(defaults, harness, id) {
+		return "", false
+	}
+	order := append([]string{tier}, Tiers...)
+	for _, candidate := range order {
+		for _, historical := range tiers[candidate].History {
+			if historical.ID == id {
+				return tiers[candidate].ID, true
+			}
+		}
+	}
+	return "", false
+}
+
 // RoutingKeys parses the model_routing: block out of WORKFLOW.md content —
 // the single parser of that block (I037 consolidation, design D13). Before
 // this, three independent readers (this package's override reader, update's

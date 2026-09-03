@@ -451,11 +451,14 @@ func TestGen0CleanClaim(t *testing.T) {
 	if wf.State != Pending {
 		t.Fatalf("WORKFLOW state=%v unrec=%v", wf.State, wf.Unrecognized)
 	}
-	for _, want := range []string{"template_version: 14", "claude.primary:", "claude-fable-5",
-		"profile: rust", "functional_harness: cli"} {
+	for _, want := range []string{"template_version: 14", "profile: rust", "functional_harness: cli"} {
 		if !strings.Contains(wf.newContent, want) {
 			t.Errorf("regenerated WORKFLOW missing %q", want)
 		}
+	}
+	// I128: the exact current primary row, not a substring of the id.
+	if !hasRow(wf.newContent, "claude.primary", "claude-fable-5-1") {
+		t.Errorf("regenerated WORKFLOW lacks the current claude.primary row:\n%s", wf.newContent)
 	}
 	// I036: the gen0 model_default (claude-opus-4-8) is an inherited default
 	// of a retired key — it retires quietly rather than surviving or being

@@ -118,7 +118,7 @@ func TestGen12ChangesAreAdditive(t *testing.T) {
 			if isGen13ContentDiffLine(line) {
 				continue
 			}
-			if isModelRefreshDiffLine(line) { // sanctioned model-table refresh; see modelrouting_test.go
+			if sanctionedRefreshLine(line, r.ModelRefreshes) { // a mirror-row change this report itemizes (I128); see modelrouting_test.go
 				continue
 			}
 			body := strings.TrimSpace(strings.TrimPrefix(line, "-"))

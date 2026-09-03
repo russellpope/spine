@@ -44,12 +44,14 @@ func TestHbmviewUnstranding(t *testing.T) {
 	}
 	wf, _ := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
 	for _, want := range []string{"# Workflow — hbmview", "profile: rust", "template_version: 14",
-		"claude.primary:", "claude-fable-5",
 		"reviewers: [rust-reviewer, security-review]", "functional_harness: cli",
 		"## Execution modes"} {
 		if !strings.Contains(string(wf), want) {
 			t.Errorf("WORKFLOW.md missing %q", want)
 		}
+	}
+	if !hasRow(string(wf), "claude.primary", "claude-fable-5-1") { // I128: exact row, not a substring
+		t.Errorf("WORKFLOW.md lacks the current claude.primary row:\n%s", wf)
 	}
 	// I036: hbmview's gen0 model_default (claude-opus-4-8) is an inherited
 	// default of the retired key — retired quietly, not flagged or kept.

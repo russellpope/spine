@@ -10,47 +10,60 @@ import (
 	"github.com/russellpope/spine/internal/scaffold"
 )
 
-// modelRefreshDiffLines are the diff-line bodies (TrimSpace'd, matching the
-// isGenNContentDiffLine convention) that the I035 model-table refresh (design
-// D6) adds to any migration diff whose fixture carries a prior shipped
-// default: the inherited old value's rendered line ("-") and the current
-// default's rendered line ("+"). Every strict generation lock consults this
-// set — sanctioned 2026-07-24 (I035, owner-approved): before I035 those
-// locks were pinning the propagation bug itself, in which a stale inherited
-// default was classified as a choice, carried forward, and produced no diff
-// line at all.
-var modelRefreshDiffLines = map[string]bool{
-	// gen 6–9 rendered claude fallback row, refreshed away ("-").
-	"fallback: claude-opus-4-8        # primary-refused or security-framed work": true,
-	// the current table default's rendered row ("+").
-	"fallback: claude-opus-5          # primary-refused or security-framed work": true,
-}
-
-// modelRefreshMirrorRows are the sanctioned dotted mirror rows a table refresh
-// rewrites in a gen ≥10 fixture, keyed by row key then value with the column
-// padding collapsed (the padding moves whenever a longer harness name lands,
-// so it is not part of what the lock pins). Every historical and current
-// value of a refreshed row is listed so both the "-" and the "+" line pass —
-// sanctioned 2026-09-01 (claude.primary Fable 5 → Fable 5.1).
-var modelRefreshMirrorRows = map[string]map[string]bool{
-	"claude.primary": {"claude-fable-5": true, "claude-fable-5-1": true},
-}
-
-// isModelRefreshDiffLine reports whether a unified-diff line carries a
-// sanctioned model-table refresh above.
-func isModelRefreshDiffLine(line string) bool {
+// Every strict generation lock admits the mirror-row lines the I035
+// model-table refresh (design D6) adds to a migration diff whose fixture
+// carries a prior shipped default: the inherited old value's line ("-") and
+// the current default's line ("+"). Sanctioned 2026-07-24 (I035,
+// owner-approved): before I035 those locks were pinning the propagation bug
+// itself, in which a stale inherited default was classified as a choice,
+// carried forward, and produced no diff line at all. Until I128 the
+// sanction was a static allowlist that had to be hand-extended per remap
+// and could pass vacuously; now each lock sanctions only what its own
+// report itemizes.
+//
+// sanctionedRefreshLine reports whether a unified-diff "+"/"-" line is a
+// model_routing mirror row whose value the lock's own update report
+// itemizes as the Old or New side of a refresh for that row (I128). Bare
+// gen ≤9 tier keys map to the claude harness the way the shared resolver
+// maps them; a trailing comment is stripped; column padding is collapsed.
+// Nothing outside the report is sanctioned: the allowlist is the report.
+func sanctionedRefreshLine(line string, refreshes []ModelRefresh) bool {
 	if len(line) == 0 || (line[0] != '+' && line[0] != '-') {
 		return false
 	}
 	body := strings.TrimSpace(line[1:])
-	if modelRefreshDiffLines[body] {
-		return true
+	if i := model.CommentIndex(body); i >= 0 {
+		body = strings.TrimSpace(body[:i])
 	}
-	key, value, ok := strings.Cut(body, ":")
+	head, value, ok := strings.Cut(body, ":")
 	if !ok {
 		return false
 	}
-	return modelRefreshMirrorRows[strings.TrimSpace(key)][strings.Join(strings.Fields(value), " ")]
+	head = strings.TrimSpace(head)
+	dotted, ok := model.DottedRoutingKey(body)
+	if !ok {
+		if !strings.Contains(head, ".") && isKnownTierKey(head) {
+			dotted = "claude." + head
+		} else {
+			return false
+		}
+	}
+	value = strings.Join(strings.Fields(value), " ")
+	for _, m := range refreshes {
+		if m.Key == "model_routing."+dotted && (m.Old == value || m.New == value) {
+			return true
+		}
+	}
+	return false
+}
+
+func isKnownTierKey(key string) bool {
+	for _, tier := range model.Tiers {
+		if key == tier {
+			return true
+		}
+	}
+	return false
 }
 
 // stageGen8Repo copies the ccq-gen8 capture — a realistic repo whose mirror
@@ -294,7 +307,7 @@ func TestHostPinDoesNotChangeMirrorOrUpdatePlan(t *testing.T) {
 	hostPath := filepath.Join(t.TempDir(), "routing-host.json")
 	if err := os.WriteFile(hostPath, []byte(`{
   "schema_version": 1, "host_id": "host", "harnesses": {
-    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:test", "models": {"claude-fable-5": {"efforts": ["high"]}, "host-safe": {"efforts": ["high"]}}}
+    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:test", "models": {"claude-fable-5-1": {"efforts": ["high"]}, "host-safe": {"efforts": ["high"]}}}
   }, "pins": {"claude.primary": {"model": "host-safe", "effort": "high"}}
 }`), 0o600); err != nil {
 		t.Fatal(err)

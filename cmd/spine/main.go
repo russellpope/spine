@@ -273,7 +273,14 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	// is applied.
 	modelNotes := func(r update.FileReport) {
 		for _, m := range r.ModelRefreshes {
-			fmt.Fprintf(stdout, "model refresh (inherited): %s: %s -> %s\n", m.Key, m.Old, m.New)
+			kind := "inherited"
+			if m.Retired {
+				// I128: a deliberate override on a retired id migrates to
+				// the successor keeping its effort — a refresh, not a
+				// preserved override, and not the inherited kind either.
+				kind = "retired override"
+			}
+			fmt.Fprintf(stdout, "model refresh (%s): %s: %s -> %s\n", kind, m.Key, m.Old, m.New)
 		}
 		for _, o := range r.ModelOverrides {
 			if o.Migrated {
