@@ -2,14 +2,15 @@
 id: I125
 title: "implement derivation ignores closed ticket files — verified-fixed tickets derive ticked-missing without a progress-ledger line, with a misleading typo hint"
 severity: med
-status: open
+status: fixed
+commits: [7a54c3c, a171265]
 affects: [I019, I029, I032, I117]
 blocked-by: []
-execution-mode:
-tier:
+execution-mode: inline
+tier: primary
 effort:
 risk-triggers: []
-review-tier:
+review-tier: primary
 ---
 
 ## Problem
@@ -63,13 +64,39 @@ Proposal, in two parts (part 1 is the substance; part 2 stands alone if part 1 i
 
 ## Acceptance criteria
 
-- [ ] A cursor with implement `[x]`, no progress-md lines for its ids, and ticket files with
+- [x] A cursor with implement `[x]`, no progress-md lines for its ids, and ticket files with
       `status: fixed` + non-empty `commits:` derives implement as match, not ticked-missing.
-- [ ] Negative control: same shape with `status: open` (or `fixed` with empty `commits:`)
+- [x] Negative control: same shape with `status: open` (or `fixed` with empty `commits:`)
       still derives ticked-missing — the new path is load-bearing, not a blanket pass.
-- [ ] Negative control: `wontfix`/`superseded` ticket files do not evidence implement.
-- [ ] With ticket files present for every anchored id and zero progress-md lines, the
+- [x] Negative control: `wontfix`/`superseded` ticket files do not evidence implement.
+- [x] With ticket files present for every anchored id and zero progress-md lines, the
       ticked-missing detail names the missing-progress-line rule and does not emit the
       typo hint.
 
 <!-- Record an approved-without-test exception using the exact grammar in WORKFLOW.md's Acceptance exceptions section. -->
+
+## Resolution
+
+Shipped 2026-09-02 in the `ledger-burndown` effort (PRD
+`docs/specs/2026-09-02-i125-closure-implement-evidence-design.md`).
+
+- Part 1 as proposed: a ticket file with `status: fixed` and a `commits:`
+  value naming at least one SHA-shaped token (hex, 7–40 chars) is a closure
+  record and evidences implement for its id, OR'd with the progress-ledger
+  scan. Placeholders (`[pending]`), empty or absent lists, `open`,
+  `in-progress`, `wontfix`, and `superseded` are non-evidence. Closure
+  records feed both derivation directions, like ledger lines.
+- Part 2, corrected: the typo hint had already left the implement row at
+  68aa28f (I032 passes an empty tickets value for that row), so the Problem
+  sentence "still gets the typo message" was stale when this shipped. What
+  remained, and what criterion 4 tests, is naming the rule: a zero-evidence
+  implement miss with no anchored ledger line now says no progress-ledger
+  implement line and no closure record for the id(s). The row label is now
+  `implement evidence`.
+- Live proof on this repo: the 68aa28f binary refused `spine cursor tick
+  implement` for this ticket (no ledger line); the a171265 binary ticked it
+  from the closure record alone.
+- Residuals: a fixed ticket whose `commits:` names no SHA still blocks a
+  ticked implement; a multi-line YAML `commits:` block reads as empty; a
+  range or prefix cursor spanning long-closed tickets sees present-unticked
+  on a pending implement, as it already did for their ledger lines.

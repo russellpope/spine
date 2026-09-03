@@ -22,6 +22,7 @@ func closureRepo(t *testing.T, tickets, implState, ledgerTail string) string {
 	t.Helper()
 	dir := t.TempDir()
 	writeFile(t, dir, "WORKFLOW.md", closureWorkflow)
+	writeFile(t, dir, "docs/specs/x.md", "x\n")
 	writeFile(t, dir, ".superpowers/sdd/progress.md", "<!-- spine:cursor -->\n"+
 		"effort: x\nprd: docs/specs/x.md\ntickets: "+tickets+"\nstages: grill[x] prd[x] issues[x] implement["+implState+"] functional-test[<]\n"+
 		"<!-- /spine:cursor -->\n"+ledgerTail)
@@ -46,16 +47,44 @@ func implementRow(t *testing.T, dir string) stages.StageRow {
 }
 
 // Acceptance criterion 1: implement [x], no progress-md lines, ticket
-// closed with commits — match, not ticked-missing.
+// closed with commits — match, not ticked-missing. The issues row is
+// asserted in the same derivation: the ticket's first aggravation was the
+// two rows contradicting each other on one closed ticket.
 func TestImplementClosureRecordEvidencesTickedStage(t *testing.T) {
 	dir := closureRepo(t, "I001", "x", "\n- unrelated ledger prose\n")
 	writeFile(t, dir, "docs/issues/I001-a.md", ticketFile("I001", "fixed", "[a9ddea5]"))
-	impl := implementRow(t, dir)
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	impl := rowByName(t, rep.Stages, "implement")
 	if impl.Verdict != stages.VerdictMatch {
 		t.Fatalf("implement verdict = %s (%s), want match from the closure record", impl.Verdict, impl.Detail)
 	}
 	if impl.Detail != "1/1 implement evidence present" {
 		t.Errorf("Detail = %q, want the renamed implement-evidence label", impl.Detail)
+	}
+	if issues := rowByName(t, rep.Stages, "issues"); issues.Verdict != stages.VerdictMatch {
+		t.Errorf("issues verdict = %s (%s), want match alongside implement — no contradictory rows", issues.Verdict, issues.Detail)
+	}
+	// The handoff backstop blocks on this fixture (no docs/handoffs), so
+	// judge the stage rows alone: none may contradict the cursor.
+	for _, row := range rep.Stages {
+		if row.Verdict == stages.VerdictTickedMissing || row.Verdict == stages.VerdictPresentUnticked {
+			t.Errorf("row %s = %s (%s), want no contradicting row", row.Name, row.Verdict, row.Detail)
+		}
+	}
+}
+
+// A quoted status is not the lifecycle's spelling and is not a closure
+// record: the frontmatter walk strips no quotes, so id: resolution on the
+// issues row stays byte-identical to the pre-I125 behaviour.
+func TestImplementQuotedStatusIsNotClosureRecord(t *testing.T) {
+	dir := closureRepo(t, "I001", "x", "\n")
+	writeFile(t, dir, "docs/issues/I001-a.md", ticketFile("I001", "\"fixed\"", "[a9ddea5]"))
+	impl := implementRow(t, dir)
+	if impl.Verdict != stages.VerdictTickedMissing {
+		t.Fatalf("implement verdict = %s (%s), want ticked-missing", impl.Verdict, impl.Detail)
 	}
 }
 

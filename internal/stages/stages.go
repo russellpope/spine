@@ -44,7 +44,14 @@
 //     "not complete" (it contains the whole word "complete"), so a
 //     negated-but-word-boundary-matching record can still manufacture
 //     false evidence — narrower than the substring bug it replaces, but
-//     not eliminated; and a multi-line YAML commits: block reads as empty.
+//     not eliminated; a multi-line YAML commits: block reads as empty; a
+//     fixed ticket whose commits: names no SHA-shaped token (e.g. "[see PR
+//     #12]") still blocks a ticked implement, exactly as before I125; and
+//     because every closed ticket keeps its closure record forever, a
+//     range/prefix cursor spanning long-closed tickets sees present-
+//     unticked on a pending implement — the same exposure their
+//     accumulated ledger lines already caused, now without depending on
+//     whether a line was written.
 //
 // Every other stage name (grill, functional-test, review, verify, ship,
 // deploy, docs, handoff, and anything not in this list) has no rule: it
@@ -588,11 +595,14 @@ func scanIssues(issuesDir string) map[string]issueFact {
 }
 
 // frontmatterFields parses a docs/issues file's leading --- fence into its
-// same-line key/value pairs (trimmed, matching surrounding quotes stripped).
-// A file without a leading fence yields an empty map, so it can neither
-// resolve an id nor count as a closure record. Only same-line values are
-// read: a YAML block list under a key reads as empty (documented residual —
-// the ledger convention writes inline lists).
+// same-line key/value pairs, whitespace-trimmed and otherwise verbatim — no
+// quote stripping, so id: resolution stays byte-identical to the pre-I125
+// walk (a quoted status: "fixed" is therefore not a closure record; the
+// ledger convention writes it unquoted). A file without a leading fence
+// yields an empty map, so it can neither resolve an id nor count as a
+// closure record. Only same-line values are read: a YAML block list under
+// a key reads as empty (documented residual — the ledger convention writes
+// inline lists).
 func frontmatterFields(content string) map[string]string {
 	out := map[string]string{}
 	lines := strings.Split(content, "\n")
@@ -607,11 +617,7 @@ func frontmatterFields(content string) map[string]string {
 		if !ok {
 			continue
 		}
-		value := strings.TrimSpace(v)
-		if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"')) {
-			value = value[1 : len(value)-1]
-		}
-		out[strings.TrimSpace(k)] = value
+		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
 	}
 	return out
 }

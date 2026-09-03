@@ -166,6 +166,21 @@ an autonomous session and are the ones a reviewer should challenge.
 
 | Attack | Resolution |
 |---|---|
-| Criterion 1 says "non-empty commits" while Q2 requires SHA shape; a `[pending]` list is non-empty. | SHA shape is the stricter reading and is recorded as an assumption; criterion 2's "empty commits" control still holds. |
+| Criterion 1 says "non-empty commits" while Q2 requires SHA shape; a `[pending]` list is non-empty. | SHA shape is the stricter reading and is recorded as an assumption; criterion 2's "empty commits" control still holds. Review caveat (2026-09-02): a fixed ticket whose `commits:` names no SHA (`[see PR #12]`) still blocks a ticked implement — a known residual recorded in the package doc, not a neutral tightening. |
 | Criterion 4 conditions the rule text on ticket files existing; Q7 fires it unconditionally. | Unconditional wording still satisfies the criterion's observable (rule named, no typo hint) and adds no false block. |
 | The ticket calls closure "a stronger record" than the ledger, yet both are OR'd equally. | Equal weight is correct for a presence check; strength ordering would only matter for a contradiction verdict the package does not have. |
+| The ticket's Problem says the typo hint "still gets" emitted on the implement row; at 68aa28f it already could not (I032 passed an empty tickets value for that row). | Fix part 2 is read as "name the rule", which is what criterion 4 tests and what was built. The ticket's Resolution records the stale sentence. |
+| Q4 symmetry: closure records exist for every closed ticket forever, so `present-unticked` exposure on a range or prefix cursor that spans old closed tickets widens beyond what progress-ledger lines already caused. | Story 8 stands: a pending implement over a closed ticket is a stale cursor. The widening is a recorded residual; a cursor that deliberately spans pre-closed tickets should tick implement, as the batch efforts do. |
+
+## Review corrections (2026-09-02)
+
+- **Quote stripping dropped.** The frontmatter walk does not strip quotes,
+  so `id:` resolution on the issues row stays byte-identical to 68aa28f.
+  A quoted `status: "fixed"` is therefore not a closure record; the ledger
+  convention writes it unquoted.
+- **Bare `commits:` value accepted.** "Bracketed" above over-specified: the
+  predicate reads the same-line value with brackets tolerated, so a bare
+  `commits: a9ddea5` counts. A real SHA is a real SHA either way.
+- **Both rows in one derivation.** The positive test also asserts the
+  issues row matches, since ending the row contradiction is the ticket's
+  first aggravation.
