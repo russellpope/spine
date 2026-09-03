@@ -190,6 +190,43 @@ func TestImplementAnchoredNoDoneWordKeepsWordingMessage(t *testing.T) {
 	}
 }
 
+// The frontmatter walk is first-occurrence-wins, exactly like the pre-I125
+// id: lookup: an indented duplicate id: deeper in the fence must neither
+// re-point the file at another ticket (a false issues-row block) nor lose
+// the first id's closure record.
+func TestImplementFirstIDWinsOnRepeatedKey(t *testing.T) {
+	dir := closureRepo(t, "I001", "x", "\n")
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\nrelated:\n  id: I002\nstatus: fixed\ncommits: [a9ddea5]\n---\n\nx\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := rowByName(t, rep.Stages, "issues"); issues.Verdict != stages.VerdictMatch {
+		t.Errorf("issues verdict = %s (%s), want match — the first id: line resolves the file", issues.Verdict, issues.Detail)
+	}
+	if impl := rowByName(t, rep.Stages, "implement"); impl.Verdict != stages.VerdictMatch {
+		t.Errorf("implement verdict = %s (%s), want match from I001's closure record", impl.Verdict, impl.Detail)
+	}
+}
+
+// An unclosed fence still resolves the id (pre-I125 leniency kept) but is
+// never a closure record: body prose read as frontmatter must not
+// manufacture presence evidence over a pending implement stage.
+func TestImplementUnclosedFenceIsNotClosureRecord(t *testing.T) {
+	dir := closureRepo(t, "I001", " ", "\n")
+	writeFile(t, dir, "docs/issues/I001-a.md", "---\nid: I001\ntitle: \"t\"\n\n## Problem\n\nstatus: fixed\ncommits: [a9ddea5]\n")
+	rep, err := stages.Derive(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues := rowByName(t, rep.Stages, "issues"); issues.Verdict != stages.VerdictMatch {
+		t.Errorf("issues verdict = %s (%s), want match — an unclosed fence still resolves id:", issues.Verdict, issues.Detail)
+	}
+	if impl := rowByName(t, rep.Stages, "implement"); impl.Verdict != stages.VerdictMatch {
+		t.Errorf("implement verdict = %s (%s), want match (pending, no evidence) — prose must not be a closure record", impl.Verdict, impl.Detail)
+	}
+}
+
 // Conservative rule: a ticket file with a broken frontmatter fence is no
 // evidence and no error — the derivation degrades to ticked-missing, the
 // same verdict an absent record gives.

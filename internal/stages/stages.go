@@ -582,13 +582,17 @@ func scanIssues(issuesDir string) map[string]issueFact {
 		if err != nil {
 			continue
 		}
-		fm := frontmatterFields(string(raw))
+		fm, closed := frontmatterFields(string(raw))
 		id := fm["id"]
 		if id == "" {
 			continue
 		}
 		f := facts[id]
-		f.closure = f.closure || closureRecord(fm)
+		// A closure record needs a closed fence: with no closing ---, body
+		// prose would be read as frontmatter, and a stray "status: fixed"
+		// paragraph must not manufacture presence evidence. id: resolution
+		// keeps its pre-I125 leniency (an unclosed fence still resolves).
+		f.closure = f.closure || (closed && closureRecord(fm))
 		facts[id] = f
 	}
 	return facts
@@ -596,30 +600,36 @@ func scanIssues(issuesDir string) map[string]issueFact {
 
 // frontmatterFields parses a docs/issues file's leading --- fence into its
 // same-line key/value pairs, whitespace-trimmed and otherwise verbatim — no
-// quote stripping, so id: resolution stays byte-identical to the pre-I125
-// walk (a quoted status: "fixed" is therefore not a closure record; the
-// ledger convention writes it unquoted). A file without a leading fence
-// yields an empty map, so it can neither resolve an id nor count as a
-// closure record. Only same-line values are read: a YAML block list under
-// a key reads as empty (documented residual — the ledger convention writes
+// quote stripping, and first occurrence wins on a repeated key — so id:
+// resolution stays byte-identical to the pre-I125 walk, which returned the
+// first id: line (a quoted status: "fixed" is therefore not a closure
+// record; the ledger convention writes it unquoted). A file without a
+// leading fence yields an empty map, so it can neither resolve an id nor
+// count as a closure record. closed reports whether a closing --- was
+// found. Only same-line values are read: a YAML block list under a key
+// reads as empty (documented residual — the ledger convention writes
 // inline lists).
-func frontmatterFields(content string) map[string]string {
+func frontmatterFields(content string) (fields map[string]string, closed bool) {
 	out := map[string]string{}
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return out
+		return out, false
 	}
 	for _, line := range lines[1:] {
 		if strings.TrimSpace(line) == "---" {
-			break
+			return out, true
 		}
 		k, v, ok := strings.Cut(line, ":")
 		if !ok {
 			continue
 		}
-		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		key := strings.TrimSpace(k)
+		if _, seen := out[key]; seen {
+			continue
+		}
+		out[key] = strings.TrimSpace(v)
 	}
-	return out
+	return out, false
 }
 
 // commitSHARe is the token shape a commits: entry must have to count: an
