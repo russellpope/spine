@@ -110,5 +110,11 @@ I128 found after the fact:
 
 ## Spec-review record
 
-Reviewed under I128 on 2026-09-03 against this design; result recorded in
-I128's Resolution.
+Reviewed under I128 on 2026-09-03 (primary, blind) against the first draft
+of this design. The review found the draft overstated the commit: it
+claimed template-test coverage and itemization-coupled locks for gen 9-10
+and 11-12 that 68aa28f did not have, omitted the gen 11-12 blanket skip and
+the gen 9-10 minted-override wording, and carried two wording mismatches.
+The user stories and testing decisions above were corrected to what the
+commit evidences; the remap checklist was confirmed accurate on all five
+items. Full record in I128's Resolution.

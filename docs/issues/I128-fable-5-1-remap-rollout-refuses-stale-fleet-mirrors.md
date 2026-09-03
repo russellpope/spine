@@ -2,14 +2,15 @@
 id: I128
 title: "Fable 5.1 primary remap (68aa28f) refuses dispatch on every unrefreshed fleet mirror as retired-model, with no rollout signal, a stuck override path, and host-config coupling"
 severity: med
-status: open
+status: fixed
+commits: [4e1dee0, 5acb7f7, aa1d551]
 affects: [I051, I072, I063]
 blocked-by: []
-execution-mode:
-tier:
+execution-mode: inline
+tier: primary
 effort:
 risk-triggers: [cross-task-integration]
-review-tier:
+review-tier: primary
 ---
 
 ## Problem
@@ -76,10 +77,65 @@ Retroactively, the remap itself needs its PRD pair and spec-review record
 
 ## Acceptance criteria
 
-- [ ] A fleet repo mirroring the retired id fails the dispatch preflight with a message naming `spine update --dir R --write`, and `spine doctor` names the retired mirrored id.
-- [ ] A repo with `claude.primary: claude-fable-5 @ xhigh` can reach a validating state by following the printed remedy alone.
-- [ ] A host config listing only the retired id either resolves the current primary or is reported by doctor with the host-config remedy, and the I072 fixture carries the current id.
-- [ ] Reverting `models/defaults.json` primary to `claude-fable-5` with empty history fails the render locks it currently passes.
-- [ ] `docs/specs/` carries a design/plan pair for the 68aa28f remap and the ticket records its spec-review.
+- [x] A fleet repo mirroring the retired id fails the dispatch preflight with a message naming `spine update --dir R --write`, and `spine doctor` names the retired mirrored id.
+- [x] A repo with `claude.primary: claude-fable-5 @ xhigh` can reach a validating state by following the printed remedy alone.
+- [x] A host config listing only the retired id either resolves the current primary or is reported by doctor with the host-config remedy, and the I072 fixture carries the current id.
+- [x] Reverting `models/defaults.json` primary to `claude-fable-5` with empty history fails the render locks it currently passes.
+- [x] `docs/specs/` carries a design/plan pair for the 68aa28f remap and the ticket records its spec-review.
 
 <!-- Record an approved-without-test exception using the exact grammar in WORKFLOW.md's Acceptance exceptions section. -->
+
+## Resolution
+
+Shipped 2026-09-03 in the `i128-remap-rollout` effort (PRD
+`docs/specs/2026-09-02-i128-fable-5-1-remap-rollout-design.md`; inline
+execution, justified in the plan: one successor predicate drives the update
+migration, doctor, locks, and the preflights). Test-first throughout.
+
+- **Rollout.** Doctor D18 names a retired mirrored id per (harness, tier)
+  with its successor and `spine update --dir R --write`, using the strict
+  launch selection so it fires exactly where validate refuses; D2 still
+  reports the generation lag. The three deepthought preflight blocks
+  (claude-team, codex-team, handoff-to-codex; deepthought 0a39e20) relay a
+  validate refusal verbatim, keep the rebuild text for a missing or old
+  binary (exit 127 or an unknown-command/usage line), and relay any other
+  failure as a configuration error; the guard script covers all three arms
+  (103 pass). The fleet sweep ran at deploy; the handoff lists the checkouts
+  written.
+- **Retired override.** `spine update` migrates an override whose id is a
+  historical id of its harness to the successor (`model.SuccessorID`),
+  keeping the effort and alternate, itemized as
+  `model refresh (retired override)`; `claude.primary: claude-fable-5 @
+  xhigh` becomes `claude-fable-5-1 @ xhigh` and validates. The resolver's
+  I063 pair-aware classification is unchanged; ADR 0011 carries a dated
+  note and CONTEXT.md the term.
+- **Host config.** Byte-exact matching stays (I051 contract). D16's
+  unreachable message names the host file and, when the host lists a
+  historical id of the lineage, says it is retired. Both host fixtures carry
+  `claude-fable-5-1`. Not live-verifiable here (no host file on this
+  machine); covered by tests.
+- **Tests.** Exact-row locks replace the three substring locks; the gen-13
+  to 14 lock checks the converse; all ten generation locks share
+  `sanctionedRefreshLine`, which admits a mirror-row diff only when that
+  lock's own report itemizes it, with a negative control; the static
+  allowlists are gone. `modelDefaultDivergence` retires any historical
+  primary id quietly. Negative control run twice (build and verify): the
+  table reverted to Fable 5 with empty history fails 16 tests.
+- **Retroactive PRD.** `docs/specs/2026-09-02-claude-primary-fable-5-1-remap-{design,plan}.md`
+  record 68aa28f. Spec-review of 68aa28f against that design (primary,
+  blind, 2026-09-03): (a) four items the first draft claimed but the commit
+  lacked (template test, itemization-coupled locks for gen 9-10 and 11-12,
+  historical-id discoverability and refusal tests); (b) two behaviours the
+  draft omitted (the gen 11-12 blanket skip; the gen 9-10 minted override
+  wording); (c) two wording mismatches. All corrected in the design and
+  plan (aa1d551); the remap checklist was confirmed accurate on all five
+  items.
+- **Reviews of this diff.** Spec-review (primary, blind): pass with two
+  minor mismatches and one spec omission, fixed. Code review (primary):
+  approve spine; two deepthought findings (exit 2 misread as old binary,
+  `echo` escapes), fixed; the trailing-comment mirror row that still
+  defeats the printed remedy is pre-existing and cut as I130. Fresh-context
+  verification (primary): PASS on AC1-AC4 under execution with negative
+  controls; AC5 completed by this record.
+- Lane: maipipe full #84 passed at 5acb7f7; the final lane number is in
+  the effort handoff.

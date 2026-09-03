@@ -122,7 +122,9 @@ ticket did not settle is marked **assumption** for the owner to challenge.
    preflight refuse with validate's own message naming
    `spine update --dir R --write`, not "rebuild spine".
 2. As an operator with no spine binary, or one predating `model validate`,
-   I still see the rebuild message (exit 2 or command not found).
+   I still see the rebuild message (command not found, or an
+   unknown-command or usage line on stderr; exit 2 alone is not the
+   signal, a configuration error exits 2 too).
 3. As a repo owner running `spine doctor` on a stale mirror, I see D18 naming
    the retired id, its successor, and the update remedy, alongside D2.
 4. As a repo owner with `claude.primary: claude-fable-5 @ xhigh`, running the
