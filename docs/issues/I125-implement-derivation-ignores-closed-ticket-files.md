@@ -3,7 +3,7 @@ id: I125
 title: "implement derivation ignores closed ticket files — verified-fixed tickets derive ticked-missing without a progress-ledger line, with a misleading typo hint"
 severity: med
 status: fixed
-commits: [7a54c3c, a171265]
+commits: [7a54c3c, a171265, 5251346, 995760e]
 affects: [I019, I029, I032, I117]
 blocked-by: []
 execution-mode: inline
