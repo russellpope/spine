@@ -2,14 +2,15 @@
 id: I105
 title: "opencode supports bench-defined custom subagents (fixed prompt, restricted tools, inherited model+variant) — weigh in pi vs opencode worker decisions"
 severity: low
-status: open
-affects: [I102]
+status: fixed
+commits: [c06a896]
+affects: [I102, I129]
 blocked-by: []
-execution-mode:
-tier:
+execution-mode: inline
+tier: n/a
 effort:
 risk-triggers: []
-review-tier:
+review-tier: n/a
 ---
 
 ## Problem
@@ -54,3 +55,16 @@ contract needed by ladderbench, while Pi needs an owner-maintained extension to
 match it. The material choice remains owner-dependent, so this ticket stays
 open: adopt OpenCode for the constrained worker lane now, or fund a scoped Pi
 extension that implements the listed parity controls. I102 remains unchanged.
+
+## Resolution
+
+Owner ruling 2026-09-02: fund the Pi extension, so Pi remains a viable
+second worker harness if it becomes the chosen one, rather than letting the
+harness be decided by default. OpenCode stays the constrained worker lane
+available now; Pi reaches parity through the owner-maintained extension
+scoped in **I129** (immutable agent definitions, parent allowlist, depth
+counter, job ids and cancellation, persisted parent-child record with
+normalized usage, and a field-by-field parity test against OpenCode's
+persisted worker record). No spine code changes; I102 is unchanged. No ADR:
+the ruling is recorded here and in I129, and it is reversible by closing
+I129 as wontfix.
