@@ -2228,7 +2228,7 @@ func TestAuditStagesOmitsAcceptanceLineWhenNoCandidates(t *testing.T) {
 		"grill            done     not-judged  no derivation rule for stage \"grill\"\n" +
 		"prd              done     match       1/1 PRD file docs/specs/2026-01-01-fixture-design.md present\n" +
 		"issues           done     match       2/2 ticket file(s) present\n" +
-		"implement        done     match       2/2 ledger implement evidence present\n" +
+		"implement        done     match       2/2 implement evidence present\n" +
 		"functional-test  here     not-judged  no derivation rule for stage \"functional-test\"\n" +
 		"review           pending  not-judged  no derivation rule for stage \"review\"\n" +
 		"verify           pending  not-judged  no derivation rule for stage \"verify\"\n" +

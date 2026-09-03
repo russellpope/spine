@@ -20,22 +20,31 @@
 //   - "prd": the cursor's prd: path exists under the repo root.
 //   - "issues": every ticket id in the cursor's tickets: set has a
 //     docs/issues/*.md file with a matching id: frontmatter field.
-//   - "implement": a heuristic scan of .superpowers/sdd/progress.md's
-//     dispatch/escalation lines for a "<ticket-id>: ... done|complete"
-//     record (case-insensitive), matched via the word-boundary regexp
-//     \b(done|completed?)\b so substrings like "abandoned" or "incomplete"
-//     do not manufacture false evidence — the same ledger convention audit
-//     routing already reads (ESCALATION/FALLBACK lines live in the same
-//     file). Documented here as a heuristic because, unlike prd/issues,
-//     there is no authoritative on-disk artifact for "implemented" —
-//     commit/branch inspection was ruled out (design's Testing Decisions:
-//     fixture-repo trees, not real git state) in favor of the ledger's own
-//     dispatch record, which every effort already maintains under the
-//     audit-routing contract. One accepted residual: the word-boundary
-//     match still fires on a phrase like "not complete" (it contains the
-//     whole word "complete"), so a negated-but-word-boundary-matching
-//     record can still manufacture false evidence — narrower than the
-//     substring bug it replaces, but not eliminated.
+//   - "implement": two sources, OR'd per ticket id (I125). (1) A heuristic
+//     scan of .superpowers/sdd/progress.md's dispatch/escalation lines for
+//     a "<ticket-id>: ... done|complete" record (case-insensitive), matched
+//     via the word-boundary regexp \b(done|completed?)\b so substrings like
+//     "abandoned" or "incomplete" do not manufacture false evidence — the
+//     same ledger convention audit routing already reads (ESCALATION/
+//     FALLBACK lines live in the same file). This was the sole source
+//     while there was no authoritative on-disk artifact for "implemented"
+//     — commit/branch inspection was ruled out (design's Testing
+//     Decisions: fixture-repo trees, not real git state) in favor of the
+//     ledger's own dispatch record. (2) The ticket's closure record: its
+//     docs/issues file (same id: match the issues rule uses) with
+//     status: fixed and a commits: list naming at least one SHA-shaped
+//     token — the lifecycle's own close artifact, written by the team lead
+//     in the close commit, so it is the authoritative record the ledger
+//     scan stood in for. wontfix/superseded close without implementing and
+//     never count; a fixed ticket with an empty, absent, or placeholder
+//     commits: list never counts. Both sources feed the same bidirectional
+//     judge: a closure record over a pending implement stage is
+//     present-unticked exactly as a stray ledger line is. Accepted
+//     residuals: the word-boundary match still fires on a phrase like
+//     "not complete" (it contains the whole word "complete"), so a
+//     negated-but-word-boundary-matching record can still manufacture
+//     false evidence — narrower than the substring bug it replaces, but
+//     not eliminated; and a multi-line YAML commits: block reads as empty.
 //
 // Every other stage name (grill, functional-test, review, verify, ship,
 // deploy, docs, handoff, and anything not in this list) has no rule: it
@@ -273,18 +282,33 @@ func deriveStages(dir string, c cursor.Cursor) ([]StageRow, []string) {
 	if resolved, ok := resolveTicketIDs(dir, c.Tickets); ok {
 		ids = resolved
 		if len(ids) > 0 {
-			have := issueIDs(filepath.Join(dir, "docs", "issues"))
+			facts := scanIssues(filepath.Join(dir, "docs", "issues"))
 			ledger := readLedgerRaw(dir)
 			evidenced := implementEvidence(ledger, ids)
 			anchored := implementAnchoredLines(ledger, ids)
 			for _, id := range ids {
-				issuesPresent = append(issuesPresent, have[id])
-				implPresent = append(implPresent, evidenced[id])
+				fact, have := facts[id]
+				issuesPresent = append(issuesPresent, have)
+				// I125: the two implement sources OR per id — a progress-
+				// ledger done-word line or the ticket's own closure record.
+				implPresent = append(implPresent, evidenced[id] || fact.closure)
 				implAnchored = implAnchored || anchored[id]
 			}
 		}
 	} else if strings.TrimSpace(c.Tickets) != "" {
 		notes = append(notes, unresolvableTicketsNote(c.Tickets))
+	}
+
+	// Zero-evidence hints are row-owned (I032 scoped the typo hint to the
+	// issues row; I117 and I125 give the implement row its own two rules),
+	// so each caller hands judgeSet the text that fits its evidence source.
+	issuesZeroHint := ""
+	if strings.TrimSpace(c.Tickets) != "" {
+		issuesZeroHint = fmt.Sprintf("tickets: %q resolved but every id is missing; check it for a typo", c.Tickets)
+	}
+	implZeroHint := "no progress-ledger implement line (\"<id>: … done|complete|completed\") and no closure record (ticket file with status: fixed and a commits: SHA) for the id(s)"
+	if implAnchored {
+		implZeroHint = "ledger lines for the id(s) exist but none contains done/complete/completed as a whole word"
 	}
 
 	rows := make([]StageRow, 0, len(c.Stages))
@@ -294,12 +318,12 @@ func deriveStages(dir string, c cursor.Cursor) ([]StageRow, []string) {
 		switch s.Name {
 		case "prd":
 			// prd's evidence is a single path, not an anchored ticket-id
-			// set, so no ids/tickets value to name on a miss.
-			verdict, detail = judgeSet(s.State, prdPresent, nil, "", false, "PRD file "+dash(c.PRD))
+			// set, so no ids to name and no zero-evidence hint on a miss.
+			verdict, detail = judgeSet(s.State, prdPresent, nil, "", "PRD file "+dash(c.PRD))
 		case "issues":
-			verdict, detail = judgeSet(s.State, issuesPresent, ids, c.Tickets, false, "ticket file(s)")
+			verdict, detail = judgeSet(s.State, issuesPresent, ids, issuesZeroHint, "ticket file(s)")
 		case "implement":
-			verdict, detail = judgeSet(s.State, implPresent, ids, "", implAnchored, "ledger implement evidence")
+			verdict, detail = judgeSet(s.State, implPresent, ids, implZeroHint, "implement evidence")
 		default:
 			verdict, detail = VerdictNotJudged, "no derivation rule for stage \""+s.Name+"\""
 		}
@@ -322,20 +346,15 @@ func dash(s string) string {
 //
 // ids is the parallel ticket-id list for present (nil for prd, which has no
 // per-item ids to name — its single-element set is already fully named by
-// label). ticketsRaw is the cursor's live tickets: value, used only on a
-// VerdictTickedMissing verdict; it may be "" wherever ids is nil. I029: a
-// ticked-missing detail names the missing ids (see missingIDs/namedIDs) and,
-// when every resolved id is missing, also surfaces ticketsRaw — an
-// all-missing set is exactly the shape a resolvable-but-wrong tickets:
-// value (a typo'd range/prefix) produces, so the reader is pointed at the
-// likely cause rather than left with a bare count.
-//
-// anchoredNoEvidence narrows that hint (I117): true means at least one
-// ledger line starts with an anchored id even though no id has evidence —
-// the ids demonstrably resolved, so the miss is the done-word requirement,
-// not a typo, and the detail names that rule instead. Only the implement
-// caller can pass true.
-func judgeSet(state cursor.State, present []bool, ids []string, ticketsRaw string, anchoredNoEvidence bool, label string) (Verdict, string) {
+// label). I029: a ticked-missing detail names the missing ids (see
+// missingIDs/namedIDs) and, when every resolved id is missing, also appends
+// zeroHint — the caller's own reading of an all-missing set. For the issues
+// row that is the tickets: typo hint (an all-missing set is exactly the
+// shape a resolvable-but-wrong tickets: value produces); for the implement
+// row it names whichever evidence rule was missed (I117's done-word wording
+// when anchored lines exist, otherwise I125's two-sources rule). An empty
+// zeroHint appends nothing (prd).
+func judgeSet(state cursor.State, present []bool, ids []string, zeroHint string, label string) (Verdict, string) {
 	if len(present) == 0 {
 		return VerdictNotJudged, "no evidence to derive (n/a)"
 	}
@@ -357,11 +376,8 @@ func judgeSet(state cursor.State, present []bool, ids []string, ticketsRaw strin
 			if missing := missingIDs(present, ids); len(missing) > 0 {
 				detail += ": " + namedIDs(missing)
 			}
-			switch {
-			case existing == 0 && anchoredNoEvidence:
-				detail += " — ledger lines for the id(s) exist but none contains done/complete/completed as a whole word"
-			case existing == 0 && ticketsRaw != "":
-				detail += fmt.Sprintf(" — tickets: %q resolved but every id is missing; check it for a typo", ticketsRaw)
+			if existing == 0 && zeroHint != "" {
+				detail += " — " + zeroHint
 			}
 			return VerdictTickedMissing, detail
 		}
@@ -475,10 +491,10 @@ var implementDoneWordRe = regexp.MustCompile(`\b(done|completed?)\b`)
 // "<ticket-id>: ... done|complete" record per id, case-insensitive, matching
 // done/complete as whole words via implementDoneWordRe so that negations
 // like "abandoned" or "incomplete" do not manufacture false evidence. This
-// is the documented heuristic for "implement" evidence: there is no
-// authoritative on-disk artifact for "implemented", so the ledger's own
-// dispatch record — which every effort already maintains — stands in. One
-// residual the word-boundary match cannot cure: a done-word about a
+// is the documented heuristic source for "implement" evidence; since I125
+// it is OR'd with the ticket's closure record (see closureRecord), which
+// is the authoritative close artifact the ledger scan originally stood in
+// for. One residual the word-boundary match cannot cure: a done-word about a
 // different stage on a ticket-prefixed line (e.g. "I019: grill done")
 // still counts as implement evidence — under-detection's mirror image,
 // accepted because the line format is ledger-convention-bound rather than
@@ -521,14 +537,34 @@ func implementAnchoredLines(ledgerRaw string, ids []string) map[string]bool {
 	return anchored
 }
 
+// issueFact is what one docs/issues ticket id contributes to derivation:
+// its file exists (the issues row's evidence) and, when the file is a
+// closure record (I125), implement evidence for the same id.
+type issueFact struct {
+	closure bool
+}
+
 // issueIDs returns the set of docs/issues ticket ids present on disk (files
 // with a parseable id: frontmatter field). A missing/unreadable dir yields
 // an empty set — never an error, matching the conservative philosophy.
 func issueIDs(issuesDir string) map[string]bool {
 	ids := map[string]bool{}
+	for id := range scanIssues(issuesDir) {
+		ids[id] = true
+	}
+	return ids
+}
+
+// scanIssues reads every docs/issues ticket file once and returns, per
+// parseable id, the facts derivation consumes. Two files claiming the same
+// id are a ledger defect doctor owns; here the id is present if any file
+// carries it and is a closure record if any such file is one. Unreadable
+// files and files without a leading fence are skipped, never an error.
+func scanIssues(issuesDir string) map[string]issueFact {
+	facts := map[string]issueFact{}
 	des, err := os.ReadDir(issuesDir)
 	if err != nil {
-		return ids
+		return facts
 	}
 	for _, de := range des {
 		name := de.Name()
@@ -539,19 +575,29 @@ func issueIDs(issuesDir string) map[string]bool {
 		if err != nil {
 			continue
 		}
-		if id := frontmatterID(string(raw)); id != "" {
-			ids[id] = true
+		fm := frontmatterFields(string(raw))
+		id := fm["id"]
+		if id == "" {
+			continue
 		}
+		f := facts[id]
+		f.closure = f.closure || closureRecord(fm)
+		facts[id] = f
 	}
-	return ids
+	return facts
 }
 
-// frontmatterID extracts the id: field from a docs/issues file's leading
-// --- frontmatter fence, or "" if absent/malformed.
-func frontmatterID(content string) string {
+// frontmatterFields parses a docs/issues file's leading --- fence into its
+// same-line key/value pairs (trimmed, matching surrounding quotes stripped).
+// A file without a leading fence yields an empty map, so it can neither
+// resolve an id nor count as a closure record. Only same-line values are
+// read: a YAML block list under a key reads as empty (documented residual —
+// the ledger convention writes inline lists).
+func frontmatterFields(content string) map[string]string {
+	out := map[string]string{}
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return ""
+		return out
 	}
 	for _, line := range lines[1:] {
 		if strings.TrimSpace(line) == "---" {
@@ -561,11 +607,36 @@ func frontmatterID(content string) string {
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(k) == "id" {
-			return strings.TrimSpace(v)
+		value := strings.TrimSpace(v)
+		if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"')) {
+			value = value[1 : len(value)-1]
+		}
+		out[strings.TrimSpace(k)] = value
+	}
+	return out
+}
+
+// commitSHARe is the token shape a commits: entry must have to count: an
+// abbreviated or full git SHA. Placeholders ("pending", "n/a") do not match,
+// so a fixed ticket that names no real commit is not a closure record.
+var commitSHARe = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+
+// closureRecord reports whether a ticket's frontmatter is a closure record
+// (I125): status exactly "fixed" — the lifecycle vocabulary is lowercase —
+// and a commits: list naming at least one SHA-shaped token. wontfix and
+// superseded close without implementing and are not closure records; an
+// open or in-progress ticket is not closed at all.
+func closureRecord(fm map[string]string) bool {
+	if fm["status"] != "fixed" {
+		return false
+	}
+	list := strings.Trim(fm["commits"], "[] ")
+	for _, tok := range strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+		if commitSHARe.MatchString(tok) {
+			return true
 		}
 	}
-	return ""
+	return false
 }
 
 // resolveTicketIDs parses the cursor's tickets: value into the concrete set

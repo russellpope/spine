@@ -33,3 +33,43 @@ func TestImplementEvidenceWordBoundary(t *testing.T) {
 		})
 	}
 }
+
+// TestClosureRecord is the white-box table for the closure-record predicate
+// (I125): a ticket file evidences implement only when its status is fixed
+// AND its commits: list names at least one SHA-shaped token. Every other
+// status, an empty or absent list, and a placeholder token are non-evidence
+// so the new path is load-bearing rather than a blanket pass.
+func TestClosureRecord(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  string
+		commits string
+		want    bool
+	}{
+		{"fixed with one sha", "fixed", "[a9ddea5]", true},
+		{"fixed with several shas", "fixed", "[61d4c40, 5372110, 9ca0dd8]", true},
+		{"fixed with a full-length sha", "fixed", "[68aa28ffb51eac886863a0cfbc0d4c266e0426df]", true},
+		{"fixed with unbracketed sha", "fixed", "a9ddea5", true},
+		{"fixed with empty list", "fixed", "[]", false},
+		{"fixed with absent commits", "fixed", "", false},
+		{"fixed with placeholder token", "fixed", "[pending]", false},
+		{"fixed with too-short token", "fixed", "[abc123]", false},
+		{"fixed with non-hex token", "fixed", "[zzzzzzz]", false},
+		{"open with sha", "open", "[a9ddea5]", false},
+		{"in-progress with sha", "in-progress", "[a9ddea5]", false},
+		{"wontfix with sha", "wontfix", "[a9ddea5]", false},
+		{"superseded with sha", "superseded", "[a9ddea5]", false},
+		{"status case is exact", "Fixed", "[a9ddea5]", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fm := map[string]string{"status": tc.status}
+			if tc.commits != "" {
+				fm["commits"] = tc.commits
+			}
+			if got := closureRecord(fm); got != tc.want {
+				t.Errorf("closureRecord(status=%q commits=%q) = %v, want %v", tc.status, tc.commits, got, tc.want)
+			}
+		})
+	}
+}
