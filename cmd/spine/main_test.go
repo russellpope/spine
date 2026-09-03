@@ -655,7 +655,7 @@ func TestUpdateAnnouncesMigratedEffortOverridesAsCreated(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("dry-run code=%d out=%q", code, out)
 	}
-	if !strings.Contains(out, "model override created (migrated from retired effort:): model_routing.claude.primary: claude-fable-5 @ xhigh") {
+	if !strings.Contains(out, "model override created (migrated from retired effort:): model_routing.claude.primary: claude-fable-5-1 @ xhigh") {
 		t.Errorf("plan missing created-wording for the minted override, out=%q", out)
 	}
 	if strings.Contains(out, "model override preserved:") {
@@ -3125,7 +3125,7 @@ func TestModelBareIDIsDefaultOutsideAnyRepo(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
-	if out != "claude-fable-5\n" {
+	if out != "claude-fable-5-1\n" {
 		t.Fatalf("out=%q, want bare id on its own line with no decoration", out)
 	}
 }
@@ -3157,7 +3157,7 @@ func TestModelJSONFlagPrintsIDAndEffortTogether(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("out=%q not valid JSON: %v", out, err)
 	}
-	if got.ID != "claude-fable-5" || got.Effort != "high" || got.Harness != "claude" || got.Flavor != got.Harness || got.Tier != "primary" {
+	if got.ID != "claude-fable-5-1" || got.Effort != "high" || got.Harness != "claude" || got.Flavor != got.Harness || got.Tier != "primary" {
 		t.Errorf("got=%+v, out=%q", got, out)
 	}
 	if got.Provenance != "default" {
@@ -3659,8 +3659,8 @@ func TestModelBareJSONEffortAlternateLegacyOutputsRemainByteCompatible(t *testin
 		args []string
 		want string
 	}{
-		{"bare", []string{"model", "--dir", dir, "claude", "primary"}, "claude-fable-5\n"},
-		{"json", []string{"model", "--dir", dir, "--json", "claude", "primary"}, "{\"harness\":\"claude\",\"flavor\":\"claude\",\"tier\":\"primary\",\"id\":\"claude-fable-5\",\"effort\":\"high\",\"aliases\":[\"claude-fable-5\",\"fable\"],\"provenance\":\"default\"}\n"},
+		{"bare", []string{"model", "--dir", dir, "claude", "primary"}, "claude-fable-5-1\n"},
+		{"json", []string{"model", "--dir", dir, "--json", "claude", "primary"}, "{\"harness\":\"claude\",\"flavor\":\"claude\",\"tier\":\"primary\",\"id\":\"claude-fable-5-1\",\"effort\":\"high\",\"aliases\":[\"claude-fable-5-1\",\"fable\"],\"provenance\":\"default\"}\n"},
 		{"effort", []string{"model", "--dir", dir, "--effort", "claude", "primary"}, "high\n"},
 		{"alternate", []string{"model", "--dir", dir, "--alternate", "pi", "routine"}, "qwen3.8-27b-q8_0\n"},
 	} {

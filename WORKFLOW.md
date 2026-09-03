@@ -6,7 +6,7 @@ reviewers: [go-reviewer, python-reviewer]
 functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
 model_routing:                     # spine-managed defaults; edit a value to override
-  claude.primary:         claude-fable-5
+  claude.primary:         claude-fable-5-1
   claude.routine:         claude-opus-5 @ low
   claude.mechanical:      claude-haiku-4-5
   claude.fallback:        claude-opus-5

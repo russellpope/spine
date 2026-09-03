@@ -140,7 +140,7 @@ func TestValidatedLaunchIDsRemainMappedInAudit(t *testing.T) {
 	for _, tc := range []struct {
 		name, workflow, id, harness, tier string
 	}{
-		{"embedded current", "template_version: 12\n", "claude-fable-5", "claude", "primary"},
+		{"embedded current", "template_version: 12\n", "claude-fable-5-1", "claude", "primary"},
 		{"safe deliberate override", "template_version: 12\nmodel_routing:\n  claude.primary: bespoke-audit-safe\n", "bespoke-audit-safe", "claude", "primary"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

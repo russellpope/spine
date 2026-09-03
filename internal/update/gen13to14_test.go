@@ -42,8 +42,15 @@ func TestGen13To14PristineUpdatesAndStaysStable(t *testing.T) {
 	if wf.State != Pending || len(wf.Unrecognized) != 0 {
 		t.Fatalf("pristine generation-13 dry run state=%v unrecognized=%v, want clean pending migration", wf.State, wf.Unrecognized)
 	}
-	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
+	written, err := Run(Options{Dir: dir, Write: true})
+	if err != nil {
 		t.Fatal(err)
+	}
+	// A mirror row may change only as an itemized table refresh (D6): the
+	// captured fixture carries the Fable 5 primary that later became history.
+	refreshed := map[string]ModelRefresh{}
+	for _, m := range report(t, written, "WORKFLOW.md").ModelRefreshes {
+		refreshed[m.Key] = m
 	}
 	after, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
 	if err != nil {
@@ -57,9 +64,13 @@ func TestGen13To14PristineUpdatesAndStaysStable(t *testing.T) {
 		t.Fatalf("functional_harness changed from %q to %q", beforeKeys["functional_harness"], afterKeys["functional_harness"])
 	}
 	for key, value := range beforeKeys {
-		if strings.HasPrefix(key, "model_routing.") && afterKeys[key] != value {
-			t.Errorf("mirror %s changed from %q to %q", key, value, afterKeys[key])
+		if !strings.HasPrefix(key, "model_routing.") || afterKeys[key] == value {
+			continue
 		}
+		if m, ok := refreshed[key]; ok && m.Old == value && m.New == afterKeys[key] {
+			continue
+		}
+		t.Errorf("mirror %s changed from %q to %q without an itemized refresh", key, value, afterKeys[key])
 	}
 	if !strings.Contains(string(after), "owns the public harness migration;") {
 		t.Error("generation-14 workflow lacks canonical harness migration wording")

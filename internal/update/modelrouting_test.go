@@ -26,13 +26,31 @@ var modelRefreshDiffLines = map[string]bool{
 	"fallback: claude-opus-5          # primary-refused or security-framed work": true,
 }
 
-// isModelRefreshDiffLine reports whether a unified-diff line carries the
+// modelRefreshMirrorRows are the sanctioned dotted mirror rows a table refresh
+// rewrites in a gen ≥10 fixture, keyed by row key then value with the column
+// padding collapsed (the padding moves whenever a longer harness name lands,
+// so it is not part of what the lock pins). Every historical and current
+// value of a refreshed row is listed so both the "-" and the "+" line pass —
+// sanctioned 2026-09-01 (claude.primary Fable 5 → Fable 5.1).
+var modelRefreshMirrorRows = map[string]map[string]bool{
+	"claude.primary": {"claude-fable-5": true, "claude-fable-5-1": true},
+}
+
+// isModelRefreshDiffLine reports whether a unified-diff line carries a
 // sanctioned model-table refresh above.
 func isModelRefreshDiffLine(line string) bool {
 	if len(line) == 0 || (line[0] != '+' && line[0] != '-') {
 		return false
 	}
-	return modelRefreshDiffLines[strings.TrimSpace(line[1:])]
+	body := strings.TrimSpace(line[1:])
+	if modelRefreshDiffLines[body] {
+		return true
+	}
+	key, value, ok := strings.Cut(body, ":")
+	if !ok {
+		return false
+	}
+	return modelRefreshMirrorRows[strings.TrimSpace(key)][strings.Join(strings.Fields(value), " ")]
 }
 
 // stageGen8Repo copies the ccq-gen8 capture — a realistic repo whose mirror
@@ -93,14 +111,18 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 	if wf.State != Pending {
 		t.Fatalf("want Pending, got state=%v unrec=%v", wf.State, wf.Unrecognized)
 	}
-	if len(wf.ModelRefreshes) != 2 {
-		t.Fatalf("ModelRefreshes = %+v, want routine and fallback refreshes", wf.ModelRefreshes)
+	if len(wf.ModelRefreshes) != 3 {
+		t.Fatalf("ModelRefreshes = %+v, want primary, routine and fallback refreshes", wf.ModelRefreshes)
 	}
-	routine := wf.ModelRefreshes[0]
+	primary := wf.ModelRefreshes[0]
+	if primary.Key != "model_routing.claude.primary" || primary.Old != "claude-fable-5" || primary.New != "claude-fable-5-1" {
+		t.Errorf("primary refresh = %+v, want {model_routing.claude.primary claude-fable-5 claude-fable-5-1}", primary)
+	}
+	routine := wf.ModelRefreshes[1]
 	if routine.Key != "model_routing.claude.routine" || routine.Old != "claude-sonnet-5" || routine.New != "claude-opus-5 @ low" {
 		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5 @ low}", routine)
 	}
-	m := wf.ModelRefreshes[1]
+	m := wf.ModelRefreshes[2]
 	// I036: refreshes itemize under the harness-qualified dotted key.
 	if m.Key != "model_routing.claude.fallback" || m.Old != "claude-opus-4-8" || m.New != "claude-opus-5" {
 		t.Errorf("refresh item = %+v, want {model_routing.claude.fallback claude-opus-4-8 claude-opus-5}", m)
@@ -113,6 +135,9 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 	}
 	if !hasRow(wf.Diff, "claude.routine", "claude-opus-5 @ low") {
 		t.Errorf("diff does not carry the refreshed routine value:\n%s", wf.Diff)
+	}
+	if !hasRow(wf.Diff, "claude.primary", "claude-fable-5-1") {
+		t.Errorf("diff does not carry the refreshed primary value:\n%s", wf.Diff)
 	}
 
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
@@ -130,6 +155,9 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 	}
 	if strings.Contains(string(got), "claude-sonnet-5") {
 		t.Error("written file still carries the stale inherited routine default")
+	}
+	if !hasRow(string(got), "claude.primary", "claude-fable-5-1") {
+		t.Error("written file does not carry the current primary default")
 	}
 }
 
@@ -151,8 +179,8 @@ func TestOverrideBareFallbackPreservedAndReported(t *testing.T) {
 	if wf.State == SkippedUnrecognized {
 		t.Fatalf("override misread as unrecognized local edit: %v", wf.Unrecognized)
 	}
-	if len(wf.ModelRefreshes) != 1 || wf.ModelRefreshes[0].Key != "model_routing.claude.routine" {
-		t.Errorf("ModelRefreshes = %+v, want only the inherited routine refresh", wf.ModelRefreshes)
+	if len(wf.ModelRefreshes) != 2 || wf.ModelRefreshes[0].Key != "model_routing.claude.primary" || wf.ModelRefreshes[1].Key != "model_routing.claude.routine" {
+		t.Errorf("ModelRefreshes = %+v, want only the inherited primary and routine refreshes", wf.ModelRefreshes)
 	}
 	if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Key != "model_routing.claude.fallback" ||
 		wf.ModelOverrides[0].Value != "claude-opus-3-pinned" {

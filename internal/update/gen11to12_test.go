@@ -118,6 +118,9 @@ func TestGen12ChangesAreAdditive(t *testing.T) {
 			if isGen13ContentDiffLine(line) {
 				continue
 			}
+			if isModelRefreshDiffLine(line) { // sanctioned model-table refresh; see modelrouting_test.go
+				continue
+			}
 			body := strings.TrimSpace(strings.TrimPrefix(line, "-"))
 			if body == "template_version: 11" || body == "<!-- spine:begin v11 -->" {
 				continue

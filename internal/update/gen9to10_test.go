@@ -252,17 +252,21 @@ func TestGen9To10PristineUpdatesCleanly(t *testing.T) {
 			t.Errorf("%s: never reported by Run — the lock did not exercise it", name)
 		}
 	}
-	// Both stale inherited Claude pairs are refreshed and itemized under their
-	// harness-qualified keys.
+	// All three stale inherited Claude pairs are refreshed and itemized under
+	// their harness-qualified keys.
 	wf := report(t, reports, "WORKFLOW.md")
-	if len(wf.ModelRefreshes) != 2 {
-		t.Fatalf("ModelRefreshes = %+v, want routine and fallback refreshes", wf.ModelRefreshes)
+	if len(wf.ModelRefreshes) != 3 {
+		t.Fatalf("ModelRefreshes = %+v, want primary, routine and fallback refreshes", wf.ModelRefreshes)
 	}
-	routine := wf.ModelRefreshes[0]
+	primary := wf.ModelRefreshes[0]
+	if primary.Key != "model_routing.claude.primary" || primary.Old != "claude-fable-5" || primary.New != "claude-fable-5-1" {
+		t.Errorf("primary refresh = %+v, want {model_routing.claude.primary claude-fable-5 claude-fable-5-1}", primary)
+	}
+	routine := wf.ModelRefreshes[1]
 	if routine.Key != "model_routing.claude.routine" || routine.Old != "claude-sonnet-5" || routine.New != "claude-opus-5 @ low" {
 		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5 @ low}", routine)
 	}
-	m := wf.ModelRefreshes[1]
+	m := wf.ModelRefreshes[2]
 	if m.Key != "model_routing.claude.fallback" || m.Old != "claude-opus-4-8" || m.New != "claude-opus-5" {
 		t.Errorf("refresh item = %+v, want {model_routing.claude.fallback claude-opus-4-8 claude-opus-5}", m)
 	}
@@ -413,9 +417,9 @@ func TestGen9To10CustomEffortMigratesToPerEntryOverrides(t *testing.T) {
 			t.Errorf("ModelOverrides[%s] = %q, want an ' @ xhigh' per-entry override", key, migrated[key])
 		}
 	}
-	// The stale fallback still refreshes (id) before gaining the effort.
-	if len(wf.ModelRefreshes) != 2 || wf.ModelRefreshes[0].Key != "model_routing.claude.routine" || wf.ModelRefreshes[1].Key != "model_routing.claude.fallback" {
-		t.Errorf("ModelRefreshes = %+v, want routine and fallback refreshes alongside the effort migration", wf.ModelRefreshes)
+	// The stale ids still refresh before gaining the effort.
+	if len(wf.ModelRefreshes) != 3 || wf.ModelRefreshes[0].Key != "model_routing.claude.primary" || wf.ModelRefreshes[1].Key != "model_routing.claude.routine" || wf.ModelRefreshes[2].Key != "model_routing.claude.fallback" {
+		t.Errorf("ModelRefreshes = %+v, want primary, routine and fallback refreshes alongside the effort migration", wf.ModelRefreshes)
 	}
 
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
@@ -427,7 +431,7 @@ func TestGen9To10CustomEffortMigratesToPerEntryOverrides(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		"claude.primary: claude-fable-5 @ xhigh",
+		"claude.primary: claude-fable-5-1 @ xhigh",
 		"claude.routine: claude-opus-5 @ xhigh",
 		"claude.mechanical: claude-haiku-4-5 @ xhigh",
 		"claude.fallback: claude-opus-5 @ xhigh",
@@ -498,7 +502,7 @@ func TestGen9To10LegacyMediumEffortOverridesClaudeRoutineDefault(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		"claude.primary: claude-fable-5 @ medium",
+		"claude.primary: claude-fable-5-1 @ medium",
 		"claude.routine: claude-opus-5",
 		"claude.mechanical: claude-haiku-4-5 @ medium",
 		"claude.fallback: claude-opus-5 @ medium",
@@ -610,8 +614,8 @@ func TestGen9To10ModelOverrideKeptThroughFormatChange(t *testing.T) {
 	if wf.State != Pending || len(wf.Unrecognized) > 0 {
 		t.Fatalf("override misread: state=%v unrec=%v", wf.State, wf.Unrecognized)
 	}
-	if len(wf.ModelRefreshes) != 1 || wf.ModelRefreshes[0].Key != "model_routing.claude.routine" {
-		t.Errorf("ModelRefreshes = %+v, want only the inherited routine refresh", wf.ModelRefreshes)
+	if len(wf.ModelRefreshes) != 2 || wf.ModelRefreshes[0].Key != "model_routing.claude.primary" || wf.ModelRefreshes[1].Key != "model_routing.claude.routine" {
+		t.Errorf("ModelRefreshes = %+v, want only the inherited primary and routine refreshes", wf.ModelRefreshes)
 	}
 	if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Key != "model_routing.claude.fallback" ||
 		wf.ModelOverrides[0].Value != "claude-opus-3-pinned" {
