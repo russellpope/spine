@@ -203,6 +203,22 @@ declares exactly one.
   artifact derivation at the moment of the write, not only at audit time; a
   forced write defers the reckoning to the audit, never waives it.
 
+## Stage derivation (added 2026-09-02, I125 grill)
+
+- **implement evidence** — the on-disk facts the stage derivation accepts as
+  proof that a ticket's implementation happened. Two sources, OR'd per
+  ticket: a **progress-ledger implement line** or a **closure record**.
+  Presence in either direction is judged the same way as any other stage
+  evidence; absence of both never blocks a stage that is not marked done.
+- **progress-ledger implement line** — an effort-ledger line anchored on the
+  ticket id that carries a done-word as a whole word. The original, heuristic
+  source; still valid.
+- **closure record** — a ticket file closed as fixed that names at least one
+  fix commit. The lifecycle's own close artifact, so it evidences implement
+  for its ticket. A ticket closed as wontfix or superseded is not a closure
+  record: it closed without implementing. A fixed ticket with no commit named
+  is not one either.
+
 ## Checkpoint (decided 2026-08-18, local-harness grill)
 
 - **checkpoint** — the document a running session distils itself into just
