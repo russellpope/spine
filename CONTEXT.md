@@ -243,8 +243,8 @@ declares exactly one.
   separate so narrative can never masquerade as fact.
 - **checkpoint working home** — the uncommitted, ordinal-numbered location
   where checkpoints accumulate for the current effort; the newest one may be
-  snapshotted into a handoff. _Avoid_: "state file", and bare "brief" (maipipe's
-  relay term for what it hands a leg — a checkpoint is one possible brief
+  snapshotted into a handoff. _Avoid_: "state file", and bare "brief" (the retired
+  maipipe's relay term for what it handed a leg — a checkpoint is one possible brief
   payload). The two-word **dispatch brief** is a different, well-defined thing;
   see the Audit evidence section.
 - **reload preamble** — the static, spine-shipped text that precedes the
@@ -256,11 +256,12 @@ declares exactly one.
 - **workflow gate** — a stage in a repo's WORKFLOW.md `gates:` list (grill,
   verify) that must pass before the effort advances. Human/agent-judged.
 - **gate pack** — a spine-authored, independently versioned battery of
-  deterministic **check classes** for one language (Go first), executed by
-  maipipe as the enforcement floor. Versioned per pack (`go@1`), not by the
-  template generation, so a finding is attributable to `<pack>@<v>/<check>`
-  and a repo can opt out by dropping a check class. Not a workflow gate: it
-  is content maipipe's verify gate runs. _Avoid_: "check pack" (rejected
+  deterministic **check classes** for one language (Go first). Pipelines now
+  run under Kintsugi, the enforcement floor that replaced maipipe; a gate pack
+  reaches it only as a check that calls `spine gate`. Versioned per pack
+  (`go@1`), not by the template generation, so a finding is attributable to
+  `<pack>@<v>/<check>` and a repo can opt out by dropping a check class. Not
+  a workflow gate: it is content the pipeline's verify gate runs. _Avoid_: "check pack" (rejected
   2026-08-18 — five PRDs already say gate pack), "gate stage" for the pack as
   a whole.
 - **pack pin** (decided 2026-08-21, I103 grill) — the `<pack>@<v>` value a repo
@@ -272,7 +273,7 @@ declares exactly one.
   repo-side value (that is the pack's own number, not the repo's choice).
 - **check class** — one attributable, individually droppable check inside a
   gate pack (e.g. t.Skip zero-tolerance, deferred-cleanup errcheck). One
-  maipipe stage per check class.
+  pipeline check per check class.
 - **positive control** — the fixture pair every check class ships with in
   spine's own test suite: a known-good input the check must pass and a
   seeded violation it must fail. A check without both is not shippable.

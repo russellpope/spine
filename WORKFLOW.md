@@ -22,7 +22,7 @@ model_routing:                     # spine-managed defaults; edit a value to ove
   pi.routine:             qwen3.8-27b-q8_0 alt: qwen3.8-27b-q8_0 @ xhigh
   pi.mechanical:          qwen3.8-27b-q8_0 alt: qwen3.8-27b-q8_0 @ xhigh
   pi.fallback:            qwen3.8-27b-q8_0 @ xhigh alt: qwen3.8-27b-q8_0 @ xhigh
-gate_pack: go@1    # gate pack rendered into maipipe.toml (go@1); empty = no pack
+gate_pack:                         # gate pack rendered into maipipe.toml (go@1); empty = no pack
 gate_pack_disabled: [test-enum-vs-spec, n-plus-one, fixture-manifest]    # check classes dropped from the rendered pipeline
 gate_pack_config:                  # per-check inputs; a non-empty value reaches its stage as SPINE_GATE_<KEY>
   test_enum_spec:                  # spec file test-enum-vs-spec reads the enumerated values from
