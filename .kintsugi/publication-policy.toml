@@ -1,0 +1,98 @@
+# Kintsugi candidate check definition and publication policy for spine.
+# Path: .kintsugi/publication-policy.toml, read at the candidate commit.
+#
+# Translated from maipipe.toml (left unchanged) under kintsugi parity decision
+# D16; the stage-by-stage mapping is kintsugi docs/reviews/parity/P16-mapping.md.
+#
+# - Composition is flattened: profile `full` is every leaf of pipelines
+#   `fast` and `gate-go`, and the `gates needs fast` edge is applied to every
+#   gate-go leaf (each needs both fast leaves).
+# - `vet` and `test` are shared by profiles fast and full (identical run).
+# - Each maipipe `run` is argv ["/bin/sh", "-c", <run>]; env carried over.
+# - Timeouts carried over. maipipe stages without a timeout were unbounded;
+#   kintsugi defaults an absent timeout to 30 s, so they carry the kintsugi
+#   maximum, 7200 s.
+# - Every `spine gate go@1` check gets MAIPIPE_RESULTS (spine gate writes its
+#   results contract only there) and the matching required_result. The files
+#   go in .kintsugi/, a directory every candidate carries because this policy
+#   lives there; spine gate does not create parent directories.
+# - mutation-go is its own profile `mutation-go`, never `audit` (spine I099);
+#   it is not gated.
+
+schema_version = 1
+artifact_max_bytes = 1048576
+artifact_retention_seconds = 604800
+
+# maipipe fast.vet (also full.fast -> fast.vet)
+[[checks]]
+name = "vet"
+argv = ["/bin/sh", "-c", "go vet ./..."]
+profiles = ["fast", "full"]
+timeout_seconds = 180
+
+# maipipe fast.test (also full.fast -> fast.test)
+[[checks]]
+name = "test"
+argv = ["/bin/sh", "-c", "go test ./..."]
+needs = ["vet"]
+profiles = ["fast", "full"]
+timeout_seconds = 600
+
+# maipipe gate-go.binary-hygiene (full.gates -> gate-go)
+[[checks]]
+name = "binary-hygiene"
+argv = ["/bin/sh", "-c", "spine gate go@1 binary-hygiene"]
+needs = ["vet", "test"]
+profiles = ["full"]
+env = { MAIPIPE_RESULTS = ".kintsugi/gate-binary-hygiene.json" }
+required_result = ".kintsugi/gate-binary-hygiene.json"
+timeout_seconds = 7200
+
+# maipipe gate-go.dead-code-callgraph (full.gates -> gate-go)
+[[checks]]
+name = "dead-code-callgraph"
+argv = ["/bin/sh", "-c", "spine gate go@1 dead-code-callgraph"]
+needs = ["vet", "test"]
+profiles = ["full"]
+env = { MAIPIPE_RESULTS = ".kintsugi/gate-dead-code-callgraph.json" }
+required_result = ".kintsugi/gate-dead-code-callgraph.json"
+timeout_seconds = 7200
+
+# maipipe gate-go.deferred-cleanup-errcheck (full.gates -> gate-go)
+[[checks]]
+name = "deferred-cleanup-errcheck"
+argv = ["/bin/sh", "-c", "spine gate go@1 deferred-cleanup-errcheck"]
+needs = ["vet", "test"]
+profiles = ["full"]
+env = { MAIPIPE_RESULTS = ".kintsugi/gate-deferred-cleanup-errcheck.json" }
+required_result = ".kintsugi/gate-deferred-cleanup-errcheck.json"
+timeout_seconds = 7200
+
+# maipipe gate-go.gitignore-control (full.gates -> gate-go)
+[[checks]]
+name = "gitignore-control"
+argv = ["/bin/sh", "-c", "spine gate go@1 gitignore-control"]
+needs = ["vet", "test"]
+profiles = ["full"]
+env = { MAIPIPE_RESULTS = ".kintsugi/gate-gitignore-control.json", SPINE_GATE_BUILD_OUTPUTS = "bin/spine" }
+required_result = ".kintsugi/gate-gitignore-control.json"
+timeout_seconds = 7200
+
+# maipipe gate-go.tskip (full.gates -> gate-go)
+[[checks]]
+name = "tskip"
+argv = ["/bin/sh", "-c", "spine gate go@1 tskip"]
+needs = ["vet", "test"]
+profiles = ["full"]
+env = { MAIPIPE_RESULTS = ".kintsugi/gate-tskip.json", SPINE_GATE_TSKIP_ALLOW = "cmd/spine/dogfood_test.go,internal/cursor/dogfood_test.go" }
+required_result = ".kintsugi/gate-tskip.json"
+timeout_seconds = 7200
+
+# maipipe mutation-go.mutate (advisory battery; profile mutation-go, not gated)
+[[checks]]
+name = "mutate"
+argv = ["/bin/sh", "-c", "spine gate go@1 mutate"]
+profiles = ["mutation-go"]
+env = { MAIPIPE_RESULTS = ".kintsugi/gate-mutate.json" }
+required_result = ".kintsugi/gate-mutate.json"
+timeout_seconds = 7200
