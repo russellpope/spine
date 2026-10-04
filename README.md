@@ -143,16 +143,16 @@ evidence.
 
 `spine gate` runs deterministic code checks as versioned packs (currently `go@1`). Each check class ships with a positive control pair: a known-good input it must pass and a seeded violation it must catch. A check without both is not shippable. Exit codes are fixed: 0 pass, 1 findings, 2 misconfiguration.
 
-Gate stages are designed to run under [maipipe](https://github.com/russellpope/maipipe), a local CI daemon, and write structured results to `$MAIPIPE_RESULTS`. That integration is optional. With no `gate_pack` configured, spine never needs maipipe at all; with one configured, `spine update` needs `maipipe` on PATH to validate the rendered pipeline region, and skips that file otherwise.
+Pipelines run under Kintsugi, which executes a repository's checks from `.kintsugi/publication-policy.toml` and owns the merge gate (`kintsugi verify`, `kintsugi gate`). A Kintsugi check can call `spine gate` like any other command. The older [maipipe](https://github.com/russellpope/maipipe) integration is retired; with no `gate_pack` configured, spine never needs maipipe at all. A repo that still pins a `gate_pack` gets a rendered pipeline region in `maipipe.toml`, which `spine update` validates only when `maipipe` is on PATH.
 
 ## Companion tools
 
 spine works alone, but it was built as one corner of a triangle:
 
-- [maipipe](https://github.com/russellpope/maipipe) runs the pipelines and owns the deterministic merge gate.
+- Kintsugi runs the pipelines and owns the deterministic merge gate. It replaced [maipipe](https://github.com/russellpope/maipipe) in that role.
 - [maikanban](https://github.com/russellpope/maikanban) renders `docs/issues/` ledgers from many repos as a terminal kanban board.
 
-The coupling is thin by design. maikanban only needs the ledger file convention and the `maikanban.repositorySlug` git config that `spine init` stamps. maipipe only meets spine at the managed region inside `maipipe.toml`.
+The coupling is thin by design. maikanban only needs the ledger file convention and the `maikanban.repositorySlug` git config that `spine init` stamps. Kintsugi only reads the `model_routing` table in WORKFLOW.md, plus any check that calls `spine gate`.
 
 ## Caveats
 
