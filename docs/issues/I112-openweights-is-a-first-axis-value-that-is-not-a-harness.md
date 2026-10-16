@@ -89,3 +89,7 @@ that reason still holds for the case it was written about.
   the glossary finds this ticket rather than an unexplained inconsistency.
 - ADR 0011 (model table resolves in spine, keyed by flavor) is the decision
   this would amend if option 1 or 3 is taken.
+
+## Owner note (2026-09-15)
+
+- The owner chose to reuse `openweights` for opencode-driven z.ai/DeepSeek models on the home host (`deepthought`) via I072 host pins in `routing-host.json` (executable `opencode`, pins `zai-coding-plan/glm-5.3 @ xhigh` etc.). `openweights` now names two execution vehicles across hosts (claude-auto at work, opencode at home), which widens this tension; resolution still owed.
