@@ -14,6 +14,7 @@ import (
 
 	"github.com/russellpope/spine/internal/audit"
 	"github.com/russellpope/spine/internal/handoff"
+	"github.com/russellpope/spine/internal/hermetic"
 	"github.com/russellpope/spine/internal/hostconfig"
 	"github.com/russellpope/spine/internal/tmpl"
 	"github.com/russellpope/spine/internal/update"
@@ -25,9 +26,11 @@ import (
 // results-emitting commands, so an inherited MAIPIPE_RESULTS makes them write
 // their fixture findings into the stage's real results file and fail the run.
 // Tests that need either variable set it themselves with t.Setenv.
+// hermetic.Main then keeps the suite off the developer's HOME and host
+// routing file.
 func TestMain(m *testing.M) {
 	scrubStageEnv()
-	os.Exit(m.Run())
+	os.Exit(hermetic.Main(m))
 }
 
 // scrubStageEnv removes the gate stage's own variables from this process.

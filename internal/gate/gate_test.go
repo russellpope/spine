@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/russellpope/spine/internal/hermetic"
 )
 
 // Gate tests exercise result-emitting commands directly. They must not write
@@ -18,7 +20,7 @@ import (
 // path explicitly.
 func TestMain(m *testing.M) {
 	os.Unsetenv(ResultsEnvVar)
-	os.Exit(m.Run())
+	os.Exit(hermetic.Main(m))
 }
 
 func tskipViolationDir(t *testing.T) string {
