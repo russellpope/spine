@@ -35,7 +35,7 @@ func TestUpdatePlanPrintsRetiredOverrideMigration(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("dry-run code=%d out=%q", code, out)
 	}
-	wantLine := "model refresh (retired override): model_routing.claude.primary: claude-fable-5 @ xhigh -> claude-fable-5-1 @ xhigh"
+	wantLine := "model refresh (retired override): model_routing.claude.primary: claude-fable-5 @ xhigh -> claude-opus-5-5 @ xhigh"
 	if !strings.Contains(out, wantLine) {
 		t.Errorf("dry-run plan lacks %q, out=%q", wantLine, out)
 	}
@@ -48,7 +48,7 @@ func TestUpdatePlanPrintsRetiredOverrideMigration(t *testing.T) {
 		t.Fatalf("write code=%d out=%q", code, out)
 	}
 	code, stdout, errOut := runCmd(t, "model", "--dir", dir, "validate", "claude", "primary")
-	if code != 0 || strings.TrimSpace(stdout) != "claude-fable-5-1" {
+	if code != 0 || strings.TrimSpace(stdout) != "claude-opus-5-5" {
 		t.Fatalf("validate after the remedy: code=%d out=%q err=%q", code, stdout, errOut)
 	}
 }

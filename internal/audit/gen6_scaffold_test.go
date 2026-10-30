@@ -98,7 +98,7 @@ func TestGen10ScaffoldMirrorResolvesThroughAudit(t *testing.T) {
 	}
 	tdir := t.TempDir()
 	writeDispatchTranscript(t, dir, tdir, map[string]string{
-		"I601": "fable",
+		"I601": "claude-opus-5-5",
 		"I602": "my-pinned-routine-model",
 		"I603": "claude-haiku-4-5",
 		"I604": "opus",

@@ -140,7 +140,7 @@ func TestValidatedLaunchIDsRemainMappedInAudit(t *testing.T) {
 	for _, tc := range []struct {
 		name, workflow, id, harness, tier string
 	}{
-		{"embedded current", "template_version: 12\n", "claude-fable-5-1", "claude", "primary"},
+		{"embedded current", "template_version: 12\n", "claude-opus-5-5", "claude", "primary"},
 		{"safe deliberate override", "template_version: 12\nmodel_routing:\n  claude.primary: bespoke-audit-safe\n", "bespoke-audit-safe", "claude", "primary"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -499,7 +499,7 @@ func TestMissingRoutingBlockWarnsOnGen6Plus(t *testing.T) {
 	writeAuditRepo(t, dir, "# Workflow — proof\n\nprofile: go-service\ntemplate_version: 10\n",
 		map[string]string{"I861": "primary"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, dir, tdir, map[string]string{"I861": "fable"})
+	writeDispatchTranscript(t, dir, tdir, map[string]string{"I861": "claude-opus-5-5"})
 	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)
@@ -688,7 +688,7 @@ func TestMissingWorkflowResolvesEmbeddedDefaultsWithWarning(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, "", map[string]string{"I851": "primary"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, dir, tdir, map[string]string{"I851": "fable"})
+	writeDispatchTranscript(t, dir, tdir, map[string]string{"I851": "claude-opus-5-5"})
 	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {
 		t.Fatal(err)

@@ -114,9 +114,9 @@ func TestSubagentTranscriptIsTheActual(t *testing.T) {
 	if got != "claude-sonnet-5" {
 		t.Errorf("I101 actuals = %q, want claude-sonnet-5 (from subagent transcript)", got)
 	}
-	// I102 has no subagent transcript: the dispatch alias is the evidence.
-	if got := strings.Join(rows["I102"].Actuals, ","); got != "fable" {
-		t.Errorf("I102 actuals = %q, want fable (dispatch alias)", got)
+	// I102 has no subagent transcript: the dispatch model is the evidence.
+	if got := strings.Join(rows["I102"].Actuals, ","); got != "claude-opus-5-5" {
+		t.Errorf("I102 actuals = %q, want claude-opus-5-5 (dispatch model)", got)
 	}
 }
 
@@ -421,8 +421,8 @@ func TestEscalationWithReasonAdvisory(t *testing.T) {
 
 // Acceptance: dispatch below the annotated tier with no recorded reason ->
 // silent-descent, and the report is blocking. The actual here comes from the
-// subagent transcript (claude-sonnet-5) even though the dispatch alias said
-// "fable" — the transcript is ground truth.
+// subagent transcript (claude-sonnet-5) even though the dispatch model said
+// "claude-opus-5-5" — the transcript is ground truth.
 func TestSilentDescentBlocks(t *testing.T) {
 	rep := runFixture(t, "mixed")
 	rows := rowsByID(t, rep)

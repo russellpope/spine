@@ -715,7 +715,7 @@ func TestCodexMissingSessionsDirDegradesToWarning(t *testing.T) {
 	dir := t.TempDir()
 	writeAuditRepo(t, dir, gen9DefaultWorkflow, map[string]string{"I046": "primary"})
 	tdir := t.TempDir()
-	writeDispatchTranscript(t, dir, tdir, map[string]string{"I046": "fable"})
+	writeDispatchTranscript(t, dir, tdir, map[string]string{"I046": "claude-opus-5-5"})
 
 	rep, err := Run(Options{
 		RepoDir:              dir,

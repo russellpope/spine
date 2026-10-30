@@ -27,7 +27,7 @@ func writeWorkflow(t *testing.T, content string) string {
 func TestResolve_NoRepoContext_ReturnsDefaultsForEveryHarnessTier(t *testing.T) {
 	want := map[string]map[string]struct{ id, effort string }{
 		"claude": {
-			"primary":    {"claude-fable-5-1", "high"},
+			"primary":    {"claude-opus-5-5", "high"},
 			"routine":    {"claude-opus-5", "low"},
 			"mechanical": {"claude-haiku-4-5", "low"},
 			"fallback":   {"claude-opus-5", "high"},
@@ -115,14 +115,14 @@ func TestResolve_RepoWithNoOverride_ResolvesToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.ID != "claude-fable-5-1" || entry.Provenance != Default {
-		t.Errorf("got %+v, want id=claude-fable-5-1 provenance=default", entry)
+	if entry.ID != "claude-opus-5-5" || entry.Provenance != Default {
+		t.Errorf("got %+v, want id=claude-opus-5-5 provenance=default", entry)
 	}
 }
 
-// Claude primary's displaced Fable 5 default is historical at the tier's
-// high effort. The same historical id at another effort is a deliberate
-// override, never a refresh candidate (D11 pair-aware history).
+// Claude primary's displaced Fable 5 and Fable 5.1 defaults are historical
+// at the tier's high effort. The same historical id at another effort is a
+// deliberate override, never a refresh candidate (D11 pair-aware history).
 func TestResolve_ClaudePrimaryHistoryIsPairAware(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -131,6 +131,8 @@ func TestResolve_ClaudePrimaryHistoryIsPairAware(t *testing.T) {
 	}{
 		{"shipped high pair", "claude-fable-5", Inherited},
 		{"unshipped low pair", "claude-fable-5 @ low", Override},
+		{"shipped Fable 5.1 high pair", "claude-fable-5-1", Inherited},
+		{"unshipped Fable 5.1 low pair", "claude-fable-5-1 @ low", Override},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := writeWorkflow(t, "model_routing:\n  claude.primary: "+tc.value+"\n")
@@ -837,8 +839,8 @@ func TestDecodeTableRejectsDuplicateJSONMembersRecursively(t *testing.T) {
 		},
 		{
 			name:        "entry id",
-			old:         `"id": "claude-fable-5-1",`,
-			replacement: `"id": "shadow", "id": "claude-fable-5-1",`,
+			old:         `"id": "claude-opus-5-5",`,
+			replacement: `"id": "shadow", "id": "claude-opus-5-5",`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1413,8 +1415,8 @@ func TestMirrorValue_EffortSuffixOnlyOnDeviation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := MirrorValue(claude); got != "claude-fable-5-1" {
-		t.Errorf("MirrorValue(claude primary) = %q, want %q", got, "claude-fable-5-1")
+	if got := MirrorValue(claude); got != "claude-opus-5-5" {
+		t.Errorf("MirrorValue(claude primary) = %q, want %q", got, "claude-opus-5-5")
 	}
 }
 

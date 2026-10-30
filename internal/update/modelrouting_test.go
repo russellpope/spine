@@ -128,8 +128,8 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 		t.Fatalf("ModelRefreshes = %+v, want primary, routine and fallback refreshes", wf.ModelRefreshes)
 	}
 	primary := wf.ModelRefreshes[0]
-	if primary.Key != "model_routing.claude.primary" || primary.Old != "claude-fable-5" || primary.New != "claude-fable-5-1" {
-		t.Errorf("primary refresh = %+v, want {model_routing.claude.primary claude-fable-5 claude-fable-5-1}", primary)
+	if primary.Key != "model_routing.claude.primary" || primary.Old != "claude-fable-5" || primary.New != "claude-opus-5-5" {
+		t.Errorf("primary refresh = %+v, want {model_routing.claude.primary claude-fable-5 claude-opus-5-5}", primary)
 	}
 	routine := wf.ModelRefreshes[1]
 	if routine.Key != "model_routing.claude.routine" || routine.Old != "claude-sonnet-5" || routine.New != "claude-opus-5 @ low" {
@@ -149,7 +149,7 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 	if !hasRow(wf.Diff, "claude.routine", "claude-opus-5 @ low") {
 		t.Errorf("diff does not carry the refreshed routine value:\n%s", wf.Diff)
 	}
-	if !hasRow(wf.Diff, "claude.primary", "claude-fable-5-1") {
+	if !hasRow(wf.Diff, "claude.primary", "claude-opus-5-5") {
 		t.Errorf("diff does not carry the refreshed primary value:\n%s", wf.Diff)
 	}
 
@@ -169,7 +169,7 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 	if strings.Contains(string(got), "claude-sonnet-5") {
 		t.Error("written file still carries the stale inherited routine default")
 	}
-	if !hasRow(string(got), "claude.primary", "claude-fable-5-1") {
+	if !hasRow(string(got), "claude.primary", "claude-opus-5-5") {
 		t.Error("written file does not carry the current primary default")
 	}
 }
@@ -307,7 +307,7 @@ func TestHostPinDoesNotChangeMirrorOrUpdatePlan(t *testing.T) {
 	hostPath := filepath.Join(t.TempDir(), "routing-host.json")
 	if err := os.WriteFile(hostPath, []byte(`{
   "schema_version": 1, "host_id": "host", "harnesses": {
-    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:test", "models": {"claude-fable-5-1": {"efforts": ["high"]}, "host-safe": {"efforts": ["high"]}}}
+    "claude": {"available": true, "executable": "claude", "launch_contract_ref": "fleet:test", "models": {"claude-opus-5-5": {"efforts": ["high"]}, "host-safe": {"efforts": ["high"]}}}
   }, "pins": {"claude.primary": {"model": "host-safe", "effort": "high"}}
 }`), 0o600); err != nil {
 		t.Fatal(err)

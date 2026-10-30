@@ -40,9 +40,9 @@
   "harnesses": {
     "claude": {
       "primary": {
-        "id": "claude-fable-5-1",
-        "aliases": ["claude-fable-5-1", "fable"],
-        "history": [{"id": "claude-fable-5"}]
+        "id": "claude-opus-5-5",
+        "aliases": ["claude-opus-5-5"],
+        "history": [{"id": "claude-fable-5"}, {"id": "claude-fable-5-1"}]
       },
       "routine": {
         "id": "claude-opus-5",

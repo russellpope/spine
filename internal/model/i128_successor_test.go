@@ -13,10 +13,11 @@ func TestSuccessorID(t *testing.T) {
 		want          string
 		ok            bool
 	}{
-		{"same tier", "claude", "primary", "claude-fable-5", "claude-fable-5-1", true},
-		{"cross tier falls back to the row that lists it", "claude", "routine", "claude-fable-5", "claude-fable-5-1", true},
+		{"same tier", "claude", "primary", "claude-fable-5", "claude-opus-5-5", true},
+		{"latest displaced primary", "claude", "primary", "claude-fable-5-1", "claude-opus-5-5", true},
+		{"cross tier falls back to the row that lists it", "claude", "routine", "claude-fable-5", "claude-opus-5-5", true},
 		{"routine history", "claude", "routine", "claude-sonnet-5", "claude-opus-5", true},
-		{"current id is not historical", "claude", "primary", "claude-fable-5-1", "", false},
+		{"current id is not historical", "claude", "primary", "claude-opus-5-5", "", false},
 		{"unknown id", "claude", "primary", "local-llama-70b", "", false},
 		{"unknown harness", "nope", "primary", "claude-fable-5", "", false},
 	} {

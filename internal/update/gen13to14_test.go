@@ -81,8 +81,8 @@ func TestGen13To14PristineUpdatesAndStaysStable(t *testing.T) {
 			t.Errorf("itemized refresh %+v does not match the on-disk change %q -> %q", m, beforeKeys[key], afterKeys[key])
 		}
 	}
-	if m, ok := refreshed["model_routing.claude.primary"]; !ok || m.Old != "claude-fable-5" || m.New != "claude-fable-5-1" {
-		t.Errorf("primary refresh = %+v, want the captured Fable 5 row itemized as claude-fable-5 -> claude-fable-5-1", m)
+	if m, ok := refreshed["model_routing.claude.primary"]; !ok || m.Old != "claude-fable-5" || m.New != "claude-opus-5-5" {
+		t.Errorf("primary refresh = %+v, want the captured Fable 5 row itemized as claude-fable-5 -> claude-opus-5-5", m)
 	}
 	if !strings.Contains(string(after), "owns the public harness migration;") {
 		t.Error("generation-14 workflow lacks canonical harness migration wording")

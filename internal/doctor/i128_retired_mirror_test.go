@@ -72,7 +72,7 @@ func TestRetiredMirrorD18NamesIDSuccessorAndRemedy(t *testing.T) {
 	if f.Severity != "warn" || f.Path != "WORKFLOW.md" {
 		t.Errorf("finding = %#v, want a warn on WORKFLOW.md", f)
 	}
-	for _, want := range []string{"claude.primary", `"claude-fable-5"`, "claude-fable-5-1", "retired", "spine update --dir", "--write"} {
+	for _, want := range []string{"claude.primary", `"claude-fable-5"`, "claude-opus-5-5", "retired", "spine update --dir", "--write"} {
 		if !strings.Contains(f.Message, want) {
 			t.Errorf("message %q lacks %q", f.Message, want)
 		}
@@ -96,7 +96,7 @@ func TestRetiredMirrorD18FiresOnRetiredOverride(t *testing.T) {
 // Negative controls: a refreshed mirror, a current-id override, and an
 // unrelated override are not retired and stay silent.
 func TestRetiredMirrorD18SilentOnCurrentAndForeignIDs(t *testing.T) {
-	for _, value := range []string{"", "claude-fable-5-1 @ xhigh", "local-llama-70b"} {
+	for _, value := range []string{"", "claude-opus-5-5 @ xhigh", "local-llama-70b"} {
 		dir := stageRepoWithPrimary(t, value)
 		findings, err := Run(dir)
 		if err != nil {
@@ -130,7 +130,7 @@ func TestHostRoutingCheckUnreachableNamesHostFileAndRetiredID(t *testing.T) {
 		t.Fatalf("D16 primary findings = %#v, want exactly one unreachable warning (all: %#v)", primary, findings)
 	}
 	msg := primary[0].Message
-	for _, want := range []string{"claude-fable-5-1@high", "not reachable", "add it to", path, `"claude-fable-5"`, "retired"} {
+	for _, want := range []string{"claude-opus-5-5@high", "not reachable", "add it to", path, `"claude-fable-5"`, "retired"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message %q lacks %q", msg, want)
 		}

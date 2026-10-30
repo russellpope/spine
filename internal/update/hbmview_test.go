@@ -50,7 +50,7 @@ func TestHbmviewUnstranding(t *testing.T) {
 			t.Errorf("WORKFLOW.md missing %q", want)
 		}
 	}
-	if !hasRow(string(wf), "claude.primary", "claude-fable-5-1") { // I128: exact row, not a substring
+	if !hasRow(string(wf), "claude.primary", "claude-opus-5-5") { // I128: exact row, not a substring
 		t.Errorf("WORKFLOW.md lacks the current claude.primary row:\n%s", wf)
 	}
 	// I036: hbmview's gen0 model_default (claude-opus-4-8) is an inherited

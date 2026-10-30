@@ -45,6 +45,17 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Changed
 
+- **`claude.primary` now defaults to `claude-opus-5-5`.** The displaced
+  `claude-fable-5-1` joins the row's history beside `claude-fable-5`, so an
+  inherited Fable mirror row refreshes on `spine update --write`; a Fable
+  pin at another effort migrates to `claude-opus-5-5` at that effort as a
+  retired override. Launch validation now refuses `claude-fable-5-1` in
+  every repo, and `spine doctor` names it under D18 until the row is
+  refreshed. The row ships no effort and resolves to the tier's `high`, and
+  it carries no shorthand alias: `opus` stays with routine and fallback.
+  Ids spine never shipped stay preserved overrides. (Owner decision
+  2026-10-30, toolkit retro.)
+
 - **The model table now calls its first axis a harness.** `spine model` help
   and diagnostics use the canonical term, defaults write `harnesses`, and
   generation 14 updates active workflow wording without changing route values

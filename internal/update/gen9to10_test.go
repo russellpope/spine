@@ -259,8 +259,8 @@ func TestGen9To10PristineUpdatesCleanly(t *testing.T) {
 		t.Fatalf("ModelRefreshes = %+v, want primary, routine and fallback refreshes", wf.ModelRefreshes)
 	}
 	primary := wf.ModelRefreshes[0]
-	if primary.Key != "model_routing.claude.primary" || primary.Old != "claude-fable-5" || primary.New != "claude-fable-5-1" {
-		t.Errorf("primary refresh = %+v, want {model_routing.claude.primary claude-fable-5 claude-fable-5-1}", primary)
+	if primary.Key != "model_routing.claude.primary" || primary.Old != "claude-fable-5" || primary.New != "claude-opus-5-5" {
+		t.Errorf("primary refresh = %+v, want {model_routing.claude.primary claude-fable-5 claude-opus-5-5}", primary)
 	}
 	routine := wf.ModelRefreshes[1]
 	if routine.Key != "model_routing.claude.routine" || routine.Old != "claude-sonnet-5" || routine.New != "claude-opus-5 @ low" {
@@ -431,7 +431,7 @@ func TestGen9To10CustomEffortMigratesToPerEntryOverrides(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		"claude.primary: claude-fable-5-1 @ xhigh",
+		"claude.primary: claude-opus-5-5 @ xhigh",
 		"claude.routine: claude-opus-5 @ xhigh",
 		"claude.mechanical: claude-haiku-4-5 @ xhigh",
 		"claude.fallback: claude-opus-5 @ xhigh",
@@ -502,7 +502,7 @@ func TestGen9To10LegacyMediumEffortOverridesClaudeRoutineDefault(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		"claude.primary: claude-fable-5-1 @ medium",
+		"claude.primary: claude-opus-5-5 @ medium",
 		"claude.routine: claude-opus-5",
 		"claude.mechanical: claude-haiku-4-5 @ medium",
 		"claude.fallback: claude-opus-5 @ medium",

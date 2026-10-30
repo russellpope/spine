@@ -457,7 +457,7 @@ func TestGen0CleanClaim(t *testing.T) {
 		}
 	}
 	// I128: the exact current primary row, not a substring of the id.
-	if !hasRow(wf.newContent, "claude.primary", "claude-fable-5-1") {
+	if !hasRow(wf.newContent, "claude.primary", "claude-opus-5-5") {
 		t.Errorf("regenerated WORKFLOW lacks the current claude.primary row:\n%s", wf.newContent)
 	}
 	// I036: the gen0 model_default (claude-opus-4-8) is an inherited default

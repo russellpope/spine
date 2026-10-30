@@ -32,14 +32,14 @@ func TestCurrentMirrorRetiredOverrideMigratesKeepingEffort(t *testing.T) {
 		t.Fatalf("ModelRefreshes = %+v, want exactly the retired-override migration", wf.ModelRefreshes)
 	}
 	got := wf.ModelRefreshes[0]
-	want := ModelRefresh{Key: "model_routing.claude.primary", Old: "claude-fable-5 @ xhigh", New: "claude-fable-5-1 @ xhigh", Retired: true}
+	want := ModelRefresh{Key: "model_routing.claude.primary", Old: "claude-fable-5 @ xhigh", New: "claude-opus-5-5 @ xhigh", Retired: true}
 	if got != want {
 		t.Errorf("refresh = %+v, want %+v", got, want)
 	}
 	if len(wf.ModelOverrides) != 0 {
 		t.Errorf("ModelOverrides = %+v, want none: a migrated retired override is not a preserved one", wf.ModelOverrides)
 	}
-	if !hasRow(wf.Diff, "claude.primary", "claude-fable-5-1 @ xhigh") {
+	if !hasRow(wf.Diff, "claude.primary", "claude-opus-5-5 @ xhigh") {
 		t.Errorf("diff does not carry the migrated value:\n%s", wf.Diff)
 	}
 
@@ -50,7 +50,7 @@ func TestCurrentMirrorRetiredOverrideMigratesKeepingEffort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasRow(string(after), "claude.primary", "claude-fable-5-1 @ xhigh") {
+	if !hasRow(string(after), "claude.primary", "claude-opus-5-5 @ xhigh") {
 		t.Errorf("written mirror did not migrate the retired override:\n%s", after)
 	}
 	// The printed remedy alone reaches a validating state (I128 AC 2).
@@ -58,8 +58,8 @@ func TestCurrentMirrorRetiredOverrideMigratesKeepingEffort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate after the remedy: %v", err)
 	}
-	if entry.ID != "claude-fable-5-1" || entry.Effort != "xhigh" {
-		t.Errorf("validated %s @ %s, want claude-fable-5-1 @ xhigh", entry.ID, entry.Effort)
+	if entry.ID != "claude-opus-5-5" || entry.Effort != "xhigh" {
+		t.Errorf("validated %s @ %s, want claude-opus-5-5 @ xhigh", entry.ID, entry.Effort)
 	}
 	// Second pass: the migrated value is now an ordinary current-id override,
 	// preserved and reported as such, with nothing left to refresh.
@@ -71,7 +71,7 @@ func TestCurrentMirrorRetiredOverrideMigratesKeepingEffort(t *testing.T) {
 	if wf.State != UpToDate || len(wf.ModelRefreshes) != 0 {
 		t.Errorf("second pass state=%v refreshes=%+v, want up-to-date with nothing to refresh", wf.State, wf.ModelRefreshes)
 	}
-	if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Value != "claude-fable-5-1 @ xhigh" || wf.ModelOverrides[0].Migrated {
+	if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Value != "claude-opus-5-5 @ xhigh" || wf.ModelOverrides[0].Migrated {
 		t.Errorf("second pass overrides = %+v, want the migrated value preserved as a plain override", wf.ModelOverrides)
 	}
 }
@@ -81,7 +81,7 @@ func TestCurrentMirrorRetiredOverrideMigratesKeepingEffort(t *testing.T) {
 // being historical, not off the effort suffix.
 func TestCurrentMirrorCurrentIDOverrideAtXhighIsPreserved(t *testing.T) {
 	dir := stageCurrentRepo(t, func(content string) string {
-		return replaceRow(t, content, "claude.primary", "claude-fable-5-1 @ xhigh")
+		return replaceRow(t, content, "claude.primary", "claude-opus-5-5 @ xhigh")
 	})
 	reports, err := Run(Options{Dir: dir, Write: true})
 	if err != nil {
@@ -91,14 +91,14 @@ func TestCurrentMirrorCurrentIDOverrideAtXhighIsPreserved(t *testing.T) {
 	if len(wf.ModelRefreshes) != 0 {
 		t.Errorf("ModelRefreshes = %+v, want none for a current-id override", wf.ModelRefreshes)
 	}
-	if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Value != "claude-fable-5-1 @ xhigh" {
+	if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Value != "claude-opus-5-5 @ xhigh" {
 		t.Errorf("ModelOverrides = %+v, want the xhigh override preserved", wf.ModelOverrides)
 	}
 	after, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasRow(string(after), "claude.primary", "claude-fable-5-1 @ xhigh") {
+	if !hasRow(string(after), "claude.primary", "claude-opus-5-5 @ xhigh") {
 		t.Error("write update did not preserve the current-id xhigh override")
 	}
 }
@@ -114,7 +114,7 @@ func TestCurrentMirrorRetiredOverrideKeepsAlternate(t *testing.T) {
 		t.Fatal(err)
 	}
 	wf := report(t, reports, "WORKFLOW.md")
-	want := ModelRefresh{Key: "model_routing.claude.primary", Old: "claude-fable-5 @ xhigh alt: claude-opus-5 @ high", New: "claude-fable-5-1 @ xhigh alt: claude-opus-5 @ high", Retired: true}
+	want := ModelRefresh{Key: "model_routing.claude.primary", Old: "claude-fable-5 @ xhigh alt: claude-opus-5 @ high", New: "claude-opus-5-5 @ xhigh alt: claude-opus-5 @ high", Retired: true}
 	if len(wf.ModelRefreshes) != 1 || wf.ModelRefreshes[0] != want {
 		t.Errorf("ModelRefreshes = %+v, want %+v", wf.ModelRefreshes, want)
 	}
@@ -122,7 +122,7 @@ func TestCurrentMirrorRetiredOverrideKeepsAlternate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasRow(string(after), "claude.primary", "claude-fable-5-1 @ xhigh alt: claude-opus-5 @ high") {
+	if !hasRow(string(after), "claude.primary", "claude-opus-5-5 @ xhigh alt: claude-opus-5 @ high") {
 		t.Errorf("written mirror lost the alternate or the effort:\n%s", after)
 	}
 }
@@ -175,9 +175,61 @@ func TestCurrentMirrorInheritedRetiredIDIsStillInheritedRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	wf := report(t, reports, "WORKFLOW.md")
-	want := ModelRefresh{Key: "model_routing.claude.primary", Old: "claude-fable-5", New: "claude-fable-5-1"}
+	want := ModelRefresh{Key: "model_routing.claude.primary", Old: "claude-fable-5", New: "claude-opus-5-5"}
 	if len(wf.ModelRefreshes) != 1 || wf.ModelRefreshes[0] != want {
 		t.Errorf("ModelRefreshes = %+v, want %+v", wf.ModelRefreshes, want)
+	}
+}
+
+// The 2026-10-30 remap (Fable 5.1 -> Opus 5.5) as a consumer repo meets it:
+// the inherited Fable 5.1 mirror refreshes, a Fable 5.1 pin at a non-shipped
+// effort migrates as a retired override keeping its effort, and an id spine
+// never shipped stays a preserved override.
+func TestCurrentMirrorFable51PrimaryFollowsTheOpus55Remap(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		refresh     *ModelRefresh
+		override    string
+	}{
+		{"inherited", "claude-fable-5-1", &ModelRefresh{Key: "model_routing.claude.primary", Old: "claude-fable-5-1", New: "claude-opus-5-5"}, ""},
+		{"retired override", "claude-fable-5-1 @ xhigh", &ModelRefresh{Key: "model_routing.claude.primary", Old: "claude-fable-5-1 @ xhigh", New: "claude-opus-5-5 @ xhigh", Retired: true}, ""},
+		{"never shipped", "local-llama-70b", nil, "local-llama-70b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := stageCurrentRepo(t, func(content string) string {
+				return replaceRow(t, content, "claude.primary", tc.value)
+			})
+			reports, err := Run(Options{Dir: dir, Write: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wf := report(t, reports, "WORKFLOW.md")
+			if tc.refresh == nil {
+				if len(wf.ModelRefreshes) != 0 {
+					t.Errorf("ModelRefreshes = %+v, want none", wf.ModelRefreshes)
+				}
+			} else if len(wf.ModelRefreshes) != 1 || wf.ModelRefreshes[0] != *tc.refresh {
+				t.Errorf("ModelRefreshes = %+v, want %+v", wf.ModelRefreshes, *tc.refresh)
+			}
+			if tc.override == "" {
+				if len(wf.ModelOverrides) != 0 {
+					t.Errorf("ModelOverrides = %+v, want none", wf.ModelOverrides)
+				}
+			} else if len(wf.ModelOverrides) != 1 || wf.ModelOverrides[0].Value != tc.override {
+				t.Errorf("ModelOverrides = %+v, want %q preserved", wf.ModelOverrides, tc.override)
+			}
+			after, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantRow := tc.override
+			if tc.refresh != nil {
+				wantRow = tc.refresh.New
+			}
+			if !hasRow(string(after), "claude.primary", wantRow) {
+				t.Errorf("written mirror lacks claude.primary %q:\n%s", wantRow, after)
+			}
+		})
 	}
 }
 
