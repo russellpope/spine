@@ -605,7 +605,7 @@ func TestUpdateItemizesModelRefreshAndOverride(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("dry-run code=%d out=%q", code, out)
 	}
-	if !strings.Contains(out, "model refresh (inherited): model_routing.claude.fallback: claude-opus-4-8 -> claude-opus-5") {
+	if !strings.Contains(out, "model refresh (inherited): model_routing.claude.fallback: claude-opus-4-8 -> claude-mythos-5-1") {
 		t.Errorf("dry-run plan missing itemized refresh, out=%q", out)
 	}
 	if !strings.Contains(out, "model override preserved: model_routing.claude.routine: local-llama-70b") {
@@ -613,14 +613,14 @@ func TestUpdateItemizesModelRefreshAndOverride(t *testing.T) {
 	}
 
 	code, out, _ = runCmd(t, "update", "--dir", dir, "--write")
-	if code != 0 || !strings.Contains(out, "model refresh (inherited): model_routing.claude.fallback: claude-opus-4-8 -> claude-opus-5") {
+	if code != 0 || !strings.Contains(out, "model refresh (inherited): model_routing.claude.fallback: claude-opus-4-8 -> claude-mythos-5-1") {
 		t.Fatalf("write code=%d out=%q", code, out)
 	}
 	got, err := os.ReadFile(wfPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "claude-opus-5") || strings.Contains(string(got), "claude-opus-4-8") {
+	if !strings.Contains(string(got), "claude-mythos-5-1") || strings.Contains(string(got), "claude-opus-4-8") {
 		t.Errorf("written WORKFLOW.md not refreshed:\n%s", got)
 	}
 	if !strings.Contains(string(got), "routine: local-llama-70b") {

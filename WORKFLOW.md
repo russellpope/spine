@@ -7,9 +7,9 @@ functional_harness: cli    # cli | rest | framebuffer | none
 gates: [grill, verify]             # mandatory; everything else advisory. verify = fresh-context verifier subagent(s) against the PRD/spec, not self-review
 model_routing:                     # spine-managed defaults; edit a value to override
   claude.primary:         claude-opus-5-5
-  claude.routine:         claude-opus-5 @ low
+  claude.routine:         claude-opus-5-5 @ low
   claude.mechanical:      claude-haiku-4-5
-  claude.fallback:        claude-opus-5
+  claude.fallback:        claude-mythos-5-1
   codex.primary:          gpt-5.6-sol @ xhigh
   codex.routine:          gpt-5.6-terra
   codex.mechanical:       gpt-5.6-luna

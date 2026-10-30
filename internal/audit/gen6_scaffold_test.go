@@ -101,7 +101,7 @@ func TestGen10ScaffoldMirrorResolvesThroughAudit(t *testing.T) {
 		"I601": "claude-opus-5-5",
 		"I602": "my-pinned-routine-model",
 		"I603": "claude-haiku-4-5",
-		"I604": "opus",
+		"I604": "claude-mythos-5-1",
 	})
 	rep, err := Run(Options{RepoDir: dir, ClaudeTranscriptsDir: tdir})
 	if err != nil {

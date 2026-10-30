@@ -116,7 +116,7 @@ func applyModelRouting(repoDir, content string, extracted map[string]string) (st
 			// for inherited Claude rows. Compare the fully rendered candidate
 			// with the current default rather than just the tier default: the
 			// routine tier's customized "medium" is a real override now that
-			// its shipped pair is claude-opus-5 @ low, even though medium is
+			// its shipped pair is claude-opus-5-5 @ low, even though medium is
 			// also the tier default. Existing explicit per-entry effort
 			// overrides keep winning, as before.
 			migrated := false

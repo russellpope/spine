@@ -147,7 +147,7 @@ func TestCurrentMirrorRetiredRoutineOverrideMigratesToSuccessor(t *testing.T) {
 		t.Fatal(err)
 	}
 	wf := report(t, reports, "WORKFLOW.md")
-	want := ModelRefresh{Key: "model_routing.claude.routine", Old: "claude-sonnet-5 @ low", New: "claude-opus-5 @ low", Retired: true}
+	want := ModelRefresh{Key: "model_routing.claude.routine", Old: "claude-sonnet-5 @ low", New: "claude-opus-5-5 @ low", Retired: true}
 	if len(wf.ModelRefreshes) != 1 || wf.ModelRefreshes[0] != want {
 		t.Errorf("ModelRefreshes = %+v, want %+v", wf.ModelRefreshes, want)
 	}

@@ -16,8 +16,12 @@ func TestSuccessorID(t *testing.T) {
 		{"same tier", "claude", "primary", "claude-fable-5", "claude-opus-5-5", true},
 		{"latest displaced primary", "claude", "primary", "claude-fable-5-1", "claude-opus-5-5", true},
 		{"cross tier falls back to the row that lists it", "claude", "routine", "claude-fable-5", "claude-opus-5-5", true},
-		{"routine history", "claude", "routine", "claude-sonnet-5", "claude-opus-5", true},
+		{"routine history", "claude", "routine", "claude-sonnet-5", "claude-opus-5-5", true},
+		{"displaced routine", "claude", "routine", "claude-opus-5", "claude-opus-5-5", true},
+		{"displaced fallback prefers its own row", "claude", "fallback", "claude-opus-5", "claude-mythos-5-1", true},
+		{"cross tier Opus 5 takes the first listing row", "claude", "primary", "claude-opus-5", "claude-opus-5-5", true},
 		{"current id is not historical", "claude", "primary", "claude-opus-5-5", "", false},
+		{"current fallback id is not historical", "claude", "fallback", "claude-mythos-5-1", "", false},
 		{"unknown id", "claude", "primary", "local-llama-70b", "", false},
 		{"unknown harness", "nope", "primary", "claude-fable-5", "", false},
 	} {

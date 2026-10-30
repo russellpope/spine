@@ -45,6 +45,23 @@ Behaviour changes visible to repos that consume `spine`. Format follows
 
 ### Changed
 
+- **`claude.routine` now defaults to `claude-opus-5-5 @ low`, and
+  `claude.fallback` to `claude-mythos-5-1`.** The displaced `claude-opus-5`
+  joins both rows' history as the pair each shipped (`@ low` for routine,
+  the tier's `high` for fallback), so inherited mirror rows refresh on
+  `spine update --write`, and an Opus 5 pin at another effort migrates to
+  the row's new id at that effort as a retired override: a
+  `claude.fallback: claude-opus-5 @ xhigh` pin becomes
+  `claude-mythos-5-1 @ xhigh`, which a host file declaring Mythos only at
+  `high` cannot reach. Launch validation now refuses `claude-opus-5` in
+  every repo, including deliberate pins on other tiers. Fallback ships no
+  effort and resolves to the tier's `high`; it carries no shorthand alias,
+  so `opus` now names routine only and a bare `mythos` is refused like the
+  other Claude family names. Routine and primary now share
+  `claude-opus-5-5`, so `spine audit routing` reads a routine-to-primary
+  escalation on that id as a match for the declared tier. (Owner decision
+  2026-10-30, toolkit retro.)
+
 - **`claude.primary` now defaults to `claude-opus-5-5`.** The displaced
   `claude-fable-5-1` joins the row's history beside `claude-fable-5`, so an
   inherited Fable mirror row refreshes on `spine update --write`; a Fable
@@ -52,7 +69,7 @@ Behaviour changes visible to repos that consume `spine`. Format follows
   retired override. Launch validation now refuses `claude-fable-5-1` in
   every repo, and `spine doctor` names it under D18 until the row is
   refreshed. The row ships no effort and resolves to the tier's `high`, and
-  it carries no shorthand alias: `opus` stays with routine and fallback.
+  it carries no shorthand alias: `opus` stays with routine.
   Ids spine never shipped stay preserved overrides. (Owner decision
   2026-10-30, toolkit retro.)
 

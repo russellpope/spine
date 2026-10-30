@@ -263,12 +263,12 @@ func TestGen9To10PristineUpdatesCleanly(t *testing.T) {
 		t.Errorf("primary refresh = %+v, want {model_routing.claude.primary claude-fable-5 claude-opus-5-5}", primary)
 	}
 	routine := wf.ModelRefreshes[1]
-	if routine.Key != "model_routing.claude.routine" || routine.Old != "claude-sonnet-5" || routine.New != "claude-opus-5 @ low" {
-		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5 @ low}", routine)
+	if routine.Key != "model_routing.claude.routine" || routine.Old != "claude-sonnet-5" || routine.New != "claude-opus-5-5 @ low" {
+		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5-5 @ low}", routine)
 	}
 	m := wf.ModelRefreshes[2]
-	if m.Key != "model_routing.claude.fallback" || m.Old != "claude-opus-4-8" || m.New != "claude-opus-5" {
-		t.Errorf("refresh item = %+v, want {model_routing.claude.fallback claude-opus-4-8 claude-opus-5}", m)
+	if m.Key != "model_routing.claude.fallback" || m.Old != "claude-opus-4-8" || m.New != "claude-mythos-5-1" {
+		t.Errorf("refresh item = %+v, want {model_routing.claude.fallback claude-opus-4-8 claude-mythos-5-1}", m)
 	}
 	if len(wf.ModelOverrides) != 0 {
 		t.Errorf("pristine fixture reported overrides: %+v", wf.ModelOverrides)
@@ -432,9 +432,9 @@ func TestGen9To10CustomEffortMigratesToPerEntryOverrides(t *testing.T) {
 	gotStr := string(got)
 	for _, want := range []string{
 		"claude.primary: claude-opus-5-5 @ xhigh",
-		"claude.routine: claude-opus-5 @ xhigh",
+		"claude.routine: claude-opus-5-5 @ xhigh",
 		"claude.mechanical: claude-haiku-4-5 @ xhigh",
-		"claude.fallback: claude-opus-5 @ xhigh",
+		"claude.fallback: claude-mythos-5-1 @ xhigh",
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("migrated WORKFLOW.md missing per-entry effort override %q", want)
@@ -493,8 +493,8 @@ func TestGen9To10LegacyMediumEffortOverridesClaudeRoutineDefault(t *testing.T) {
 	if len(minted) != 4 {
 		t.Errorf("ModelOverrides = %+v, want every Claude tier migrated", wf.ModelOverrides)
 	}
-	if got := minted["model_routing.claude.routine"]; got != "claude-opus-5" {
-		t.Errorf("claude.routine migration = %q, want bare claude-opus-5 (medium override)", got)
+	if got := minted["model_routing.claude.routine"]; got != "claude-opus-5-5" {
+		t.Errorf("claude.routine migration = %q, want bare claude-opus-5-5 (medium override)", got)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "WORKFLOW.md"))
 	if err != nil {
@@ -503,15 +503,15 @@ func TestGen9To10LegacyMediumEffortOverridesClaudeRoutineDefault(t *testing.T) {
 	gotStr := string(got)
 	for _, want := range []string{
 		"claude.primary: claude-opus-5-5 @ medium",
-		"claude.routine: claude-opus-5",
+		"claude.routine: claude-opus-5-5",
 		"claude.mechanical: claude-haiku-4-5 @ medium",
-		"claude.fallback: claude-opus-5 @ medium",
+		"claude.fallback: claude-mythos-5-1 @ medium",
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("migrated WORKFLOW.md missing per-entry effort override %q", want)
 		}
 	}
-	if strings.Contains(gotStr, "claude.routine: claude-opus-5 @ low") {
+	if strings.Contains(gotStr, "claude.routine: claude-opus-5-5 @ low") {
 		t.Error("claude.routine retained the table's low-effort default instead of the migrated medium override")
 	}
 	// Idempotence: plan again — the second plan must be clean with no diff.
@@ -628,7 +628,7 @@ func TestGen9To10ModelOverrideKeptThroughFormatChange(t *testing.T) {
 	if !strings.Contains(string(got), "claude.fallback: claude-opus-3-pinned") {
 		t.Error("deliberate override did not survive into the dotted mirror")
 	}
-	if strings.Contains(string(got), "claude.fallback:   claude-opus-5") {
+	if hasRow(string(got), "claude.fallback", "claude-mythos-5-1") {
 		t.Error("fallback override was clobbered by the current default")
 	}
 	// Second run: the bare "<id>"-only dotted value (no effort suffix, no

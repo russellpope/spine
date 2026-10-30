@@ -26,14 +26,14 @@
     "idPattern": "^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,127}$",
     "forbiddenTokens": [
       "auto", "default", "latest",
-      "fable", "opus", "sonnet", "haiku",
+      "fable", "opus", "sonnet", "haiku", "mythos",
       "sol", "terra", "luna",
       "kimi-k3", "deepseek-v4-pro", "glm-5.2",
       "qwen3.8", "qwen"
     ],
     "forbiddenPatterns": [
       {"name": "generic-selector", "re": "(?i)^(auto|default|latest)$"},
-      {"name": "bare-family", "re": "(?i)^(fable|opus|sonnet|haiku|sol|terra|luna|qwen)$"},
+      {"name": "bare-family", "re": "(?i)^(fable|opus|sonnet|haiku|mythos|sol|terra|luna|qwen)$"},
       {"name": "vendor-auto", "re": "(?i)(^|[-._/:])auto($|[-._/:])"}
     ]
   },
@@ -45,10 +45,10 @@
         "history": [{"id": "claude-fable-5"}, {"id": "claude-fable-5-1"}]
       },
       "routine": {
-        "id": "claude-opus-5",
+        "id": "claude-opus-5-5",
         "effort": "low",
-        "aliases": ["claude-opus-5", "opus"],
-        "history": [{"id": "claude-sonnet-5"}]
+        "aliases": ["claude-opus-5-5", "opus"],
+        "history": [{"id": "claude-sonnet-5"}, {"id": "claude-opus-5", "effort": "low"}]
       },
       "mechanical": {
         "id": "claude-haiku-4-5",
@@ -56,9 +56,9 @@
         "history": []
       },
       "fallback": {
-        "id": "claude-opus-5",
-        "aliases": ["claude-opus-5", "opus"],
-        "history": [{"id": "claude-opus-4-8"}]
+        "id": "claude-mythos-5-1",
+        "aliases": ["claude-mythos-5-1"],
+        "history": [{"id": "claude-opus-4-8"}, {"id": "claude-opus-5"}]
       }
     },
     "codex": {

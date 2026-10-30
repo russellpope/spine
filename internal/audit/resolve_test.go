@@ -378,7 +378,7 @@ func TestSubstringTokenNoLongerMaps(t *testing.T) {
 func TestHistoricalIDMatchesByExactID(t *testing.T) {
 	dir := t.TempDir()
 	// No model_routing block at all: every tier resolves to the embedded
-	// defaults, so fallback is claude-opus-5 and the old id is history-only.
+	// defaults, so fallback is claude-mythos-5-1 and the old id is history-only.
 	writeAuditRepo(t, dir, "# Workflow — proof\n\nprofile: go-service\ntemplate_version: 9\n",
 		map[string]string{"I821": "fallback", "I822": "primary"})
 	tdir := t.TempDir()

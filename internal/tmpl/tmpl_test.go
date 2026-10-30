@@ -113,7 +113,7 @@ func TestCurrentWorkflowIsStamped(t *testing.T) {
 	}
 	// I036: the mirror rows are table-rendered dotted harness keys (D8).
 	// I128: pin the exact current id as a whole row, not a substring of it
-	// — "claude-opus-5" (the routine and fallback id) is a prefix of
+	// — "claude-opus-5" (a displaced routine and fallback id) is a prefix of
 	// "claude-opus-5-5", so a substring check passes on any mirror.
 	if !hasMirrorRow(got, "claude.primary", "claude-opus-5-5") {
 		t.Errorf("current WORKFLOW template lacks the claude.primary mirror row for the current default:\n%s", got)

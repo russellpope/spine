@@ -132,21 +132,21 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 		t.Errorf("primary refresh = %+v, want {model_routing.claude.primary claude-fable-5 claude-opus-5-5}", primary)
 	}
 	routine := wf.ModelRefreshes[1]
-	if routine.Key != "model_routing.claude.routine" || routine.Old != "claude-sonnet-5" || routine.New != "claude-opus-5 @ low" {
-		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5 @ low}", routine)
+	if routine.Key != "model_routing.claude.routine" || routine.Old != "claude-sonnet-5" || routine.New != "claude-opus-5-5 @ low" {
+		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5-5 @ low}", routine)
 	}
 	m := wf.ModelRefreshes[2]
 	// I036: refreshes itemize under the harness-qualified dotted key.
-	if m.Key != "model_routing.claude.fallback" || m.Old != "claude-opus-4-8" || m.New != "claude-opus-5" {
-		t.Errorf("refresh item = %+v, want {model_routing.claude.fallback claude-opus-4-8 claude-opus-5}", m)
+	if m.Key != "model_routing.claude.fallback" || m.Old != "claude-opus-4-8" || m.New != "claude-mythos-5-1" {
+		t.Errorf("refresh item = %+v, want {model_routing.claude.fallback claude-opus-4-8 claude-mythos-5-1}", m)
 	}
 	if len(wf.ModelOverrides) != 0 {
 		t.Errorf("pristine fixture reported overrides: %+v", wf.ModelOverrides)
 	}
-	if !hasRow(wf.Diff, "claude.fallback", "claude-opus-5") {
+	if !hasRow(wf.Diff, "claude.fallback", "claude-mythos-5-1") {
 		t.Errorf("diff does not carry the refreshed value:\n%s", wf.Diff)
 	}
-	if !hasRow(wf.Diff, "claude.routine", "claude-opus-5 @ low") {
+	if !hasRow(wf.Diff, "claude.routine", "claude-opus-5-5 @ low") {
 		t.Errorf("diff does not carry the refreshed routine value:\n%s", wf.Diff)
 	}
 	if !hasRow(wf.Diff, "claude.primary", "claude-opus-5-5") {
@@ -160,7 +160,7 @@ func TestInheritedBareRowsRefreshedAndItemized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasRow(string(got), "claude.fallback", "claude-opus-5") {
+	if !hasRow(string(got), "claude.fallback", "claude-mythos-5-1") {
 		t.Error("written file does not carry the current fallback default")
 	}
 	if strings.Contains(string(got), "claude-opus-4-8") {
@@ -210,7 +210,7 @@ func TestOverrideBareFallbackPreservedAndReported(t *testing.T) {
 	if !hasRow(string(got), "claude.fallback", "claude-opus-3-pinned") {
 		t.Error("deliberate override did not survive the update")
 	}
-	if hasRow(string(got), "claude.fallback", "claude-opus-5") {
+	if hasRow(string(got), "claude.fallback", "claude-mythos-5-1") {
 		t.Error("fallback override was clobbered by the current default")
 	}
 }
@@ -230,8 +230,8 @@ func TestCurrentMirrorStaleRoutineRefreshesAndIsItemized(t *testing.T) {
 	if len(wf.ModelRefreshes) != 1 {
 		t.Fatalf("ModelRefreshes = %+v, want exactly routine refresh", wf.ModelRefreshes)
 	}
-	if got := wf.ModelRefreshes[0]; got.Key != "model_routing.claude.routine" || got.Old != "claude-sonnet-5" || got.New != "claude-opus-5 @ low" {
-		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5 @ low}", got)
+	if got := wf.ModelRefreshes[0]; got.Key != "model_routing.claude.routine" || got.Old != "claude-sonnet-5" || got.New != "claude-opus-5-5 @ low" {
+		t.Errorf("routine refresh = %+v, want {model_routing.claude.routine claude-sonnet-5 claude-opus-5-5 @ low}", got)
 	}
 	if _, err := Run(Options{Dir: dir, Write: true}); err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func TestCurrentMirrorStaleRoutineRefreshesAndIsItemized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasRow(string(got), "claude.routine", "claude-opus-5 @ low") {
+	if !hasRow(string(got), "claude.routine", "claude-opus-5-5 @ low") {
 		t.Error("written current mirror did not refresh Claude routine to Opus low")
 	}
 }

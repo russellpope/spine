@@ -28,9 +28,9 @@ func TestResolve_NoRepoContext_ReturnsDefaultsForEveryHarnessTier(t *testing.T) 
 	want := map[string]map[string]struct{ id, effort string }{
 		"claude": {
 			"primary":    {"claude-opus-5-5", "high"},
-			"routine":    {"claude-opus-5", "low"},
+			"routine":    {"claude-opus-5-5", "low"},
 			"mechanical": {"claude-haiku-4-5", "low"},
-			"fallback":   {"claude-opus-5", "high"},
+			"fallback":   {"claude-mythos-5-1", "high"},
 		},
 		"codex": {
 			"primary":    {"gpt-5.6-sol", "xhigh"},
@@ -142,6 +142,34 @@ func TestResolve_ClaudePrimaryHistoryIsPairAware(t *testing.T) {
 			}
 			if entry.Provenance != tc.provenance {
 				t.Errorf("Provenance = %s, want %s for %q", entry.Provenance, tc.provenance, tc.value)
+			}
+		})
+	}
+}
+
+// Claude routine's displaced Opus 5 default shipped at low effort and
+// fallback's at the tier's high effort; the same id at any other effort is a
+// deliberate override (D11 pair-aware history).
+func TestResolve_ClaudeRoutineAndFallbackOpus5HistoryIsPairAware(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		tier       string
+		value      string
+		provenance Provenance
+	}{
+		{"routine shipped low pair", "routine", "claude-opus-5 @ low", Inherited},
+		{"routine unshipped medium pair", "routine", "claude-opus-5", Override},
+		{"fallback shipped high pair", "fallback", "claude-opus-5", Inherited},
+		{"fallback unshipped xhigh pair", "fallback", "claude-opus-5 @ xhigh", Override},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeWorkflow(t, "model_routing:\n  claude."+tc.tier+": "+tc.value+"\n")
+			entry, err := Resolve(dir, "claude", tc.tier)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.Provenance != tc.provenance {
+				t.Errorf("Provenance = %s, want %s for claude.%s %q", entry.Provenance, tc.provenance, tc.tier, tc.value)
 			}
 		})
 	}
@@ -313,7 +341,7 @@ func TestResolve_UnrelatedValue_ReportsOverride(t *testing.T) {
 // default report — the entry set span is "everything ever shipped",
 // current default included, per D5/D6.
 func TestResolve_ValueMatchingCurrentDefault_ReportsInherited(t *testing.T) {
-	dir := writeWorkflow(t, "model_routing:\n  claude.fallback: claude-opus-5\n")
+	dir := writeWorkflow(t, "model_routing:\n  claude.fallback: claude-mythos-5-1\n")
 	entry, err := Resolve(dir, "claude", "fallback")
 	if err != nil {
 		t.Fatal(err)
@@ -981,8 +1009,8 @@ func TestValidateLaunchPositiveRoutes(t *testing.T) {
 		wantProvenance                       Provenance
 	}{
 		{"current dotted", "template_version: 12\nmodel_routing:\n  codex.primary: gpt-5.6-sol @ xhigh\n", "codex", "primary", "gpt-5.6-sol", Inherited},
-		{"current legacy bare", "model_routing:\n  routine: claude-opus-5 @ low\n", "claude", "routine", "claude-opus-5", Inherited},
-		{"current id changed effort", "model_routing:\n  claude.routine: claude-opus-5 @ xhigh\n", "claude", "routine", "claude-opus-5", Override},
+		{"current legacy bare", "model_routing:\n  routine: claude-opus-5-5 @ low\n", "claude", "routine", "claude-opus-5-5", Inherited},
+		{"current id changed effort", "model_routing:\n  claude.routine: claude-opus-5-5 @ xhigh\n", "claude", "routine", "claude-opus-5-5", Override},
 		{"custom dotted override", "model_routing:\n  codex.primary: bespoke-safe\n", "codex", "primary", "bespoke-safe", Override},
 		{"custom legacy bare override", "model_routing:\n  primary: claude-bespoke-safe\n", "claude", "primary", "claude-bespoke-safe", Override},
 		{"auto substring negative control", "model_routing:\n  codex.primary: automatic-model\n", "codex", "primary", "automatic-model", Override},
@@ -1268,10 +1296,10 @@ func TestValidateLaunchClassifiesHarnessHistoryCurrentFirst(t *testing.T) {
 	t.Run("current ID wins over history elsewhere", func(t *testing.T) {
 		tbl := cloneDefaultTable(t)
 		primary := tbl.Harnesses["claude"]["primary"]
-		primary.History = append(primary.History, historyEntry{ID: "claude-opus-5"})
+		primary.History = append(primary.History, historyEntry{ID: "claude-mythos-5-1"})
 		tbl.Harnesses["claude"]["primary"] = primary
 		validateTable(tbl)
-		snap, err := parseLaunchRouting("model_routing:\n  claude.primary: claude-opus-5\n", testMaxTemplateVersion)
+		snap, err := parseLaunchRouting("model_routing:\n  claude.primary: claude-mythos-5-1\n", testMaxTemplateVersion)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1279,7 +1307,7 @@ func TestValidateLaunchClassifiesHarnessHistoryCurrentFirst(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if entry.ID != "claude-opus-5" {
+		if entry.ID != "claude-mythos-5-1" {
 			t.Fatalf("entry.ID = %q, want current harness ID", entry.ID)
 		}
 	})
@@ -1297,6 +1325,7 @@ func TestValidateLaunchRefusesSelectedPolicyViolations(t *testing.T) {
 		{"unsafe custom", "model_routing:\n  codex.primary: bad;id\n", "codex", "primary", "bad;id", ReasonInvalidModelID, ""},
 		{"generic selector pattern", "model_routing:\n  codex.primary: AUTO\n", "codex", "primary", "AUTO", ReasonForbiddenModel, "generic-selector"},
 		{"bare family pattern", "model_routing:\n  codex.primary: OPUS\n", "codex", "primary", "OPUS", ReasonForbiddenModel, "bare-family"},
+		{"bare Mythos family pattern", "model_routing:\n  claude.fallback: Mythos\n", "claude", "fallback", "Mythos", ReasonForbiddenModel, "bare-family"},
 		{"vendor auto pattern", "model_routing:\n  codex.primary: vendor-AUTO-model\n", "codex", "primary", "vendor-AUTO-model", ReasonForbiddenModel, "vendor-auto"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1437,7 +1466,7 @@ func TestMirrorRows_CoverEveryHarnessTierAndRoundTrip(t *testing.T) {
 	// actually has to hold.
 	var foundClaudeRoutine bool
 	for _, row := range rows {
-		if strings.Join(strings.Fields(row), " ") == "claude.routine: claude-opus-5 @ low" {
+		if strings.Join(strings.Fields(row), " ") == "claude.routine: claude-opus-5-5 @ low" {
 			foundClaudeRoutine = true
 			break
 		}
